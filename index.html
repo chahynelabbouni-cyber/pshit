@@ -3,7 +3,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Source+Sans+3:wght@400;600;700&display=swap">
-<style>html,body{margin:0;background:#0b0c0f}
+<style>
 /* Concept : une galerie de parfumerie. Bandes graphite et gris perle, laiton champagne,
    la borne en 3D réelle comme pièce maîtresse (hero + séquence pilotée au scroll).
    Look unique assumé (nuit de boutique), donc pas de thème clair/sombre alterné. */
@@ -404,7 +404,7 @@ input[type=range]:focus-visible{outline:2px solid var(--acc);outline-offset:8px}
       <article class="ch r" data-ch="1"><div class="in">
         <div class="stat"><b data-to="10" data-dec="0">10</b><u>s</u></div>
         <h2>Un geste. <em>Dix secondes.</em></h2>
-        <p>Choisir, payer, présenter ses poignets. Sans compte à créer, sans flacon dans le sac.</p>
+        <p>Choisir, payer, se placer face à la borne. Sans compte à créer, sans flacon dans le sac.</p>
       </div></article>
       <article class="ch l" data-ch="2"><div class="in">
         <div class="stat"><b data-to="6" data-dec="0">6</b></div>
@@ -420,7 +420,7 @@ input[type=range]:focus-visible{outline:2px solid var(--acc);outline-offset:8px}
       <article class="ch l" data-ch="4"><div class="in">
         <div class="stat"><b data-to="0.1" data-dec="1">0,1</b><u>ml</u></div>
         <h2>Une pulvérisation. <em>Zéro contact.</em></h2>
-        <p>Deux capteurs détectent tes poignets sous l'alcôve, puis la buse pulvérise vers le bas.</p>
+        <p>Des capteurs détectent ta présence, la buse se règle à ta taille et pulvérise sur le torse ou le bas du ventre.</p>
       </div></article>
       <article class="ch r" data-ch="5"><div class="in">
         <div class="stat"><b data-to="35" data-dec="0">35</b><u>bornes</u></div>
@@ -462,9 +462,9 @@ input[type=range]:focus-visible{outline:2px solid var(--acc);outline-offset:8px}
           <button class="btn btn-gold" type="button" id="payBtn">Approcher ma carte</button>
         </div>
         <div class="sb" data-s="2">
-          <h3>Présente tes poignets</h3>
-          <p>Deux capteurs détectent ta main sous l'alcôve, puis la buse pulvérise 0,1 ml vers le bas. Aucun contact avec la buse.</p>
-          <button class="btn btn-gold" type="button" id="sprayBtn">Mettre mes poignets</button>
+          <h3>Place-toi face à la borne</h3>
+          <p>Un capteur mesure ta taille, la buse se règle au niveau du torse ou du bas du ventre, puis pulvérise 0,1 ml. Aucun contact avec la buse.</p>
+          <button class="btn btn-gold" type="button" id="sprayBtn">Me parfumer</button>
         </div>
         <div class="sb" data-s="3">
           <h3>Tu repars parfumé</h3>
@@ -475,7 +475,7 @@ input[type=range]:focus-visible{outline:2px solid var(--acc);outline-offset:8px}
       <div class="demo-stage rv d2" id="demoStage">
         <div class="floor"></div>
         <canvas id="demoC" role="img" aria-label="Borne en 3D qui réagit à chaque étape"></canvas>
-        <div class="fallback3d"><p>Aperçu 3D indisponible. Choisir, payer, présenter les poignets : tout se fait en moins de dix secondes.</p></div>
+        <div class="fallback3d"><p>Aperçu 3D indisponible. Choisir, payer, se placer face à la borne : tout se fait en moins de dix secondes.</p></div>
         <span class="demo-note" id="demoNote">Étape 1 sur 4</span>
       </div>
     </div>
@@ -505,7 +505,7 @@ input[type=range]:focus-visible{outline:2px solid var(--acc);outline-offset:8px}
         <div class="glyph"><svg width="34" height="44" viewBox="0 0 34 44" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 4v8M10 8l7 5 7-5" opacity=".5"/><circle cx="17" cy="26" r="2" fill="currentColor"/><circle cx="10" cy="32" r="1.4" fill="currentColor"/><circle cx="24" cy="32" r="1.4" fill="currentColor"/><circle cx="17" cy="38" r="1.2" fill="currentColor"/></svg></div>
         <h3 class="nom">Le Pshit</h3>
         <div class="px">1,50 €</div>
-        <p>0,1 ml sur les poignets, sans contact, en 10 secondes.</p>
+        <p>0,1 ml sur le torse, sans contact, en 10 secondes.</p>
         <span class="usage">Retouche immédiate</span>
       </article>
       <article class="fiche">
@@ -697,8 +697,8 @@ function drawPanel(ctx,st){
   }else if(st.step===2){
     ctx.fillStyle=CH;ctx.fillText("PAIEMENT ACCEPTÉ",cx,sy+40);
     ctx.fillStyle="#7ed39a";ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(cx-34,sy+130);ctx.lineTo(cx-8,sy+158);ctx.lineTo(cx+38,sy+100);ctx.stroke();
-    ctx.fillStyle="#f2efe9";ctx.font="600 30px 'Playfair Display',Georgia,serif";ctx.fillText("Poignets sous l'alcôve",cx,sy+224);
-    ctx.fillStyle="#9b9fa8";ctx.font="600 13px Manrope,sans-serif";ctx.fillText("La buse se déclenche dès que la main est détectée",cx,sy+270);
+    ctx.fillStyle="#f2efe9";ctx.font="600 30px 'Playfair Display',Georgia,serif";ctx.fillText("Face à la borne",cx,sy+224);
+    ctx.fillStyle="#9b9fa8";ctx.font="600 13px Manrope,sans-serif";ctx.fillText("La buse se règle sur votre taille puis pulvérise",cx,sy+270);
   }else{
     ctx.fillStyle=CH;ctx.fillText("MERCI",cx,sy+40);
     bottleGlyph(ctx,cx,sy+118,3.2,sc.c);
@@ -716,7 +716,7 @@ function drawPanel(ctx,st){
   ctx.restore();
   ctx.fillStyle="#3a3126";rr(ctx,ax+aw/2-24,ay-6,48,22,6);ctx.fill();
   ctx.fillStyle=st.step===2?"#ff6a4d":"#9a3f31";ctx.beginPath();ctx.arc(ax+26,ay+110,6,0,7);ctx.arc(ax+aw-26,ay+110,6,0,7);ctx.fill();
-  ctx.fillStyle="rgba(60,40,18,.7)";ctx.font="700 11px Manrope,sans-serif";ctx.fillText("PRÉSENTEZ VOS POIGNETS",ax+aw/2,ay+ah-26);
+  ctx.fillStyle="rgba(60,40,18,.7)";ctx.font="700 11px Manrope,sans-serif";ctx.fillText("FACE À LA BORNE",ax+aw/2,ay+ah-26);
   /* lecteur sans contact */
   var rx=ax+aw+30,ry=ay+80,rw=86,rh=190;
   ctx.fillStyle="#101216";rr(ctx,rx,ry,rw,rh,14);ctx.fill();
@@ -1049,7 +1049,7 @@ $("#payBtn").addEventListener("click",function(){
 $("#sprayBtn").addEventListener("click",function(){
   var b=this;b.disabled=true;b.textContent="Pshit…";
   if(demo){demo.spray=true;demo.sprayT=0}
-  timers.push(setTimeout(function(){b.disabled=false;b.textContent="Mettre mes poignets";go(3)},2600));
+  timers.push(setTimeout(function(){b.disabled=false;b.textContent="Me parfumer";go(3)},2600));
 });
 $("#againBtn").addEventListener("click",function(){go(0)});
 pick(state.scent);
