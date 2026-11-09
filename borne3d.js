@@ -3,16 +3,16 @@
    écran tactile, lecteur sans contact, fente carte et niche de distribution (cf. maquette). */
 (function(){
 "use strict";
-var W=1.4,H=4.0,D=0.9,R=0.7,PX=500;
+var W=1.68,H=4.0,D=1.05,K=0.2,HOOD=0.9,PX=500;
 var GOLD="#E2B64A",GOLDP="#F3D98B",CREAM="#F5EFE6";
 
 function archShape(inset,asPath){
-  var s=asPath?new THREE.Path():new THREE.Shape(),r=R-inset;
-  s.moveTo(inset,inset);s.lineTo(W-inset,inset);s.lineTo(W-inset,H-R);
-  s.absarc(W/2,H-R,r,0,Math.PI,false);s.lineTo(inset,inset);return s;
+  var s=asPath?new THREE.Path():new THREE.Shape(),r=Math.max(.02,K-inset);
+  s.moveTo(inset,inset);s.lineTo(W-inset,inset);s.lineTo(W-inset,H-K);
+  s.absarc(W-K,H-K,r,0,Math.PI/2,false);s.lineTo(K,H-inset);s.absarc(K,H-K,r,Math.PI/2,Math.PI,false);s.lineTo(inset,inset);return s;
 }
-function ringGeo(o,i,depth){var s=archShape(o,false);s.holes.push(archShape(i,true));
-  return new THREE.ExtrudeGeometry(s,{depth:depth,bevelEnabled:false,curveSegments:40})}
+function hoodShape(){var s=new THREE.Shape(),x0=-.05,x1=W+.05,y0=H-HOOD,y1=H+.02,r=.22;
+  s.moveTo(x0,y0+.02);s.lineTo(x1,y0+.02);s.lineTo(x1,y1-r);s.absarc(x1-r,y1-r,r,0,Math.PI/2,false);s.lineTo(x0+r,y1);s.absarc(x0+r,y1-r,r,Math.PI/2,Math.PI,false);s.lineTo(x0,y0+.02);return s}
 function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
 function bottle(c,cx,cy,s,col,cap){
   c.save();c.translate(cx,cy);c.scale(s,s);
@@ -33,87 +33,86 @@ function swoosh(c,w,h,alpha){
 }
 function drawPanel(c,st,P){
   var w=W*PX,h=H*PX,i,cx=w/2;
-  var g=c.createLinearGradient(0,0,w,h);g.addColorStop(0,"#2b2358");g.addColorStop(.45,"#1c1640");g.addColorStop(1,"#120d2a");
+  /* fond graphite, reflet violet sur le flanc gauche */
+  var g=c.createLinearGradient(0,0,w,h);g.addColorStop(0,"#1d1a2a");g.addColorStop(.4,"#12101b");g.addColorStop(1,"#09080e");
   c.fillStyle=g;c.fillRect(0,0,w,h);
-  var vg=c.createLinearGradient(0,0,w,0);vg.addColorStop(0,"rgba(139,92,246,.28)");vg.addColorStop(.35,"rgba(139,92,246,0)");vg.addColorStop(1,"rgba(0,0,0,.35)");
+  var vg=c.createLinearGradient(0,0,w,0);vg.addColorStop(0,"rgba(139,92,246,.3)");vg.addColorStop(.3,"rgba(139,92,246,0)");vg.addColorStop(1,"rgba(0,0,0,.4)");
   c.fillStyle=vg;c.fillRect(0,0,w,h);
-  /* capot */
-  c.fillStyle="#241b48";rr(c,40,110,w-80,330,60);c.fill();
-  c.strokeStyle=GOLD;c.lineWidth=5;c.beginPath();c.moveTo(48,430);c.quadraticCurveTo(cx,470,w-48,420);c.stroke();
-  var halo=c.createRadialGradient(cx,215,0,cx,215,130);halo.addColorStop(0,"rgba(226,182,74,.5)");halo.addColorStop(1,"rgba(226,182,74,0)");
-  c.fillStyle=halo;c.fillRect(cx-140,90,280,260);
-  bottle(c,cx,205,3.6,"none","#E2B64A");
-  c.strokeStyle=GOLD;c.lineWidth=5;c.lineCap="round";
-  c.beginPath();c.moveTo(cx-86,258);c.quadraticCurveTo(cx-40,226,cx,262);c.quadraticCurveTo(cx+48,296,cx+90,244);c.stroke();
-  c.strokeRect(cx-26,196,52,52);
-  c.textAlign="center";c.fillStyle=CREAM;c.font="600 36px 'Playfair Display',Georgia,serif";c.fillText("Le Dernier",cx-48,342);
-  c.fillStyle=GOLD;c.font="italic 600 36px 'Playfair Display',Georgia,serif";c.fillText("Pshit",cx+96,342);
-  /* lumière du capot */
-  var lc=c.createLinearGradient(0,432,0,505);lc.addColorStop(0,"rgba(201,160,255,"+(.85*P.cone)+")");lc.addColorStop(1,"rgba(201,160,255,0)");
-  c.fillStyle=lc;c.beginPath();c.moveTo(cx-22,432);c.lineTo(cx+22,432);c.lineTo(cx+120,505);c.lineTo(cx-120,505);c.closePath();c.fill();
-  c.fillStyle="#0c0818";c.beginPath();c.ellipse(cx,434,22,8,0,0,7);c.fill();
-  c.fillStyle=st.step===2?"#fff":"#d9b3ff";c.beginPath();c.ellipse(cx,434,11,4,0,0,7);c.fill();
-  /* écran */
-  var sx=100,sy=510,sw=w-200,sh=340,sc=P.scents[st.scent];
-  c.fillStyle="#07050f";rr(c,sx,sy,sw,sh,16);c.fill();c.strokeStyle="rgba(226,182,74,.6)";c.lineWidth=2;c.stroke();
-  c.fillStyle="#fff";c.font="700 15px Manrope,'Segoe UI',sans-serif";
+  /* capot avec le flacon doré */
+  c.fillStyle="#1a1528";rr(c,36,100,w-72,340,70);c.fill();
+  c.strokeStyle="rgba(226,182,74,.55)";c.lineWidth=3;c.stroke();
+  bottle(c,cx,220,4.6,"rgba(0,0,0,0)","#E2B64A");
+  c.strokeStyle=GOLD;c.lineWidth=6;c.lineCap="round";
+  c.strokeRect(cx-30,196,60,62);
+  c.beginPath();c.moveTo(cx-120,290);c.quadraticCurveTo(cx-50,246,cx+4,292);c.quadraticCurveTo(cx+60,338,cx+124,268);c.stroke();
+  /* bord doré sous le capot */
+  c.strokeStyle=GOLD;c.lineWidth=7;c.beginPath();c.moveTo(60,452);c.quadraticCurveTo(cx,480,w-60,452);c.stroke();
+  /* petit spot sous le capot, faisceau court vers le bas */
+  var lc=c.createLinearGradient(0,470,0,560);lc.addColorStop(0,"rgba(201,160,255,"+(.8*P.cone)+")");lc.addColorStop(1,"rgba(201,160,255,0)");
+  c.fillStyle=lc;c.beginPath();c.moveTo(cx-18,470);c.lineTo(cx+18,470);c.lineTo(cx+62,560);c.lineTo(cx-62,560);c.closePath();c.fill();
+  c.fillStyle="#07050d";c.beginPath();c.ellipse(cx,468,30,10,0,0,7);c.fill();
+  c.strokeStyle=GOLD;c.lineWidth=3;c.stroke();
+  c.fillStyle=st.step===2?"#fff":"#e3cdff";c.beginPath();c.ellipse(cx,468,14,5,0,0,7);c.fill();
+  /* écran tactile */
+  var sx=84,sy=570,sw=w-168,sh=370,sc=P.scents[st.scent];
+  c.fillStyle="#05040a";rr(c,sx,sy,sw,sh,18);c.fill();c.strokeStyle="rgba(226,182,74,.7)";c.lineWidth=3;c.stroke();
+  c.textAlign="center";c.fillStyle="#fff";
   if(st.step===0){
-    c.fillText("Choisissez votre parfum",cx,sy+36);
-    var pg=Math.floor(st.scent/3);
+    c.font="700 27px Manrope,'Segoe UI',sans-serif";c.fillText("Choisissez votre parfum",cx,sy+46);
+    var pg=Math.floor(st.scent/3),area=sw-100,bw=area/3-10;
     for(i=0;i<3;i++){
-      var k=pg*3+i,s=P.scents[k],bx=sx+22+i*((sw-44)/3),bw=(sw-44)/3-10,on=k===st.scent;
-      c.fillStyle=on?"rgba(255,255,255,.1)":"rgba(255,255,255,.03)";rr(c,bx,sy+54,bw,214,12);c.fill();
-      c.strokeStyle=on?GOLD:"rgba(255,255,255,.12)";c.lineWidth=on?3:1.5;c.stroke();
-      bottle(c,bx+bw/2,sy+128,3.6,s.c,"#E2B64A");
-      c.fillStyle="#fff";c.font="700 12px Manrope,sans-serif";c.fillText(s.marque.split(" ")[0],bx+bw/2,sy+196);
-      c.fillStyle="#cfc7e6";c.font="600 11px Manrope,sans-serif";c.fillText(s.nom.length>16?s.nom.slice(0,15)+"…":s.nom,bx+bw/2,sy+216);
+      var k=pg*3+i,s=P.scents[k],bx=sx+50+i*(area/3)+5,on=k===st.scent;
+      c.fillStyle=on?"rgba(255,255,255,.12)":"rgba(255,255,255,.04)";rr(c,bx,sy+66,bw,222,14);c.fill();
+      c.strokeStyle=on?GOLD:"rgba(255,255,255,.14)";c.lineWidth=on?4:2;c.stroke();
+      bottle(c,bx+bw/2,sy+138,4.4,s.c,"#E2B64A");
+      c.fillStyle="#fff";c.font="800 17px Manrope,sans-serif";c.fillText(s.marque.split(" ")[0],bx+bw/2,sy+222);
+      c.fillStyle="#d8d1ee";c.font="700 15px Manrope,sans-serif";c.fillText(s.nom.length>13?s.nom.slice(0,12)+"…":s.nom,bx+bw/2,sy+250);
     }
-    c.fillStyle="#cfc7e6";c.font="700 22px Manrope,sans-serif";c.fillText("‹",sx+12,sy+168);c.fillText("›",sx+sw-12,sy+168);
-    for(i=0;i<4;i++){c.fillStyle=i===pg?"#fff":"rgba(255,255,255,.3)";c.beginPath();c.arc(cx-27+i*18,sy+sh-50,4,0,7);c.fill()}
-    c.fillStyle=GOLD;rr(c,cx-88,sy+sh-36,176,26,13);c.fill();c.fillStyle="#1b1534";c.font="800 12px Manrope,sans-serif";c.fillText("1 PSHIT · 2 €",cx,sy+sh-18);
+    c.fillStyle="#fff";c.font="700 40px Manrope,sans-serif";c.fillText("‹",sx+26,sy+196);c.fillText("›",sx+sw-26,sy+196);
+    for(i=0;i<4;i++){c.fillStyle=i===pg?"#fff":"rgba(255,255,255,.3)";c.beginPath();c.arc(cx-30+i*20,sy+312,5.5,0,7);c.fill()}
+    c.fillStyle=GOLD;rr(c,cx-110,sy+sh-50,220,36,18);c.fill();c.fillStyle="#1b1534";c.font="800 20px Manrope,sans-serif";c.fillText("1 PSHIT · 2 €",cx,sy+sh-24);
   }else if(st.step===1){
-    c.fillStyle=GOLD;c.font="700 13px Manrope,sans-serif";c.fillText("PAIEMENT SANS CONTACT",cx,sy+38);
+    c.fillStyle=GOLD;c.font="800 24px Manrope,sans-serif";c.fillText("Paiement sans contact",cx,sy+46);
     bottle(c,cx,sy+118,3.6,sc.c,"#E2B64A");
-    c.fillStyle="#fff";c.font="600 26px 'Playfair Display',Georgia,serif";c.fillText(sc.nom,cx,sy+184);
-    c.fillStyle=GOLD;c.font="800 34px Manrope,sans-serif";c.fillText("2 €",cx,sy+232);
-    c.fillStyle="#a89fc4";c.font="600 12px Manrope,sans-serif";c.fillText("Approchez votre carte ou votre téléphone",cx,sy+280);
-    c.fillText("3 ml 6 € · 5 ml 9,99 € à emporter",cx,sy+304);
+    c.fillStyle="#fff";c.font="600 34px 'Playfair Display',Georgia,serif";c.fillText(sc.nom.length>16?sc.nom.slice(0,15)+"…":sc.nom,cx,sy+214);
+    c.fillStyle=GOLD;c.font="800 54px Manrope,sans-serif";c.fillText("2 €",cx,sy+270);
+    c.fillStyle="#d8d1ee";c.font="700 18px Manrope,sans-serif";c.fillText("Approchez votre carte ou votre téléphone",cx,sy+318);
+    c.fillStyle="#a89fc4";c.font="600 16px Manrope,sans-serif";c.fillText("À emporter : 3 ml 6 € · 5 ml 9,99 €",cx,sy+346);
   }else if(st.step===2){
-    c.fillStyle=GOLD;c.font="700 13px Manrope,sans-serif";c.fillText("PAIEMENT ACCEPTÉ",cx,sy+40);
-    c.strokeStyle="#7dffa6";c.lineWidth=7;c.lineCap="round";c.beginPath();c.moveTo(cx-34,sy+130);c.lineTo(cx-8,sy+158);c.lineTo(cx+38,sy+100);c.stroke();
-    c.fillStyle="#fff";c.font="600 28px 'Playfair Display',Georgia,serif";c.fillText("Face à la borne",cx,sy+226);
-    c.fillStyle="#a89fc4";c.font="600 12px Manrope,sans-serif";c.fillText("La buse se règle sur votre taille puis pulvérise",cx,sy+272);
+    c.fillStyle=GOLD;c.font="800 24px Manrope,sans-serif";c.fillText("Paiement accepté",cx,sy+48);
+    c.strokeStyle="#7dffa6";c.lineWidth=10;c.lineCap="round";c.beginPath();c.moveTo(cx-48,sy+150);c.lineTo(cx-12,sy+188);c.lineTo(cx+54,sy+108);c.stroke();
+    c.fillStyle="#fff";c.font="600 40px 'Playfair Display',Georgia,serif";c.fillText("Face à la borne",cx,sy+270);
+    c.fillStyle="#d8d1ee";c.font="700 18px Manrope,sans-serif";c.fillText("La buse se règle sur votre taille",cx,sy+314);
   }else{
-    c.fillStyle=GOLD;c.font="700 13px Manrope,sans-serif";c.fillText("MERCI",cx,sy+40);
-    bottle(c,cx,sy+118,3.6,sc.c,"#E2B64A");
-    c.fillStyle="#fff";c.font="600 30px 'Playfair Display',Georgia,serif";c.fillText("Bonne journée",cx,sy+210);
-    c.fillStyle="#a89fc4";c.font="600 12px Manrope,sans-serif";c.fillText("+1 pshit sur votre carte Pshit Club",cx,sy+258);
+    c.fillStyle=GOLD;c.font="800 24px Manrope,sans-serif";c.fillText("Merci",cx,sy+48);
+    bottle(c,cx,sy+118,3.8,sc.c,"#E2B64A");
+    c.fillStyle="#fff";c.font="600 40px 'Playfair Display',Georgia,serif";c.fillText("Bonne journée",cx,sy+246);
+    c.fillStyle="#d8d1ee";c.font="700 18px Manrope,sans-serif";c.fillText("+1 pshit sur votre carte Pshit Club",cx,sy+306);
   }
-  /* sans contact + fente carte */
-  var ny=930,nfc=st.step===1;
-  c.fillStyle="#1a1338";c.beginPath();c.arc(190,ny,38,0,7);c.fill();
-  if(nfc){var rg=c.createRadialGradient(190,ny,4,190,ny,110);rg.addColorStop(0,"rgba(255,226,160,.6)");rg.addColorStop(1,"rgba(255,226,160,0)");c.fillStyle=rg;c.fillRect(70,ny-120,240,240)}
-  c.strokeStyle=nfc?"#ffe6a8":GOLD;c.lineWidth=nfc?5:3;c.lineCap="round";
-  for(i=0;i<3;i++){c.beginPath();c.arc(178,ny,12+i*11,-.85,.85);c.stroke()}
-  c.fillStyle="#0c0818";rr(c,w-300,ny-26,150,52,10);c.fill();c.strokeStyle="rgba(226,182,74,.5)";c.lineWidth=2;c.stroke();
-  c.fillStyle=GOLD;rr(c,w-282,ny-4,114,8,4);c.fill();
+  /* lecteur sans contact + fente carte */
+  var ny=1000,nfc=st.step===1;
+  c.fillStyle="#120e22";c.beginPath();c.arc(210,ny,46,0,7);c.fill();c.strokeStyle="rgba(255,255,255,.14)";c.lineWidth=2;c.stroke();
+  if(nfc){var rg=c.createRadialGradient(210,ny,4,210,ny,120);rg.addColorStop(0,"rgba(255,226,160,.6)");rg.addColorStop(1,"rgba(255,226,160,0)");c.fillStyle=rg;c.fillRect(80,ny-130,260,260)}
+  c.strokeStyle=nfc?"#ffe6a8":"#e9e4f5";c.lineWidth=nfc?6:4;c.lineCap="round";
+  for(i=0;i<3;i++){c.beginPath();c.arc(196,ny,13+i*13,-.85,.85);c.stroke()}
+  c.fillStyle="#07050d";rr(c,w-310,ny-30,150,60,10);c.fill();c.strokeStyle="rgba(255,255,255,.2)";c.lineWidth=2;c.stroke();
+  c.fillStyle="#d9d4e8";rr(c,w-290,ny-6,110,12,4);c.fill();
   /* niche de distribution */
-  var ax=100,ay=1010,aw=w-200,ah=270,glow=st.step===2?1:(st.step===1?.5:.75);
-  c.fillStyle="#0a0614";rr(c,ax,ay,aw,ah,34);c.fill();c.strokeStyle=GOLD;c.lineWidth=5;c.stroke();
+  var ax=96,ay=1074,aw=w-192,ah=270,glow=st.step===2?1:(st.step===1?.5:.75);
+  c.fillStyle="#08050f";rr(c,ax,ay,aw,ah,34);c.fill();c.strokeStyle=GOLD;c.lineWidth=6;c.stroke();
   var ig=c.createLinearGradient(0,ay,0,ay+ah);ig.addColorStop(0,"rgba(255,226,170,"+(.5*glow)+")");ig.addColorStop(1,"rgba(120,70,200,"+(.18*glow)+")");
   c.fillStyle=ig;rr(c,ax+8,ay+8,aw-16,ah-16,28);c.fill();
-  bottle(c,cx,ay+158,6.2,st.step===3?sc.c:"#e8d6a0","#E2B64A");
-  c.fillStyle="rgba(255,255,255,.6)";c.font="700 11px Manrope,sans-serif";c.fillText("RETIREZ VOTRE ÉCHANTILLON",cx,ay+ah-16);
-  /* flancs */
-  swoosh(c,w,h,.92);
-  c.fillStyle="#08050f";c.fillRect(0,h-92,w,92);
-  c.fillStyle="rgba(255,255,255,.07)";c.font="700 12px Manrope,sans-serif";c.fillText("Parfums de marque · spray dosé 0,1 ml",cx,1560);
+  bottle(c,cx,ay+128,5,st.step===3?sc.c:"#e8d6a0","#E2B64A");
+  c.fillStyle="rgba(255,255,255,.75)";c.font="800 15px Manrope,sans-serif";c.fillText("Retirez votre échantillon",cx,ay+ah-20);
+  /* filets dorés sur les flancs */
+  swoosh(c,w,h,.95);
+  c.fillStyle="#07050c";c.fillRect(0,h-92,w,92);
 }
 function drawBack(c){
   var w=W*PX,h=H*PX;
   var g=c.createLinearGradient(0,0,w,h);g.addColorStop(0,"#241c4d");g.addColorStop(1,"#120d2a");c.fillStyle=g;c.fillRect(0,0,w,h);
   c.textAlign="center";c.fillStyle=GOLDP;c.font="600 34px 'Playfair Display',Georgia,serif";c.fillText("Le Dernier Pshit",w/2,300);
-  c.fillStyle="#a89fc4";c.font="700 12px Manrope,sans-serif";c.fillText("12 PARFUMS DE MARQUE · SPRAY DOSÉ",w/2,338);
+  c.fillStyle="#a89fc4";c.font="700 18px Manrope,sans-serif";c.fillText("12 parfums de marque",w/2,342);
   c.strokeStyle="rgba(226,182,74,.5)";c.lineWidth=2;rr(c,90,1500,w-180,380,8);c.stroke();
   c.fillStyle="#08050f";c.fillRect(0,h-92,w,92);
 }
@@ -141,15 +140,25 @@ function create(canvas,box,opts,P){
   var body=new THREE.Group();body.position.set(-W/2,-H/2,-D/2);pivot.add(body);
   var bev=.03;
   var bodyGeo=new THREE.ExtrudeGeometry(archShape(0,false),{depth:D,bevelEnabled:true,bevelThickness:bev,bevelSize:bev,bevelSegments:3,curveSegments:48});
-  body.add(new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:0x1d1640,metalness:.7,roughness:.38,envMapIntensity:.9})));
+  body.add(new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:0x0f0d16,metalness:.7,roughness:.42,envMapIntensity:.22})));
   var goldMat=new THREE.MeshStandardMaterial({color:0xE2B64A,metalness:1,roughness:.24,envMapIntensity:1.5});
-  var outer=new THREE.Mesh(ringGeo(-bev*.2,.032,.012),goldMat);outer.position.z=D+bev-.004;body.add(outer);
-  var outerBack=outer.clone();outerBack.position.z=-bev-.008;body.add(outerBack);
+  /* capot en surplomb, comme sur la planche technique */
+  var hoodMat=new THREE.MeshStandardMaterial({color:0x0f0d16,metalness:.7,roughness:.42,envMapIntensity:.22});
+  var hood=new THREE.Mesh(new THREE.ExtrudeGeometry(hoodShape(),{depth:.16,bevelEnabled:true,bevelThickness:.03,bevelSize:.03,bevelSegments:3,curveSegments:32}),hoodMat);
+  hood.position.z=D+bev-.02;body.add(hood);
+  var lc2=document.createElement("canvas");lc2.width=W*PX;lc2.height=HOOD*PX;var lx2=lc2.getContext("2d");
+  (function(c,w,cx){bottle(c,cx,170,4.8,"rgba(0,0,0,0)","#E2B64A");c.strokeStyle=GOLD;c.lineWidth=7;c.lineCap="round";c.strokeRect(cx-31,146,62,64);
+    c.beginPath();c.moveTo(cx-130,242);c.quadraticCurveTo(cx-55,198,cx+4,246);c.quadraticCurveTo(cx+64,294,cx+134,220);c.stroke()})(lx2,W*PX,W*PX/2);
+  var ltex=new THREE.CanvasTexture(lc2);ltex.encoding=THREE.sRGBEncoding;
+  var logo=new THREE.Mesh(new THREE.PlaneGeometry(W,HOOD),new THREE.MeshBasicMaterial({map:ltex,transparent:true}));
+  logo.position.set(W/2,H-HOOD/2,D+bev+.16+.012);body.add(logo);
+  var strip=new THREE.Mesh(new THREE.BoxGeometry(W+.06,.035,.03),new THREE.MeshBasicMaterial({color:0xF3D98B}));strip.position.set(W/2,H-HOOD+.02,D+bev+.15);body.add(strip);
+  var spot=new THREE.Mesh(new THREE.CircleGeometry(.09,32),new THREE.MeshBasicMaterial({color:0xfff2d0}));spot.rotation.x=Math.PI/2;spot.position.set(W/2,H-HOOD,D+.08);body.add(spot);
   var pc=document.createElement("canvas");pc.width=W*PX;pc.height=H*PX;var pctx=pc.getContext("2d");
   var ptex=new THREE.CanvasTexture(pc);ptex.encoding=THREE.sRGBEncoding;ptex.anisotropy=8;
   var pg=new THREE.ShapeGeometry(archShape(.052,false),48),pos=pg.attributes.position,uv=pg.attributes.uv;
   for(var i=0;i<pos.count;i++)uv.setXY(i,pos.getX(i)/W,pos.getY(i)/H);
-  var face=new THREE.Mesh(pg,new THREE.MeshStandardMaterial({map:ptex,emissiveMap:ptex,emissive:0xffffff,emissiveIntensity:.55,metalness:.3,roughness:.5}));
+  var face=new THREE.Mesh(pg,new THREE.MeshStandardMaterial({map:ptex,emissiveMap:ptex,emissive:0xffffff,emissiveIntensity:.4,metalness:.3,roughness:.5}));
   face.position.z=D+bev+.001;body.add(face);
   var bc=document.createElement("canvas");bc.width=W*PX;bc.height=H*PX;drawBack(bc.getContext("2d"));
   var btex=new THREE.CanvasTexture(bc);btex.encoding=THREE.sRGBEncoding;btex.anisotropy=8;
@@ -161,12 +170,12 @@ function create(canvas,box,opts,P){
   fg.addColorStop(0,"rgba(255,255,255,.9)");fg.addColorStop(.45,"rgba(255,255,255,.28)");fg.addColorStop(1,"rgba(255,255,255,0)");fx.fillStyle=fg;fx.fillRect(0,0,256,256);
   var floorMat=new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(fc),transparent:true,depthWrite:false,color:0x8b5cf6,blending:THREE.AdditiveBlending});
   var floor=new THREE.Mesh(new THREE.PlaneGeometry(4.6,4.6),floorMat);floor.rotation.x=-Math.PI/2;floor.position.y=-H/2-.02;scene.add(floor);
-  /* cône de lumière violet au-dessus de l'écran */
-  var cone=new THREE.Mesh(new THREE.ConeGeometry(.42,.5,32,1,true),new THREE.MeshBasicMaterial({color:0xc9a0ff,transparent:true,opacity:.0,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide}));
-  cone.position.set(W/2,H-1.05,D+.25);cone.rotation.x=Math.PI;body.add(cone);
-  scene.add(new THREE.AmbientLight(0xffffff,.3));
-  var key=new THREE.DirectionalLight(0xefe6ff,1.5);key.position.set(-4,5,7);scene.add(key);
-  var rim=new THREE.DirectionalLight(0xb79cff,.9);rim.position.set(6,3,-5);scene.add(rim);
+  /* petit faisceau sous le spot du capot, évasé vers le bas */
+  var cone=new THREE.Mesh(new THREE.CylinderGeometry(.035,.12,.17,32,1,true),new THREE.MeshBasicMaterial({color:0xc9a0ff,transparent:true,opacity:.0,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide}));
+  cone.position.set(W/2,H-HOOD-.095,D+.1);body.add(cone);
+  scene.add(new THREE.AmbientLight(0xffffff,.22));
+  var key=new THREE.DirectionalLight(0xefe6ff,1.1);key.position.set(-4,5,7);scene.add(key);
+  var rim=new THREE.DirectionalLight(0xb79cff,.45);rim.position.set(6,3,-5);scene.add(rim);
   var warm=new THREE.PointLight(0xc9a0ff,1.0,6);warm.position.set(0,-.1,1.6);scene.add(warm);
   /* brume du pshit */
   var N=190,pp=new Float32Array(N*3),pcol=new Float32Array(N*3),vel=new Float32Array(N*3),age=new Float32Array(N).fill(9),life=new Float32Array(N);
@@ -189,14 +198,14 @@ function create(canvas,box,opts,P){
     if(api.idle&&!api.drag)api.spin+=(Math.sin(api.t*.7)*.3-api.spin)*Math.min(1,dt*2.5);else api.spin+=(0-api.spin)*Math.min(1,dt*3);
     if(Math.abs(api.vel)>1e-4&&!api.drag){api.rot+=api.vel;api.vel*=.94}
     pivot.rotation.y=api.rot+api.spin;pivot.position.x=api.off;
-    cone.material.opacity=.16+.07*Math.sin(api.t*2.2)+(api.spray?.2:0);
+    cone.material.opacity=.1+.04*Math.sin(api.t*2.2)+(api.spray?.12:0);
     var c=api.cam;camera.position.set(c.x,c.y,c.z*api.zoom);camera.lookAt(c.lx,c.ly,0);
     if(api.spray)api.sprayT+=dt;
     var emit=api.spray&&((api.sprayT%1.7)<.75);
     for(var i=0;i<N;i++){
       if(age[i]>=life[i]){
         if(emit&&Math.random()<dt*80){
-          pp[i*3]=W/2+(Math.random()-.5)*.06;pp[i*3+1]=H-.9;pp[i*3+2]=D+.2;
+          pp[i*3]=W/2+(Math.random()-.5)*.06;pp[i*3+1]=H-.95;pp[i*3+2]=D+.2;
           vel[i*3]=(Math.random()-.5)*.55;vel[i*3+1]=-(.25+Math.random()*.55);vel[i*3+2]=.7+Math.random()*.6;
           age[i]=0;life[i]=.6+Math.random()*.55;
         }else{pcol[i*3]=pcol[i*3+1]=pcol[i*3+2]=0;continue}

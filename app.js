@@ -28,7 +28,6 @@ function scentLabel(s){return s.marque+" · "+s.nom}
 var vid=SJ.videoId;
 var viewUrl=vid?"https://drive.google.com/file/d/"+vid+"/view":"#video";
 $$(".video-link").forEach(function(a){a.href=viewUrl;if(vid){a.target="_blank";a.rel="noopener"}});
-if(vid)$("#vidFrame").src="https://drive.google.com/file/d/"+vid+"/preview";
 
 /* ---------- apparitions, nav ---------- */
 var rvs=$$(".rv");
@@ -66,14 +65,12 @@ function redraw3d(){list3d.forEach(function(b){b.redraw()})}
 var showEl=$("#show"),chEls=$$(".ch"),NCH=chEls.length;
 var GOLD=[226,182,74],LIL=[167,139,250];
 var KEYS=[
- {rot:-.3,x:0,y:.15,z:9.4,lx:0,ly:0,off:1.9,c:GOLD,w:0},
- {rot:-.15,x:0,y:.75,z:7.4,lx:0,ly:.5,off:-1.8,c:LIL,w:0},
- {rot:-.2,x:0,y:.75,z:6.6,lx:0,ly:.62,off:1.6,c:GOLD,w:1},
- {rot:.3,x:.55,y:.45,z:6.5,lx:.3,ly:.3,off:-1.45,c:GOLD,w:0},
- {rot:.32,x:.75,y:.35,z:6.5,lx:.4,ly:.2,off:1.5,c:[201,160,255],w:0},
- {rot:Math.PI*2-.45,x:0,y:.2,z:9.6,lx:0,ly:0,off:-1.9,c:LIL,w:0},
- {rot:Math.PI*4-.3,x:0,y:.2,z:9.4,lx:0,ly:0,off:1.9,c:GOLD,w:0}];
-var STEPS=[0,0,0,1,2,3,0];
+ {rot:-.3,x:0,y:.15,z:10.2,lx:0,ly:0,off:2.0,c:GOLD,w:0},
+ {rot:-.15,x:0,y:.6,z:7.8,lx:0,ly:.45,off:-1.9,c:LIL,w:1},
+ {rot:-.18,x:0,y:.5,z:7.4,lx:0,ly:.35,off:1.7,c:GOLD,w:0},
+ {rot:.14,x:.2,y:.45,z:7.6,lx:.1,ly:.3,off:-1.6,c:[201,160,255],w:0},
+ {rot:Math.PI*2-.3,x:0,y:.2,z:9.4,lx:0,ly:0,off:1.9,c:GOLD,w:0}];
+var STEPS=[0,0,1,2,0];
 var tp=0,curCh=-1,vh=window.innerHeight,cycTimer=null,cycI=0,showFlat=false;
 function setVH(){vh=window.innerHeight;document.documentElement.style.setProperty("--vh",vh+"px");if(!showFlat)showEl.style.height=Math.round(vh*(1+(NCH-1)*.85))+"px"}
 var lastW=window.innerWidth,lastH=window.innerHeight;
@@ -84,14 +81,14 @@ function setChapter(i){
   if(i===curCh)return;curCh=i;
   chEls.forEach(function(el,k){el.classList.toggle("on",k===i)});
   $("#chapNo").innerHTML="<b>0"+(i+1)+"</b> / 0"+NCH;
-  if(hero){hero.setStep(STEPS[i]);hero.spray=(i===4);if(i!==4)hero.sprayT=0;hero.idle=(i===0&&window.scrollY<40)}
+  if(hero){hero.setStep(STEPS[i]);hero.spray=(i===3);if(i!==3)hero.sprayT=0;hero.idle=(i===0&&window.scrollY<40)}
   $$("[data-to]",chEls[i]).forEach(function(el){
     var to=parseFloat(el.dataset.to),d=parseInt(el.dataset.dec||"0",10);
     if(reduce||!hasGsap){el.textContent=fmt(to,d);return}
     var o={v:0};gsap.to(o,{v:to,duration:1.25,delay:.35,ease:"power3.out",onUpdate:function(){el.textContent=fmt(o.v,d)},onComplete:function(){el.textContent=fmt(to,d)}});
   });
   clearInterval(cycTimer);
-  if(i===2&&!reduce){cycTimer=setInterval(function(){cycI=(cycI+1)%SCENTS.length;state.scent=cycI;cycPaint();redraw3d()},1300)}
+  if(i===1&&!reduce){cycTimer=setInterval(function(){cycI=(cycI+1)%SCENTS.length;state.scent=cycI;cycPaint();redraw3d()},1300)}
 }
 function showFrame(dt){
   if(showFlat||!hero)return;
@@ -238,7 +235,7 @@ function drawRoute(){
   var b=BORNES.filter(function(x){return x.id===selBorne})[0],e=eta(b),k=routeKey(b);
   if(routeLayer){map.removeLayer(routeLayer);routeLayer=null}
   var pts=e&&e.geo?e.geo.coordinates.map(function(c){return[c[1],c[0]]}):[[user.lat,user.lng],[b.lat,b.lng]];
-  routeLayer=L.polyline(pts,{color:"#e2b64a",weight:5,opacity:.95,className:"route",lineCap:"round"}).addTo(map);
+  routeLayer=L.polyline(pts,{color:"#6b46c1",weight:6,opacity:.95,className:"route",lineCap:"round"}).addTo(map);
   if(k!==lastRouteKey){lastRouteKey=k;map.fitBounds(L.latLngBounds(pts).pad(.35),{animate:!reduce,duration:.9,maxZoom:16})}
 }
 function chooseBorne(id,pan){
@@ -251,7 +248,9 @@ function initMap(){
   var el=$("#map");
   if(!window.L){el.innerHTML='<p style="padding:24px;color:#a89fc4;font-family:sans-serif">La carte n\'a pas pu se charger. Les bornes restent listées à côté.</p>';return}
   map=L.map(el,{zoomControl:true,scrollWheelZoom:false,attributionControl:true}).setView([47.3365,5.0415],12);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{maxZoom:19,subdomains:"abcd",attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · © <a href="https://carto.com/attributions">CARTO</a>'}).addTo(map);
+  var plan=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'});
+  var sat=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"Imagery © Esri"});
+  plan.addTo(map);L.control.layers({"Plan":plan,"Satellite":sat},null,{position:"topright",collapsed:false}).addTo(map);
   BORNES.forEach(function(b){
     var m=L.marker([b.lat,b.lng],{icon:L.divIcon({className:"",html:'<div class="mk '+bornLevel(b)+'">'+ICON_BORNE+'<span class="dot"></span></div>',iconSize:[44,64],iconAnchor:[22,60],popupAnchor:[0,-56]}),title:b.nom,riseOnHover:true}).addTo(map);
     m.bindPopup(function(){return popupHtml(b)});m.on("click",function(){chooseBorne(b.id)});markers[b.id]=m});
