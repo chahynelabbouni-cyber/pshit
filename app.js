@@ -172,19 +172,21 @@ var BORNES=BJ.bornes.map(function(b){b.base=JSON.parse(JSON.stringify(b.stock));
 var selBorne=null,user=null,userSim=true,routeCache={},map=null,markers={},userMk=null,routeLayer=null,lastRouteKey="";
 var DEFAULT_START={lat:47.3217,lng:5.0415,label:"place de la Libération"};
 function hav(a,b){var R=6371,dLa=(b.lat-a.lat)*Math.PI/180,dLo=(b.lng-a.lng)*Math.PI/180,x=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLo/2)*Math.sin(dLo/2);return 2*R*Math.asin(Math.sqrt(x))}
-function est(b){if(!user)return null;var km=hav(user,b)*1.3;return{km:km,walk:km/4.8*60,bike:km/15*60,real:false}}
+function est(b){if(!user)return null;var km=hav(user,b)*1.3;return{km:km,walk:km/4.8*60,bike:km/15*60,car:Math.max(1,km/22*60+1),real:false}}
 function eta(b){if(!user)return null;var k=routeKey(b);return routeCache[k]||est(b)}
 function routeKey(b){return user.lat.toFixed(4)+","+user.lng.toFixed(4)+">"+b.id}
 function mins(x){return x<1?"moins d'1 min":Math.round(x)+" min"}
 function fetchRoute(b){
   if(!user)return Promise.resolve();
   var k=routeKey(b);if(routeCache[k]&&routeCache[k].real)return Promise.resolve(routeCache[k]);
-  var url="https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+user.lng+","+user.lat+";"+b.lng+","+b.lat+"?overview=full&geometries=geojson";
-  var ctl=window.AbortController?new AbortController():null,tm=setTimeout(function(){ctl&&ctl.abort()},6000);
-  return fetch(url,ctl?{signal:ctl.signal}:{}).then(function(r){return r.json()}).then(function(j){
-    clearTimeout(tm);if(!j.routes||!j.routes[0])throw 0;var rt=j.routes[0],km=rt.distance/1000;
-    routeCache[k]={km:km,walk:rt.duration/60,bike:km/15*60,geo:rt.geometry,real:true};return routeCache[k];
-  }).catch(function(){clearTimeout(tm)});
+  var base=user.lng+","+user.lat+";"+b.lng+","+b.lat;
+  function get(u){var ctl=window.AbortController?new AbortController():null,tm=setTimeout(function(){ctl&&ctl.abort()},6000);return fetch(u,ctl?{signal:ctl.signal}:{}).then(function(r){clearTimeout(tm);return r.json()}).catch(function(){clearTimeout(tm);return null})}
+  return Promise.all([get("https://routing.openstreetmap.de/routed-foot/route/v1/foot/"+base+"?overview=full&geometries=geojson"),get("https://routing.openstreetmap.de/routed-car/route/v1/driving/"+base+"?overview=false")]).then(function(r){
+    var f=r[0]&&r[0].routes&&r[0].routes[0],c=r[1]&&r[1].routes&&r[1].routes[0],e=est(b);
+    if(!f&&!c)return;
+    var km=f?f.distance/1000:e.km;
+    routeCache[k]={km:km,walk:f?f.duration/60:e.walk,bike:km/15*60,car:c?c.duration/60+1:e.car,geo:f?f.geometry:null,real:!!f};return routeCache[k];
+  });
 }
 var ICON_BORNE='<svg viewBox="0 0 44 64"><path d="M8 62V20Q8 4 22 4Q36 4 36 20V62Z" fill="#1b1534" stroke="#e2b64a" stroke-width="2"/><rect x="13" y="22" width="18" height="13" rx="2" fill="#07050f" stroke="#a78bfa" stroke-width="1"/><rect x="15" y="25" width="4" height="7" rx="1" fill="#d0342c"/><rect x="20" y="25" width="4" height="7" rx="1" fill="#e8c33a"/><rect x="25" y="25" width="4" height="7" rx="1" fill="#7a42d6"/><rect x="14" y="44" width="16" height="10" rx="3" fill="#07050f" stroke="#e2b64a" stroke-width="1.5"/><path d="M17 11q5-3 9 0" stroke="#e2b64a" stroke-width="2" fill="none" stroke-linecap="round"/><rect x="19.5" y="8" width="5" height="4" fill="none" stroke="#e2b64a" stroke-width="1.2"/></svg>';
 function bornLevel(b){
@@ -207,8 +209,10 @@ function paintBornes(){
   box.innerHTML=arr.map(function(b,idx){
     var e=eta(b),inStock=want?stockOf(b,want.id):null;
     var line=want?(inStock>0&&b.statut==="en_service"?'<span class="avail-yes">'+esc(want.nom)+" disponible</span>":'<span class="avail-no">'+esc(want.nom)+" en rupture</span>"):"";
-    var etaH=e?'<div class="eta"><span class="big">'+mins(e.walk)+' à pied</span><span>'+mins(e.bike)+' à vélo</span><span>'+fmt(e.km,1)+' km'+(e.real?"":" (estimé)")+'</span></div>':"";
-    var stock=P.map(function(p){var v=stockOf(b,p.id),l=lvl(v);return'<div class="sk '+l+(want&&want.id===p.id?" want":"")+'" title="'+esc(p.marque+" "+p.nom+" : "+(l==="out"?"en rupture":v+" %"))+'"><span>'+esc(p.nom.split(" – ")[0])+'</span><div class="bar"><u style="width:'+Math.max(4,v)+'%"></u></div></div>'}).join("");
+    var etaH=e?'<div class="eta"><div><b>'+mins(e.walk)+'</b><small>à pied</small></div><div><b>'+mins(e.bike)+'</b><small>à vélo</small></div><div><b>'+mins(e.car)+'</b><small>en voiture</small></div><div><b>'+fmt(e.km,1)+' km</b><small>'+(e.real?"distance":"à vol d'oiseau +30 %")+'</small></div></div>':"";
+    var nOk=0,nLow=0,nOut=0;
+    var stock=P.map(function(p){var v=stockOf(b,p.id),l=lvl(v);if(l==="ok")nOk++;else if(l==="low")nLow++;else nOut++;return'<li class="chip '+l+(want&&want.id===p.id?" want":"")+'"><i></i><span>'+esc(p.nom)+'</span>'+(l==="out"?'<em>rupture</em>':(l==="low"?'<em>bientôt vide</em>':""))+'</li>'}).join("");
+    var summ=b.statut!=="en_service"?"":'<p class="summ"><b>'+nOk+' disponibles</b>'+(nLow?' · '+nLow+' bientôt vide'+(nLow>1?"s":""):"")+(nOut?' · '+nOut+' en rupture':"")+'</p>';
     return'<article class="bc'+(selBorne===b.id?" sel":"")+'" data-id="'+b.id+'" tabindex="0"><div class="bc-top"><div><h3>'+esc(b.nom)+'</h3><div class="lieu">'+esc(b.lieu)+'</div></div>'+stLabel(b)+'</div>'+line+etaH+'<div class="stock">'+stock+'</div><div class="bc-foot"><span class="upd">'+esc(updLabel())+'</span><a href="https://www.google.com/maps/dir/?api=1&destination='+b.lat+","+b.lng+'&travelmode=walking" target="_blank" rel="noopener">Itinéraire dans Maps</a></div></article>'}).join("");
   $$(".bc",box).forEach(function(el){el.addEventListener("click",function(ev){if(ev.target.tagName==="A")return;chooseBorne(el.dataset.id,true)});el.addEventListener("keydown",function(ev){if(ev.key==="Enter")chooseBorne(el.dataset.id,true)})});
   paintPhone();
@@ -243,7 +247,7 @@ function chooseBorne(id,pan){
   var b=BORNES.filter(function(x){return x.id===id})[0];
   if(map){if(user)drawRoute();else map.flyTo([b.lat,b.lng],15,{duration:.9});markers[id]&&markers[id].openPopup()}
 }
-function popupHtml(b){var e=eta(b);return"<b>"+esc(b.nom)+"</b><br>"+esc(b.adresse)+(e?"<br>"+mins(e.walk)+" à pied":"")+"<br>"+esc(b.horaires)}
+function popupHtml(b){var e=eta(b);return"<b>"+esc(b.nom)+"</b><br>"+esc(b.adresse)+(e?"<br>"+mins(e.walk)+" à pied · "+mins(e.car)+" en voiture":"")+"<br>"+esc(b.horaires)}
 function initMap(){
   var el=$("#map");
   if(!window.L){el.innerHTML='<p style="padding:24px;color:#a89fc4;font-family:sans-serif">La carte n\'a pas pu se charger. Les bornes restent listées à côté.</p>';return}

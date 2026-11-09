@@ -285,3 +285,26 @@ input[type=range]{width:100%;accent-color:var(--gold)}
 .rg .val{position:absolute;inset:0;display:grid;place-items:center;margin:0;height:auto}
 .ring p{margin-top:0}
 .cols{grid-template-columns:repeat(4,1fr)}.col-lab{grid-template-columns:repeat(4,1fr)}
+
+.fallback3d{flex-direction:column;gap:10px}.fallback3d img{max-height:78%;width:auto;max-width:60%;filter:drop-shadow(0 20px 30px rgba(0,0,0,.5))}
+.stage .fallback3d{left:auto;right:6%;width:44%}
+
+/* cartes de bornes lisibles */
+.borne-side{display:grid;gap:14px;align-content:start}
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin:0}
+.chip{display:inline-flex;align-items:center;gap:8px;font-family:var(--f-ui);font-size:.9rem;font-weight:600;color:#f5efe6;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12)}
+.chip i{width:10px;height:10px;border-radius:50%;flex:none;background:var(--ok,#5fd38d)}
+.chip.low i{background:#f0a53a}.chip.out i{background:#ff5d6c}
+.chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.chips .chip{font-size:.88rem;padding:6px 11px}
+.chips .chip em{font-style:normal;font-size:.78rem;color:#f0a53a}.chips .chip.out em{color:#ff8d98}
+.chips .chip.out span{opacity:.6;text-decoration:line-through}
+.chips .chip.want{border-color:var(--gold);box-shadow:0 0 0 2px rgba(226,182,74,.35)}
+.bc .eta{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}
+.bc .eta>div{background:rgba(255,255,255,.06);border-radius:12px;padding:9px 6px;text-align:center}
+.bc .eta b{display:block;font-family:var(--f-ui);font-size:1.05rem;color:#fff;line-height:1.2}
+.bc .eta small{display:block;font-size:.72rem;color:#b9b0d4;margin-top:2px;line-height:1.2}
+.bc .eta>div:first-child{background:var(--gold);}.bc .eta>div:first-child b,.bc .eta>div:first-child small{color:#1b1534}
+.bc .summ{margin:4px 0 10px;color:#d8d0ee;font-size:.95rem}.bc .summ b{color:#fff}
+.bc .avail-yes,.bc .avail-no{display:block;font-family:var(--f-ui);font-weight:700;margin:6px 0}
+@media(max-width:520px){.bc .eta{grid-template-columns:1fr 1fr}}

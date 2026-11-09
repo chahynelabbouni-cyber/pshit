@@ -114,7 +114,9 @@ function spriteTex(){
   return new THREE.CanvasTexture(c);
 }
 
-function create(canvas,box,opts,P){
+function fail(box,e){try{console.error("[Pshit 3D]",e)}catch(_){}box.classList.add("no-webgl");var p=box.querySelector(".fallback3d p");if(p)p.textContent="Aperçu 3D indisponible sur ce navigateur ("+String(e&&e.message||e).slice(0,120)+")."}
+function create(canvas,box,opts,P){try{return createInner(canvas,box,opts,P)}catch(e){fail(box,e);return null}}
+function createInner(canvas,box,opts,P){
   var renderer;
   try{renderer=new THREE.WebGLRenderer({canvas:canvas,antialias:true,alpha:true,powerPreference:"high-performance"})}catch(e){box.classList.add("no-webgl");return null}
   if(!renderer||!renderer.getContext()){box.classList.add("no-webgl");return null}
@@ -182,7 +184,10 @@ function create(canvas,box,opts,P){
     renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setSize(w,h,false);
     camera.aspect=w/h;api.zoom=camera.aspect<.9?1+(.9-camera.aspect)*1.25:1;camera.updateProjectionMatrix()};
   api.tick=function(dt){
-    if(!api.visible)return;
+    if(!api.visible||api.dead)return;
+    try{api.tickInner(dt)}catch(e){api.dead=true;fail(box,e)}
+  };
+  api.tickInner=function(dt){
     api.t+=dt;
     if(api.idle&&!api.drag)api.spin+=(Math.sin(api.t*.7)*.3-api.spin)*Math.min(1,dt*2.5);else api.spin+=(0-api.spin)*Math.min(1,dt*3);
     if(Math.abs(api.vel)>1e-4&&!api.drag){api.rot+=api.vel;api.vel*=.94}
