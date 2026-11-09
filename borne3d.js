@@ -145,21 +145,22 @@ function createInner(canvas,box,opts,P){
   var ptex=new THREE.CanvasTexture(pc);ptex.flipY=false;ptex.encoding=THREE.sRGBEncoding;ptex.anisotropy=8;
   var M={},cones=[];
   var loader=new THREE.GLTFLoader();
-  loader.load("assets/borne.glb?v=7",function(g){
+  loader.load("assets/borne.glb?v=8",function(g){
     try{
     model.add(g.scene);
     g.scene.traverse(function(o){
       if(!o.isMesh)return;var mt=o.material,n=(mt.name||"");
       if(o.name.indexOf("Faisceau")===0){mt.color=new THREE.Color(0x8e62ff);mt.emissive=new THREE.Color(0);mt.transparent=true;mt.opacity=.07;mt.depthWrite=false;mt.blending=THREE.AdditiveBlending;mt.side=THREE.DoubleSide;cones.push(mt);return}
-      if(n.indexOf("Noir satiné")===0){mt.envMapIntensity=.65;mt.roughness=Math.max(.38,mt.roughness)}
+      if(n.indexOf("Noir satiné")===0){mt.color=new THREE.Color(0x0a0716);mt.emissive=new THREE.Color(0x24135a);mt.emissiveIntensity=.07;mt.envMapIntensity=.5;mt.roughness=.34;mt.metalness=Math.min(.7,mt.metalness)}
+      else if(n.indexOf("Noir mat")===0){mt.color=new THREE.Color(0x090612);mt.emissive=new THREE.Color(0x1a0e44);mt.emissiveIntensity=.06}
       else if(n.indexOf("Or brossé")===0){mt.envMapIntensity=1.3}
-      else if(n.indexOf("LED violette")===0){mt.emissiveIntensity=2.4;M.vio=mt}
-      else if(n.indexOf("LED dorée")===0){mt.emissiveIntensity=2.2;M.or=mt}
+      else if(n.indexOf("LED violette")===0){mt.emissiveIntensity=3.4;M.vio=mt}
+      else if(n.indexOf("LED dorée")===0){mt.emissiveIntensity=2.8;M.or=mt}
       else if(n.indexOf("LED blanc")===0){mt.emissiveIntensity=3.2}
       else if(n.indexOf("Fond de niche")===0){mt.emissiveIntensity=1.3;M.niche=mt}
       else if(n.indexOf("Flacon")===0){M.fl=mt}
       else if(n.indexOf("Lecteur")===0){M.nfc=mt}
-      else if(n.indexOf("Écran")===0||n.indexOf("Ecran")===0||n.indexOf("cran tactile")>=0){mt.map=null;mt.emissiveMap=ptex;mt.emissive=new THREE.Color(0xffffff);mt.emissiveIntensity=.95;mt.color=new THREE.Color(0x000000);M.scr=mt}
+      else if(n.indexOf("Écran")===0||n.indexOf("Ecran")===0||n.indexOf("cran tactile")>=0){mt.map=null;mt.emissiveMap=ptex;mt.emissive=new THREE.Color(0xffffff);mt.emissiveIntensity=1.25;mt.color=new THREE.Color(0x000000);M.scr=mt}
       o.frustumCulled=false;
     });
     api.ready=true;api.redraw();
@@ -175,6 +176,10 @@ function createInner(canvas,box,opts,P){
   var key=new THREE.DirectionalLight(0xfff1e0,.55);key.position.set(-4,5,7);scene.add(key);
   var rim=new THREE.DirectionalLight(0x9d7bff,.8);rim.position.set(6,3,-5);scene.add(rim);
   var fill=new THREE.DirectionalLight(0xffd9a0,.4);fill.position.set(5,1,6);scene.add(fill);
+  var hemi=new THREE.HemisphereLight(0x9a80ff,0x1a0f40,.05);scene.add(hemi);
+  var vA=new THREE.PointLight(0x9a6bff,.55,4);vA.position.set(-1.3,.2,1.6);pivot.add(vA);
+  var vB=new THREE.PointLight(0x6f8bff,.4,4);vB.position.set(1.2,1.0,1.5);pivot.add(vB);
+  var gB=new THREE.PointLight(0xffc15a,.4,3.5);gB.position.set(.4,-1.2,1.5);pivot.add(gB);
   var warm=new THREE.PointLight(0xffd699,.7,4);warm.position.set(0,.5,2.4);pivot.add(warm);
   /* brume du pshit */
   var N=190,pp=new Float32Array(N*3),pcol=new Float32Array(N*3),vel=new Float32Array(N*3),age=new Float32Array(N).fill(9),life=new Float32Array(N);
@@ -196,7 +201,7 @@ function createInner(canvas,box,opts,P){
   api.setStep=function(s){if(s!==api.step){api.step=s;redraw()}};
   api.resize=function(){var w=box.clientWidth,h=box.clientHeight;if(!w||!h)return;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setSize(w,h,false);
-    camera.aspect=w/h;api.zoom=camera.aspect<.9?1+(.9-camera.aspect)*1.25:1;camera.updateProjectionMatrix()};
+    camera.aspect=w/h;api.zoom=(camera.aspect<.9?1+(.9-camera.aspect)*1.25:1)*(api.wide?1.14+Math.max(0,Math.min(.3,(camera.aspect-1.7)*.3)):1);camera.updateProjectionMatrix()};
   api.tick=function(dt){
     if(!api.visible||api.dead)return;
     try{api.tickInner(dt)}catch(e){api.dead=true;fail(box,e)}

@@ -52,9 +52,13 @@ function countUp(el){
 
 /* ---------- borne 3D ---------- */
 var hero=window.PshitBorne.create($("#c"),$("#stage"),{rot:-.3},API);
-var demo=window.PshitBorne.create($("#demoC"),$("#demoStage"),{rot:-.45,drag:true,home:-.45},API);
+var demoOpts={rot:-.45,drag:true,home:-.45};var demo=window.PshitBorne.create($("#demoC"),$("#demoStage"),demoOpts,API);
 var list3d=[hero,demo].filter(Boolean);
-if(hero)hero.idle=true;if(demo)demo.cam={x:0,y:.35,z:10.2,lx:0,ly:.05};
+if(hero){hero.idle=true;hero.wide=true;hero.resize()}var DCAM=[{rot:-.35,x:0,y:.55,z:7.8,lx:0,ly:.3},{rot:.32,x:0,y:-.2,z:7.0,lx:0,ly:-.5},{rot:-.22,x:0,y:.7,z:8.4,lx:0,ly:.5},{rot:.3,x:0,y:-.7,z:7.2,lx:0,ly:-1.0}];
+function demoGo(n,fast){if(!demo)return;var d=DCAM[n],t=fast?0:1.4;demo.vel=0;demoOpts.home=d.rot;
+  gsap.to(demo.cam,{x:d.x,y:d.y,z:d.z,lx:d.lx,ly:d.ly,duration:t,ease:"power3.inOut",overwrite:true});
+  var dr=d.rot-demo.rot;dr-=Math.round(dr/6.28319)*6.28319;gsap.to(demo,{rot:demo.rot+dr,duration:t,ease:"power3.inOut",overwrite:true})}
+if(demo){Object.assign(demo.cam,DCAM[0]);demo.rot=DCAM[0].rot;demoOpts.home=DCAM[0].rot}
 var last=performance.now();
 function loop(now){var dt=Math.min(.05,(now-last)/1000);last=now;showFrame(dt);list3d.forEach(function(b){b.autoCheck(now);b.tick(dt)});requestAnimationFrame(loop)}
 if(list3d.length)requestAnimationFrame(loop);
@@ -131,7 +135,7 @@ snamePaint();
 function setStep(n){
   step=n;stepBtns.forEach(function(b,i){b.classList.toggle("on",i===n)});sbs.forEach(function(s,i){s.classList.toggle("on",i===n)});
   note.textContent="Étape "+(n+1)+" sur 4";
-  if(demo){demo.setStep(n);demo.spray=false;demo.sprayT=0}
+  if(demo){demo.setStep(n);demo.spray=false;demo.sprayT=0;demoGo(n)}
   clearTimeout(sprayTimer);
 }
 stepBtns.forEach(function(b,i){b.addEventListener("click",function(){setStep(i)})});
@@ -203,6 +207,26 @@ function orderedBornes(){
     var wa=selPerfume!=null?(stockOf(a,SCENTS[selPerfume].id)>0&&a.statut==="en_service"?0:1):0,wb=selPerfume!=null?(stockOf(b,SCENTS[selPerfume].id)>0&&b.statut==="en_service"?0:1):0;
     if(wa!==wb)return wa-wb;return hav(user,a)-hav(user,b)});
   return arr}
+
+/* ---------- module : parfums par état ---------- */
+var stockModal=null;
+function openStock(id,k){
+  var b=BORNES.filter(function(x){return x.id===id})[0];if(!b)return;
+  if(!stockModal){stockModal=document.createElement("div");stockModal.className="smodal";stockModal.hidden=true;document.body.appendChild(stockModal);
+    stockModal.addEventListener("click",function(e){if(e.target===stockModal||e.target.closest(".sm-x"))closeStock()});
+    document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!stockModal.hidden)closeStock()})}
+  stockModal.dataset.b=id;stockModal.dataset.k=k;paintStock();stockModal.hidden=false;document.body.classList.add("lock");
+  var f=stockModal.querySelector(".sm-x");if(f)f.focus();
+}
+function closeStock(){stockModal.hidden=true;document.body.classList.remove("lock")}
+function paintStock(){
+  var b=BORNES.filter(function(x){return x.id===stockModal.dataset.b})[0],k=stockModal.dataset.k;
+  var g={ok:[],low:[],out:[]};P.forEach(function(p){g[lvl(stockOf(b,p.id))].push(p)});
+  var tabs=[["all","Tous",P.length],["ok","Disponibles",g.ok.length],["low","Bientôt vides",g.low.length],["out","En rupture",g.out.length]];
+  var rows=[];["out","low","ok"].forEach(function(l){if(k==="all"||k===l)g[l].forEach(function(p){rows.push('<li class="'+l+'"><i></i><span><b>'+esc(p.nom)+'</b><small>'+esc(p.marque)+'</small></span><em>'+(l==="out"?"Rupture":l==="low"?"Bientôt vide":"Disponible")+'</em></li>')})});
+  stockModal.innerHTML='<div class="sm-card" role="dialog" aria-modal="true" aria-label="Parfums de '+esc(b.nom)+'"><div class="sm-h"><div><h3>'+esc(b.nom)+'</h3><p>'+esc(b.lieu)+'</p></div><button type="button" class="sm-x" aria-label="Fermer">×</button></div><div class="sm-tabs">'+tabs.map(function(t){return'<button type="button" data-k="'+t[0]+'" class="'+(t[0]===k?"on":"")+' t-'+t[0]+'">'+t[1]+' <b>'+t[2]+'</b></button>'}).join("")+'</div><ul class="sm-list">'+(rows.length?rows.join(""):'<li class="empty">Aucun parfum dans cette catégorie.</li>')+'</ul><p class="sm-note">'+(BJ.demo?"Disponibilités simulées, elles évoluent au fil des ventes et des saisons.":"Mis à jour en continu.")+'</p></div>';
+  $$(".sm-tabs button",stockModal).forEach(function(t){t.addEventListener("click",function(){stockModal.dataset.k=t.dataset.k;paintStock()})});
+}
 function paintBornes(){
   var box=$("#borneList");if(!box)return;
   var arr=orderedBornes(),want=selPerfume!=null?SCENTS[selPerfume]:null;
@@ -213,11 +237,12 @@ function paintBornes(){
     var nOk=0,nLow=0,nOut=0,outs=[],lows=[];
     var stock=P.map(function(p){var v=stockOf(b,p.id),l=lvl(v);if(l==="ok")nOk++;else if(l==="low"){nLow++;lows.push(p)}else{nOut++;outs.push(p)}return'<li class="chip '+l+(want&&want.id===p.id?" want":"")+'"><i></i><span>'+esc(p.nom)+'</span></li>'}).join("");
     var live=b.statut==="en_service";
-    var counts=live?'<div class="cnt"><span class="n ok"><b>'+nOk+'</b>disponibles</span>'+(nLow?'<span class="n low"><b>'+nLow+'</b>bientôt vide'+(nLow>1?"s":"")+'</span>':"")+(nOut?'<span class="n out"><b>'+nOut+'</b>en rupture</span>':"")+'</div>':"";
+    var counts=live?'<div class="cnt" role="group" aria-label="Voir les parfums par état"><button type="button" class="n ok" data-k="ok"><b>'+nOk+'</b>disponibles</button>'+(nLow?'<button type="button" class="n low" data-k="low"><b>'+nLow+'</b>bientôt vide'+(nLow>1?"s":"")+'</button>':"")+(nOut?'<button type="button" class="n out" data-k="out"><b>'+nOut+'</b>en rupture</button>':"")+'</div>':"";
     var alerts=!live?"":((nOut||nLow)?'<ul class="alerts">'+outs.map(function(p){return'<li class="out"><i></i><b>'+esc(p.nom)+'</b><em>Rupture</em></li>'}).join("")+lows.map(function(p){return'<li class="low"><i></i><b>'+esc(p.nom)+'</b><em>Bientôt vide</em></li>'}).join("")+'</ul>':'<p class="allok">Tous les parfums sont disponibles.</p>');
-    var all=live?'<details class="all"><summary>Voir les '+P.length+' parfums</summary><ul class="stock">'+stock+'</ul></details>':"";
+    var all=live?'<button type="button" class="seeall" data-k="all">Voir les '+P.length+' parfums</button>':"";
     return'<article class="bc'+(selBorne===b.id?" sel":"")+'" data-id="'+b.id+'" tabindex="0"><div class="bc-top"><div><h3>'+esc(b.nom)+'</h3><div class="lieu">'+esc(b.lieu)+'</div></div>'+stLabel(b)+'</div>'+line+etaH+counts+alerts+all+'<div class="bc-foot"><span class="upd">'+esc(updLabel())+'</span><a href="https://www.google.com/maps/dir/?api=1&destination='+b.lat+","+b.lng+'&travelmode=walking" target="_blank" rel="noopener">Itinéraire dans Maps</a></div></article>'}).join("");
-  $$(".bc",box).forEach(function(el){el.addEventListener("click",function(ev){if(ev.target.tagName==="A")return;chooseBorne(el.dataset.id,true)});el.addEventListener("keydown",function(ev){if(ev.key==="Enter")chooseBorne(el.dataset.id,true)})});
+  $$(".bc [data-k]",box).forEach(function(bt){bt.addEventListener("click",function(ev){ev.stopPropagation();openStock(bt.closest(".bc").dataset.id,bt.dataset.k)})});
+  $$(".bc",box).forEach(function(el){el.addEventListener("click",function(ev){if(ev.target.tagName==="A"||ev.target.closest("[data-k]"))return;chooseBorne(el.dataset.id,true)});el.addEventListener("keydown",function(ev){if(ev.key==="Enter")chooseBorne(el.dataset.id,true)})});
   paintPhone();
   Object.keys(markers).forEach(function(id){var b=BORNES.filter(function(x){return x.id===id})[0];var el=markers[id].getElement();if(el){var d=el.querySelector(".mk");d.className="mk "+bornLevel(b)+(selBorne===id?" sel":"")}});
 }
