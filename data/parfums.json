@@ -1,0 +1,17 @@
+{
+  "_aide": "Les 12 parfums du dossier. Pour modifier : changer nom, marque, genre, famille ou couleur (code hexadécimal). L'identifiant (id) doit rester le même que dans bornes.json.",
+  "parfums": [
+    {"id":"sauvage","marque":"Dior","nom":"Sauvage","genre":"Homme","famille":"Frais · épicé","couleur":"#3d78c4"},
+    {"id":"bleu","marque":"Chanel","nom":"Bleu de Chanel","genre":"Homme","famille":"Boisé · aromatique","couleur":"#27478f"},
+    {"id":"million","marque":"Paco Rabanne","nom":"1 Million","genre":"Homme","famille":"Ambré · épicé","couleur":"#d9a62e"},
+    {"id":"acqua","marque":"Giorgio Armani","nom":"Acqua di Giò","genre":"Homme","famille":"Aquatique · frais","couleur":"#52b4d6"},
+    {"id":"libre","marque":"Yves Saint Laurent","nom":"Libre","genre":"Femme","famille":"Floral · lavande","couleur":"#8a55c9"},
+    {"id":"vieestbelle","marque":"Lancôme","nom":"La Vie est Belle","genre":"Femme","famille":"Gourmand · iris","couleur":"#e6a3bd"},
+    {"id":"paradoxe","marque":"Prada","nom":"Paradoxe","genre":"Femme","famille":"Floral · ambré","couleur":"#e8d89a"},
+    {"id":"coco","marque":"Chanel","nom":"Coco Mademoiselle","genre":"Femme","famille":"Oriental · frais","couleur":"#e2a85f"},
+    {"id":"ckone","marque":"Calvin Klein","nom":"CK One","genre":"Mixte","famille":"Agrumes · frais","couleur":"#9cc79a"},
+    {"id":"jazzclub","marque":"Maison Margiela","nom":"Replica – Jazz Club","genre":"Mixte","famille":"Boisé · tabac","couleur":"#94603c"},
+    {"id":"woodsage","marque":"Jo Malone London","nom":"Wood Sage & Sea Salt","genre":"Mixte","famille":"Marin · boisé","couleur":"#7da595"},
+    {"id":"terre","marque":"Hermès","nom":"Terre d'Hermès","genre":"Mixte","famille":"Boisé · agrumes","couleur":"#e0752c"}
+  ]
+}
