@@ -66,9 +66,9 @@ var showEl=$("#show"),chEls=$$(".ch"),NCH=chEls.length;
 var GOLD=[226,182,74],LIL=[167,139,250];
 var KEYS=[
  {rot:-.3,x:0,y:.15,z:10.2,lx:0,ly:0,off:2.0,c:GOLD,w:0},
- {rot:-.15,x:0,y:.6,z:7.8,lx:0,ly:.45,off:-1.9,c:LIL,w:1},
- {rot:-.18,x:0,y:.5,z:7.4,lx:0,ly:.35,off:1.7,c:GOLD,w:0},
- {rot:.14,x:.2,y:.45,z:7.6,lx:.1,ly:.3,off:-1.6,c:[201,160,255],w:0},
+ {rot:-.15,x:0,y:.7,z:9.2,lx:0,ly:.5,off:-1.9,c:LIL,w:1},
+ {rot:-.18,x:0,y:.6,z:8.6,lx:0,ly:.4,off:1.7,c:GOLD,w:0},
+ {rot:.14,x:.2,y:.55,z:8.6,lx:.1,ly:.35,off:-1.6,c:[201,160,255],w:0},
  {rot:Math.PI*2-.3,x:0,y:.2,z:9.4,lx:0,ly:0,off:1.9,c:GOLD,w:0}];
 var STEPS=[0,0,1,2,0];
 var tp=0,curCh=-1,vh=window.innerHeight,cycTimer=null,cycI=0,showFlat=false;
@@ -304,9 +304,9 @@ $("#copyBtn").addEventListener("click",function(){var t=$("#codeTxt").textConten
 
 /* ---------- chiffres ---------- */
 $$("#rings .ring").forEach(function(r){onView(r,function(){var a=$(".arc",r);a.style.strokeDashoffset=String(327*(1-parseFloat(a.dataset.v)/100));countUp($(".val",r))},.4)});
-var YI=["Année 1 : 8 bornes à Dijon, 18 pshits par borne et par jour, point mort vers le 224e jour, résultat net d'environ 17 400 €.","Année 2 : 20 bornes avec Besançon, 22 pshits par borne et par jour, un technicien salarié prend la tournée.","Année 3 : 35 bornes avec Lyon, 25 pshits par borne et par jour, 493 k€ de chiffre d'affaires."];
+var YI=["Au lancement : 3 bornes à Dijon, place Darcy, place de la République et Toison d'Or. Les disponibilités sont suivies en direct.","Année 1, objectif du dossier : 8 bornes à Dijon, 18 pshits par borne et par jour, point mort vers le 224e jour, résultat net d'environ 17 400 €.","Année 2 : 20 bornes avec Besançon, 22 pshits par borne et par jour, un technicien salarié prend la tournée.","Année 3 : 35 bornes avec Lyon, 25 pshits par borne et par jour, 493 k€ de chiffre d'affaires."];
 function yPaint(i){$$("#cols .col").forEach(function(c,k){c.classList.toggle("on",k===i)});$("#yinfo").textContent=YI[i]}
-$$("#cols .col").forEach(function(c,i){c.addEventListener("click",function(){yPaint(i)})});yPaint(2);
+$$("#cols .col").forEach(function(c,i){c.addEventListener("click",function(){yPaint(i)})});yPaint(0);
 $$("[data-count]").forEach(function(el){if(!el.closest(".ring"))onView(el,function(){countUp(el)},.6)});
 }
 })();

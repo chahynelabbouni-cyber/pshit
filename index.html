@@ -8,8 +8,9 @@
 <meta name="theme-color" content="#14101F">
 <meta property="og:title" content="Le Dernier Pshit · Ton parfum, partout">
 <meta property="og:description" content="Une borne, douze parfums de marque. Dès 2 €, à Dijon.">
-<meta property="og:image" content="assets/logo.png">
-<link rel="icon" href="assets/favicon.png">
+<meta property="og:image" content="assets/borne-detouree.png">
+<link rel="icon" type="image/png" sizes="128x128" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Source+Sans+3:wght@400;600;700&display=swap">
@@ -26,7 +27,7 @@
 <div class="prog" id="prog"></div>
 <header class="nav" id="nav">
   <div class="wrap">
-    <a class="brand" href="#haut" aria-label="Le Dernier Pshit, accueil"><img src="assets/logo.png" alt="Le Dernier Pshit, distributeur de parfum"></a>
+    <a class="brand" href="#haut" aria-label="Le Dernier Pshit, accueil"><img class="mark" src="assets/logo-mark.png" alt=""><span>Le Dernier <em class="pshit">Pshit</em></span></a>
     <nav aria-label="Navigation principale"><ul id="navList">
       <li><a href="#idee">Le concept</a></li><li><a href="#essayer">Essayer</a></li><li><a href="#parfums">Parfums</a></li><li><a href="#formules">Prix</a></li><li><a href="#carte">Où nous trouver</a></li><li><a href="#club">Application</a></li><li><a href="#projet">Le projet</a></li>
     </ul></nav>
@@ -132,13 +133,13 @@
         <h2>Se parfumer en sortant, <em>sans acheter un flacon.</em></h2>
         <p class="lead">Le parfum du matin disparaît quand on en a le plus besoin, et on n'emporte pas un flacon fragile et cher. Notre borne propose douze parfums de marque, vaporisés à la demande dans les lieux de passage de Dijon.</p>
         <div class="rings" id="rings">
-          <div class="ring rv"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="bg" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" data-v="95"/></svg><div class="val" data-count="95" data-suffix=" %">95 %</div><p>des 18-25 ans se parfument <small>(Ipsos)</small></p></div>
-          <div class="ring rv d1"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="bg" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" data-v="60"/></svg><div class="val" data-count="60" data-suffix=" %">60 %</div><p>ont acheté un produit beauté vu sur TikTok</p></div>
-          <div class="ring rv d2"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="bg" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" data-v="83"/></svg><div class="val" data-count="83" data-suffix=" %">83 %</div><p>de marge sur chaque pshit</p></div>
+          <div class="ring rv"><div class="rg"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="bg" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" data-v="95"/></svg><div class="val" data-count="95" data-suffix=" %">95 %</div></div><p>des 18-25 ans se parfument <small>(Ipsos)</small></p></div>
+          <div class="ring rv d1"><div class="rg"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="bg" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" data-v="60"/></svg><div class="val" data-count="60" data-suffix=" %">60 %</div></div><p>ont acheté un produit beauté vu sur TikTok</p></div>
+          <div class="ring rv d2"><div class="rg"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="bg" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" data-v="83"/></svg><div class="val" data-count="83" data-suffix=" %">83 %</div></div><p>de marge sur chaque pshit</p></div>
         </div>
         <p class="small" style="margin-top:14px">Les résultats de notre questionnaire seront ajoutés à sa clôture.</p>
       </div>
-      <figure class="photo rv d1"><img src="assets/borne-maquette.jpg" width="378" height="702" loading="lazy" alt="Maquette de la borne Le Dernier Pshit : fût sombre, filets dorés, écran tactile, lecteur sans contact et niche de distribution"><figcaption>Maquette de conception de la borne.</figcaption></figure>
+      <figure class="photo rv d1"><img class="cutout" src="assets/borne-detouree.png" width="844" height="1905" loading="lazy" alt="Maquette de la borne Le Dernier Pshit : fût sombre, filets dorés, écran tactile, lecteur sans contact et niche de distribution"><figcaption>Maquette de conception de la borne.</figcaption></figure>
     </div>
   </div>
 </section>
@@ -228,21 +229,22 @@
 <!-- PROJET -->
 <section id="projet" class="sec band band-dark">
   <div class="wrap">
-    <div class="sec-head rv"><span class="kicker">Le projet</span><h2>Un modèle chiffré <em>sur trois ans.</em></h2>
-      <p>Notre dossier chiffre le déploiement des bornes de Dijon à Lyon, le financement et les premières étapes.</p></div>
-    <h3 class="sub-h rv">De Dijon à Lyon, en trois ans</h3>
+    <div class="sec-head rv"><span class="kicker">Le projet</span><h2>Trois bornes au lancement, <em>d'autres ensuite.</em></h2>
+      <p>Le lancement se fait avec trois bornes à Dijon. Notre dossier chiffre ensuite le déploiement de nouvelles bornes, de Dijon à Lyon, ainsi que le financement et les premières étapes.</p></div>
+    <h3 class="sub-h rv">Le déploiement prévu</h3>
     <div class="deploy">
       <div class="rv">
         <div class="cols" id="cols">
-          <button type="button" class="col" style="--h:23%" data-y="0"><span class="bar"><b data-count="8">8</b></span></button>
-          <button type="button" class="col" style="--h:57%" data-y="1"><span class="bar"><b data-count="20">20</b></span></button>
-          <button type="button" class="col" style="--h:100%" data-y="2"><span class="bar"><b data-count="35">35</b></span></button>
+          <button type="button" class="col" style="--h:14%" data-y="0"><span class="bar"><b>3</b></span></button>
+          <button type="button" class="col" style="--h:30%" data-y="1"><span class="bar"><b>8</b></span></button>
+          <button type="button" class="col" style="--h:62%" data-y="2"><span class="bar"><b>20</b></span></button>
+          <button type="button" class="col" style="--h:100%" data-y="3"><span class="bar"><b>35</b></span></button>
         </div>
-        <div class="col-lab"><span>Année 1</span><span>Année 2</span><span>Année 3</span></div>
+        <div class="col-lab"><span>Lancement</span><span>Année 1</span><span>Année 2</span><span>Année 3</span></div>
         <p class="yinfo" id="yinfo" aria-live="polite"></p>
       </div>
       <div class="kpis rv d1">
-        <div class="kpi"><b data-count="493" data-suffix=" k€">493 k€</b><span>de chiffre d'affaires prévu en année 3, avec 35 bornes</span></div>
+        <div class="kpi"><b data-count="493" data-suffix=" k€">493 k€</b><span>de chiffre d'affaires visé en année 3, quand le réseau atteindra 35 bornes</span></div>
         <div class="kpi"><b>36 €</b><span>de chiffre d'affaires par borne et par jour (18 pshits et un échantillon)</span></div>
         <div class="kpi"><b data-count="90" data-suffix=" k€">90 k€</b><span>de financement, dont 30 k€ de prêts d'honneur Réseau Entreprendre</span></div>
       </div>
