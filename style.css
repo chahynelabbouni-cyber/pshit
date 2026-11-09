@@ -308,3 +308,31 @@ input[type=range]{width:100%;accent-color:var(--gold)}
 .bc .summ{margin:4px 0 10px;color:#d8d0ee;font-size:.95rem}.bc .summ b{color:#fff}
 .bc .avail-yes,.bc .avail-no{display:block;font-family:var(--f-ui);font-weight:700;margin:6px 0}
 @media(max-width:520px){.bc .eta{grid-template-columns:1fr 1fr}}
+
+@media (max-width:860px){.hero-logo{display:none}}
+
+/* disponibilité par borne : lisible d'un coup d'œil */
+.bc .cnt{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+.bc .cnt .n{display:flex;align-items:baseline;gap:7px;padding:8px 13px;border-radius:12px;font-size:.88rem;font-weight:700;color:#fff;border:1px solid transparent}
+.bc .cnt .n b{font-size:1.35rem;line-height:1}
+.bc .cnt .ok{background:rgba(52,211,120,.14);border-color:rgba(52,211,120,.45);color:#7ff0ad}
+.bc .cnt .low{background:rgba(251,163,38,.14);border-color:rgba(251,163,38,.5);color:#ffc266}
+.bc .cnt .out{background:rgba(244,63,94,.16);border-color:rgba(244,63,94,.55);color:#ff8fa3}
+.bc .alerts{list-style:none;margin:10px 0 2px;padding:0;display:flex;flex-direction:column;gap:6px}
+.bc .alerts li{display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:12px;background:rgba(255,255,255,.04);font-size:.98rem}
+.bc .alerts li i{width:11px;height:11px;border-radius:50%;flex:none}
+.bc .alerts li.out i{background:#f43f5e}.bc .alerts li.low i{background:#fba326}
+.bc .alerts li b{flex:1;min-width:0;color:#fff;font-weight:700}
+.bc .alerts li em{font-style:normal;font-weight:800;font-size:.82rem;padding:4px 10px;border-radius:99px}
+.bc .alerts li.out em{background:rgba(244,63,94,.2);color:#ff8fa3}.bc .alerts li.low em{background:rgba(251,163,38,.2);color:#ffc266}
+.bc .allok{margin:10px 0 2px;padding:10px 13px;border-radius:12px;background:rgba(52,211,120,.1);color:#7ff0ad;font-weight:700}
+.bc details.all{margin-top:10px}
+.bc details.all summary{cursor:pointer;color:#c9bdf0;font-weight:700;font-size:.92rem;padding:8px 0;list-style:none}
+.bc details.all summary::-webkit-details-marker{display:none}
+.bc details.all summary::before{content:"+ ";color:var(--gold,#e2b64a)}
+.bc details.all[open] summary::before{content:"− "}
+.bc details.all .stock{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;list-style:none;padding:0;margin:8px 0 0}
+.bc .chip em{display:none}
+.bc .alerts li em,.bc .cnt .n{font-family:inherit}
+@media (min-width:981px){.mapbox{position:sticky;top:84px;align-self:start}}
+html,body{overflow-x:clip}

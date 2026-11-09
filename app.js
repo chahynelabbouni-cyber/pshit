@@ -52,9 +52,9 @@ function countUp(el){
 
 /* ---------- borne 3D ---------- */
 var hero=window.PshitBorne.create($("#c"),$("#stage"),{rot:-.3},API);
-var demo=window.PshitBorne.create($("#demoC"),$("#demoStage"),{rot:-.2,drag:true,home:-.2},API);
+var demo=window.PshitBorne.create($("#demoC"),$("#demoStage"),{rot:-.45,drag:true,home:-.45},API);
 var list3d=[hero,demo].filter(Boolean);
-if(hero)hero.idle=true;if(demo)demo.cam={x:0,y:.4,z:9.2,lx:0,ly:.1};
+if(hero)hero.idle=true;if(demo)demo.cam={x:0,y:.35,z:10.2,lx:0,ly:.05};
 var last=performance.now();
 function loop(now){var dt=Math.min(.05,(now-last)/1000);last=now;showFrame(dt);list3d.forEach(function(b){b.autoCheck(now);b.tick(dt)});requestAnimationFrame(loop)}
 if(list3d.length)requestAnimationFrame(loop);
@@ -65,11 +65,11 @@ function redraw3d(){list3d.forEach(function(b){b.redraw()})}
 var showEl=$("#show"),chEls=$$(".ch"),NCH=chEls.length;
 var GOLD=[226,182,74],LIL=[167,139,250];
 var KEYS=[
- {rot:-.3,x:0,y:.15,z:10.2,lx:0,ly:0,off:2.0,c:GOLD,w:0},
- {rot:-.15,x:0,y:.7,z:9.2,lx:0,ly:.5,off:-1.9,c:LIL,w:1},
- {rot:-.18,x:0,y:.6,z:8.6,lx:0,ly:.4,off:1.7,c:GOLD,w:0},
- {rot:.14,x:.2,y:.55,z:8.6,lx:.1,ly:.35,off:-1.6,c:[201,160,255],w:0},
- {rot:Math.PI*2-.3,x:0,y:.2,z:9.4,lx:0,ly:0,off:1.9,c:GOLD,w:0}];
+ {rot:-.6,x:0,y:.15,z:10.2,lx:0,ly:0,off:2.5,c:GOLD,w:0},
+ {rot:.55,x:0,y:.7,z:9.2,lx:0,ly:.5,off:-2.5,c:LIL,w:1},
+ {rot:-.55,x:0,y:.6,z:8.8,lx:0,ly:.4,off:2.4,c:GOLD,w:0},
+ {rot:.35,x:.2,y:.55,z:8.8,lx:.1,ly:.35,off:-2.4,c:[201,160,255],w:0},
+ {rot:-.45,x:0,y:.2,z:9.6,lx:0,ly:0,off:2.4,c:GOLD,w:0}];
 var STEPS=[0,0,1,2,0];
 var tp=0,curCh=-1,vh=window.innerHeight,cycTimer=null,cycI=0,showFlat=false;
 function setVH(){vh=window.innerHeight;document.documentElement.style.setProperty("--vh",vh+"px");if(!showFlat)showEl.style.height=Math.round(vh*(1+(NCH-1)*.85))+"px"}
@@ -100,7 +100,7 @@ function showFrame(dt){
   var m=window.innerWidth<=860;
   hero.rot=lerp(A.rot,B.rot,e);var c=hero.cam;
   c.x=lerp(A.x,B.x,e);c.y=lerp(A.y,B.y,e);c.z=lerp(A.z,B.z,e);c.lx=lerp(A.lx,B.lx,e);c.ly=lerp(A.ly,B.ly,e);
-  hero.off=m?0:lerp(A.off,B.off,e);hero.mobile=m;
+  if(m){c.ly-=1.0;c.z+=1.2}hero.off=m?0:lerp(A.off,B.off,e)*Math.min(1,(window.innerWidth/window.innerHeight)/1.6);hero.mobile=m;
   var w=lerp(A.w,B.w,e),sc=hex(SCENTS[state.scent].c);
   var r=Math.round(lerp(lerp(A.c[0],B.c[0],e),sc[0],w*.6)),g=Math.round(lerp(lerp(A.c[1],B.c[1],e),sc[1],w*.6)),b=Math.round(lerp(lerp(A.c[2],B.c[2],e),sc[2],w*.6));
   var key=r+","+g+","+b;if(key!==showFrame.k){showFrame.k=key;showEl.style.setProperty("--acc-rgb",key);hero.setAccent(r,g,b)}
@@ -210,10 +210,13 @@ function paintBornes(){
     var e=eta(b),inStock=want?stockOf(b,want.id):null;
     var line=want?(inStock>0&&b.statut==="en_service"?'<span class="avail-yes">'+esc(want.nom)+" disponible</span>":'<span class="avail-no">'+esc(want.nom)+" en rupture</span>"):"";
     var etaH=e?'<div class="eta"><div><b>'+mins(e.walk)+'</b><small>à pied</small></div><div><b>'+mins(e.bike)+'</b><small>à vélo</small></div><div><b>'+mins(e.car)+'</b><small>en voiture</small></div><div><b>'+fmt(e.km,1)+' km</b><small>'+(e.real?"distance":"à vol d'oiseau +30 %")+'</small></div></div>':"";
-    var nOk=0,nLow=0,nOut=0;
-    var stock=P.map(function(p){var v=stockOf(b,p.id),l=lvl(v);if(l==="ok")nOk++;else if(l==="low")nLow++;else nOut++;return'<li class="chip '+l+(want&&want.id===p.id?" want":"")+'"><i></i><span>'+esc(p.nom)+'</span>'+(l==="out"?'<em>rupture</em>':(l==="low"?'<em>bientôt vide</em>':""))+'</li>'}).join("");
-    var summ=b.statut!=="en_service"?"":'<p class="summ"><b>'+nOk+' disponibles</b>'+(nLow?' · '+nLow+' bientôt vide'+(nLow>1?"s":""):"")+(nOut?' · '+nOut+' en rupture':"")+'</p>';
-    return'<article class="bc'+(selBorne===b.id?" sel":"")+'" data-id="'+b.id+'" tabindex="0"><div class="bc-top"><div><h3>'+esc(b.nom)+'</h3><div class="lieu">'+esc(b.lieu)+'</div></div>'+stLabel(b)+'</div>'+line+etaH+'<div class="stock">'+stock+'</div><div class="bc-foot"><span class="upd">'+esc(updLabel())+'</span><a href="https://www.google.com/maps/dir/?api=1&destination='+b.lat+","+b.lng+'&travelmode=walking" target="_blank" rel="noopener">Itinéraire dans Maps</a></div></article>'}).join("");
+    var nOk=0,nLow=0,nOut=0,outs=[],lows=[];
+    var stock=P.map(function(p){var v=stockOf(b,p.id),l=lvl(v);if(l==="ok")nOk++;else if(l==="low"){nLow++;lows.push(p)}else{nOut++;outs.push(p)}return'<li class="chip '+l+(want&&want.id===p.id?" want":"")+'"><i></i><span>'+esc(p.nom)+'</span></li>'}).join("");
+    var live=b.statut==="en_service";
+    var counts=live?'<div class="cnt"><span class="n ok"><b>'+nOk+'</b>disponibles</span>'+(nLow?'<span class="n low"><b>'+nLow+'</b>bientôt vide'+(nLow>1?"s":"")+'</span>':"")+(nOut?'<span class="n out"><b>'+nOut+'</b>en rupture</span>':"")+'</div>':"";
+    var alerts=!live?"":((nOut||nLow)?'<ul class="alerts">'+outs.map(function(p){return'<li class="out"><i></i><b>'+esc(p.nom)+'</b><em>Rupture</em></li>'}).join("")+lows.map(function(p){return'<li class="low"><i></i><b>'+esc(p.nom)+'</b><em>Bientôt vide</em></li>'}).join("")+'</ul>':'<p class="allok">Tous les parfums sont disponibles.</p>');
+    var all=live?'<details class="all"><summary>Voir les '+P.length+' parfums</summary><ul class="stock">'+stock+'</ul></details>':"";
+    return'<article class="bc'+(selBorne===b.id?" sel":"")+'" data-id="'+b.id+'" tabindex="0"><div class="bc-top"><div><h3>'+esc(b.nom)+'</h3><div class="lieu">'+esc(b.lieu)+'</div></div>'+stLabel(b)+'</div>'+line+etaH+counts+alerts+all+'<div class="bc-foot"><span class="upd">'+esc(updLabel())+'</span><a href="https://www.google.com/maps/dir/?api=1&destination='+b.lat+","+b.lng+'&travelmode=walking" target="_blank" rel="noopener">Itinéraire dans Maps</a></div></article>'}).join("");
   $$(".bc",box).forEach(function(el){el.addEventListener("click",function(ev){if(ev.target.tagName==="A")return;chooseBorne(el.dataset.id,true)});el.addEventListener("keydown",function(ev){if(ev.key==="Enter")chooseBorne(el.dataset.id,true)})});
   paintPhone();
   Object.keys(markers).forEach(function(id){var b=BORNES.filter(function(x){return x.id===id})[0];var el=markers[id].getElement();if(el){var d=el.querySelector(".mk");d.className="mk "+bornLevel(b)+(selBorne===id?" sel":"")}});
