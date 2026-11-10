@@ -160,12 +160,13 @@ export class YouTubeElement extends EventTarget {
   set volume(v) { this._vol = v; try { this.player?.setVolume(Math.round(v * 100)); } catch { /* ignore */ } }
   fire(t) { this.dispatchEvent(new Event(t)); }
 
-  async load(id, duration = 0) {
+  async load(id, duration = 0, autoplay = false) {
     this.videoId = id;
     this.src = 'yt:' + id;
     this._dur = duration;
     const YT = await loadYT();
-    if (this.player) { this.player.cueVideoById(id); return; }
+    // loadVideoById démarre tout de suite (flèche « suivant ») ; cueVideoById prépare sans lancer
+    if (this.player) { this._userPause = false; autoplay ? this.player.loadVideoById(id) : this.player.cueVideoById(id); return; }
     await new Promise(resolve => {
       const div = document.createElement('div');
       this.host.innerHTML = '';
@@ -173,7 +174,7 @@ export class YouTubeElement extends EventTarget {
       this.player = new YT.Player(div, {
         videoId: id,
         width: '100%', height: '100%',
-        playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, iv_load_policy: 3, origin: location.origin },
+        playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, iv_load_policy: 3, autoplay: autoplay ? 1 : 0, origin: location.origin },
         events: {
           onReady: () => resolve(),
           onStateChange: e => this.onState(e.data),
