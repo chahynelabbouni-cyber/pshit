@@ -360,3 +360,5 @@ body.lock{overflow:hidden}
 .sm-note{margin:12px 0 0;font-size:.78rem;opacity:.55}
 
 .sm-list li em{font-family:inherit}.sm-list li b,.sm-list li small{font-family:inherit}
+
+.maquette{grid-template-columns:1fr}.maquette .lead{max-width:62ch}
