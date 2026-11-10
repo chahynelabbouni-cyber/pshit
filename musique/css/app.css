@@ -670,3 +670,23 @@ body.has-mini .ai-foot { bottom: calc(var(--tabs-h) + var(--mini-h) + var(--safe
 .import-card small { color: var(--muted); font-size: 13px; }
 .card-live { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 4px; }
 .mini.gone { transform: translateY(140%) !important; opacity: 0 !important; transition: transform .35s var(--ease), opacity .35s; }
+
+/* Module Infos */
+.news-mod .shelf-head h2 { display: flex; align-items: center; gap: 8px; }
+.news-mod .shelf-head h2 svg { color: var(--gold); }
+.flash-row { display: flex; flex-direction: column; gap: 8px; }
+.flash { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 16px; text-align: left; color: var(--text);
+  background: linear-gradient(120deg, #3a0d12, #1a0b0d 60%, #12100c); box-shadow: inset 0 0 0 1px rgba(255,90,90,.28); transition: transform .2s var(--spring); animation: rise .45s var(--ease) both; }
+.flash.alt { background: var(--bg2); box-shadow: inset 0 0 0 1px var(--line); padding: 11px 14px; }
+.flash > svg { width: 42px; height: 42px; padding: 11px; border-radius: 50%; background: #e3342f; color: #fff; flex: none; }
+.flash.alt > svg { width: 34px; height: 34px; padding: 9px; background: var(--grad); color: #140f06; }
+.flash b { display: block; font-size: 16px; }
+.flash small { color: var(--muted); font-size: 12px; }
+.flash:active { transform: scale(.98); }
+.flash.loading { opacity: .5; }
+.station.news { background: radial-gradient(circle at 80% 15%, hsl(var(--h) 20% 26%), #0d0c0a 75%); }
+.feat { flex: none; width: 170px; min-height: 120px; border-radius: 16px; padding: 14px; text-align: left; color: var(--text); display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; scroll-snap-align: start;
+  background: radial-gradient(circle at 85% 10%, hsl(var(--h) 40% 30%), hsl(calc(var(--h) + 30) 30% 9%) 80%); box-shadow: inset 0 0 0 1px rgba(217,178,106,.2); animation: pop .45s var(--ease) both; animation-delay: var(--d); transition: transform .2s var(--spring); }
+.feat:active { transform: scale(.95); }
+.feat b { font-family: var(--serif); font-size: 19px; font-weight: 500; line-height: 1.1; }
+.feat small { color: var(--muted); font-size: 12px; line-height: 1.3; }
