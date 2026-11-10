@@ -199,7 +199,7 @@ function createInner(canvas,box,opts,P){
   api.redraw=redraw;redraw();
   api.setAccent=function(r,g,b){floorMat.color.setRGB(r/255*.9,g/255*.9,b/255*.9)};
   api.setStep=function(s){if(s!==api.step){api.step=s;redraw()}};
-  api.resize=function(){var w=box.clientWidth,h=box.clientHeight;if(!w||!h)return;
+  api.resize=function(){var cvs=renderer.domElement,w=cvs.clientWidth||box.clientWidth,h=cvs.clientHeight||box.clientHeight;if(!w||!h)return;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setSize(w,h,false);
     camera.aspect=w/h;api.zoom=(camera.aspect<.9?1+(.9-camera.aspect)*1.25:1)*(api.wide?1.14+Math.max(0,Math.min(.3,(camera.aspect-1.7)*.3)):1);camera.updateProjectionMatrix()};
   api.tick=function(dt){
@@ -230,7 +230,7 @@ function createInner(canvas,box,opts,P){
     pgeo.attributes.position.needsUpdate=true;pgeo.attributes.color.needsUpdate=true;
     renderer.render(scene,camera);
   };
-  if(window.ResizeObserver)new ResizeObserver(api.resize).observe(box);window.addEventListener("resize",api.resize);api.resize();
+  if(window.ResizeObserver){var ro=new ResizeObserver(api.resize);ro.observe(box);ro.observe(renderer.domElement)}window.addEventListener("resize",api.resize);api.resize();
   if("IntersectionObserver" in window)new IntersectionObserver(function(e){api.visible=e[0].isIntersecting},{rootMargin:"120px"}).observe(box);
   var idleAt=0;
   if(opts.drag){

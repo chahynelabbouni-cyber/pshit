@@ -382,3 +382,16 @@ body.lock{overflow:hidden}
   .demo-stage{height:min(40vh,330px)}
   .sb .sname{order:1;min-height:0}.sb .swatches{order:2}.sb .btn[data-next]{order:3}
 }
+@media (max-width:860px){
+  .stage canvas{inset:auto;left:0;right:0;top:62px;height:50%}
+  .stage .glow{top:32%;left:50%;width:100vw;height:34vh}
+  .floor-line{display:none}
+  .ch{align-items:flex-end;padding:0 16px 40px}
+  .ch .in{max-width:100%;gap:11px}
+  .stat{font-size:clamp(3.4rem,16vw,4.8rem)}
+  .ch h1{font-size:clamp(2.1rem,9.5vw,2.7rem)}.ch h2{font-size:clamp(1.55rem,7vw,2.1rem)}
+  .ch p,.ch p.lede{font-size:.95rem;line-height:1.42}
+  .ch .btn{padding:.78rem 1.15rem;font-size:.95rem}
+  .ch .cta-row{display:flex;flex-wrap:wrap;gap:8px}
+  .scroll-cue{display:none}
+}

@@ -104,7 +104,7 @@ function showFrame(dt){
   var m=window.innerWidth<=860;
   hero.rot=lerp(A.rot,B.rot,e);var c=hero.cam;
   c.x=lerp(A.x,B.x,e);c.y=lerp(A.y,B.y,e);c.z=lerp(A.z,B.z,e);c.lx=lerp(A.lx,B.lx,e);c.ly=lerp(A.ly,B.ly,e);
-  if(m){c.ly-=2.6;c.z+=3.2}hero.off=m?0:lerp(A.off,B.off,e)*Math.min(1,(window.innerWidth/window.innerHeight)/1.6);hero.mobile=m;
+  if(m){c.ly=.15;c.y=Math.min(c.y,.45);c.z=9.8}hero.off=m?0:lerp(A.off,B.off,e)*Math.min(1,(window.innerWidth/window.innerHeight)/1.6);hero.mobile=m;
   var w=lerp(A.w,B.w,e),sc=hex(SCENTS[state.scent].c);
   var r=Math.round(lerp(lerp(A.c[0],B.c[0],e),sc[0],w*.6)),g=Math.round(lerp(lerp(A.c[1],B.c[1],e),sc[1],w*.6)),b=Math.round(lerp(lerp(A.c[2],B.c[2],e),sc[2],w*.6));
   var key=r+","+g+","+b;if(key!==showFrame.k){showFrame.k=key;showEl.style.setProperty("--acc-rgb",key);hero.setAccent(r,g,b)}
