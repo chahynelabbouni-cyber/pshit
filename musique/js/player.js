@@ -1,6 +1,7 @@
 // Moteur de lecture : deux lecteurs audio pour les fondus enchaînés entre morceaux,
 // file d'attente, aléatoire, répétition, écran de verrouillage (Media Session).
 import { db } from './db.js';
+import { YouTubeElement } from './sources.js';
 
 export const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -14,13 +15,14 @@ function shuffleArr(a) {
 }
 
 export class Player extends EventTarget {
-  constructor(getTrack, getCoverURL) {
+  constructor(getTrack, getCoverURL, ytHost) {
     super();
     this.getTrack = getTrack;
     this.getCoverURL = getCoverURL;
-    this.els = [new Audio(), new Audio()];
-    this.urls = [null, null];
-    this.ids = [null, null];
+    // 0-1 : fichiers locaux (deux lecteurs pour les fondus) · 2 : YouTube (lecteur officiel) · 3 : radios
+    this.els = [new Audio(), new Audio(), new YouTubeElement(ytHost), new Audio()];
+    this.urls = [null, null, null, null];
+    this.ids = [null, null, null, null];
     this.cur = 0;
     this.queue = [];
     this.original = null;
@@ -37,7 +39,7 @@ export class Player extends EventTarget {
     this.gain = 1;
 
     this.els.forEach((el, i) => {
-      el.preload = 'auto';
+      if (i !== 2) el.preload = i === 3 ? 'none' : 'auto';
       el.addEventListener('timeupdate', () => i === this.cur && this.onTime());
       el.addEventListener('ended', () => i === this.cur && this.onEnded());
       el.addEventListener('play', () => { if (i === this.cur) { this.emit('state'); this.setMSState('playing'); } });
@@ -53,7 +55,14 @@ export class Player extends EventTarget {
   }
 
   get el() { return this.els[this.cur]; }
-  get other() { return this.els[1 - this.cur]; }
+  get other() { return this.els[this.cur < 2 ? 1 - this.cur : 0]; }
+  get kind() { return this.cur === 2 ? 'yt' : this.cur === 3 ? 'radio' : 'local'; }
+  pauseOthers() { this.els.forEach((e, i) => { if (i !== this.cur && !e.paused) e.pause(); }); }
+  slotFor(t) {
+    if (t?.source === 'yt') return 2;
+    if (t?.source === 'radio') return 3;
+    return this.cur < 2 ? this.cur : 0;
+  }
   get currentId() { return this.queue[this.index] ?? null; }
   get current() { return this.currentId ? this.getTrack(this.currentId) : null; }
   get playing() { return !this.el.paused; }
@@ -63,6 +72,16 @@ export class Player extends EventTarget {
   emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
 
   async srcFor(slot, id) {
+    if (slot === 2) {
+      const t = this.getTrack(id);
+      if (this.ids[2] !== id) { await this.els[2].load(t.ytId, t.duration); this.ids[2] = id; }
+      return;
+    }
+    if (slot === 3) {
+      const t = this.getTrack(id);
+      if (this.ids[3] !== id) { this.els[3].src = t.url; this.ids[3] = id; }
+      return;
+    }
     if (this.ids[slot] === id && this.urls[slot]) return;
     const blob = await db.get('audio', id);
     if (!blob) throw new Error('Fichier introuvable');
@@ -105,7 +124,8 @@ export class Player extends EventTarget {
     this.cancelFade();
     const id = this.currentId;
     if (!id) return;
-    this.other.pause();
+    this.cur = this.slotFor(this.current);
+    this.pauseOthers();
     try {
       await this.srcFor(this.cur, id);
     } catch (e) {
@@ -133,7 +153,7 @@ export class Player extends EventTarget {
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 256;
       this.analyser.smoothingTimeConstant = 0.8;
-      this.els.forEach(el => this.ctx.createMediaElementSource(el).connect(this.analyser));
+      this.els.slice(0, 2).forEach(el => this.ctx.createMediaElementSource(el).connect(this.analyser));
       this.analyser.connect(this.ctx.destination);
       // Si le système suspend le moteur audio (écran éteint), on le relance pour ne pas couper la musique
       const wake = () => { if (this.ctx.state !== 'running' && this.playing) this.ctx.resume().catch(() => {}); };
@@ -288,7 +308,9 @@ export class Player extends EventTarget {
       this.emit('sleep');
     }
     const d = this.el.duration;
-    if (!this.crossfade || isIOS || this.fading || this.repeat === 'one' || this.sleepEndOfTrack || !d) return;
+    if (!this.crossfade || isIOS || this.fading || this.repeat === 'one' || this.sleepEndOfTrack || !d || !isFinite(d) || this.cur > 1) return;
+    const nt = this.getTrack(this.queue[this.nextIndex()]);
+    if (nt?.source) return; // pas de fondu vers YouTube / radio
     const remaining = d - this.el.currentTime;
     if (remaining <= this.crossfade && remaining > 0.3 && this.nextIndex() >= 0 && d > this.crossfade * 2) {
       this.startCrossfade(remaining);

@@ -4,6 +4,7 @@ import { Player, isIOS } from './player.js';
 import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js';
 import * as AI from './ai.js';
 import * as Voice from './voice.js';
+import * as Src from './sources.js';
 
 const BRAND = 'Maison Chahyn';
 
@@ -15,7 +16,7 @@ const S = {
   playlists: new Map(),
   covers: new Map(),       // coverId -> objectURL
   colors: loadJSON('onde.colors', {}),
-  settings: Object.assign({ name: 'Chahyn', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true }, loadJSON('onde.settings', {})),
+  settings: Object.assign({ name: 'Chahyn', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt' }, loadJSON('onde.settings', {})),
   mixes: {},
   chat: loadJSON('onde.chat', []),
   version: 0,
@@ -74,7 +75,8 @@ function memo(name, fn) {
   S.cache[name] = { v: S.version, val };
   return val;
 }
-const allTracks = () => memo('all', () => [...S.tracks.values()]);
+const allTracks = () => memo('all', () => [...S.tracks.values()].filter(t => t.source !== 'radio' && (!t.source || t.saved)));
+const savedRadios = () => memo('radios', () => [...S.tracks.values()].filter(t => t.source === 'radio' && t.saved).sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0)));
 
 const albums = () => memo('albums', () => {
   const m = new Map();
@@ -157,6 +159,7 @@ async function computeColor(coverId) {
   if (!url) return null;
   try {
     const img = new Image();
+    img.crossOrigin = 'anonymous';
     img.src = url;
     await img.decode();
     const c = document.createElement('canvas');
@@ -205,7 +208,7 @@ async function tint(el, coverId, seed, prop = '--tint') {
 // ======================================================================
 // Lecteur
 // ======================================================================
-const player = new Player(id => S.tracks.get(id), async t => coverURL(t.coverId));
+const player = new Player(id => S.tracks.get(id), async t => coverURL(t.coverId), $('#ytbox .yt-host'));
 player.crossfade = S.settings.crossfade;
 player.visualizer = S.settings.visualizer;
 
@@ -217,7 +220,7 @@ player.addEventListener('played', async e => {
   await db.put('tracks', t);
 });
 let listen = { id: null, max: 0 };
-player.addEventListener('track', () => {
+player.addEventListener('track', () => { setTimeout(placeYT, 30); np.classList.toggle('live', player.current?.source === 'radio');
   if (listen.id && listen.id !== player.currentId && listen.max > 0.02) {
     AI.logListen(listen.id, { skipped: listen.max < 0.35, ratio: Math.min(1, listen.max) });
     S.mixes.moment = null;
@@ -393,7 +396,8 @@ function openNP() {
   updateTime();
   updateModes();
   updateSleep();
-  pushOverlay('np', () => { S.npOpen = false; np.classList.remove('open'); np.style.transform = ''; np.setAttribute('aria-hidden', 'true'); stopViz(); });
+  pushOverlay('np', () => { S.npOpen = false; np.classList.remove('open'); np.style.transform = ''; np.setAttribute('aria-hidden', 'true'); stopViz(); placeYT(); });
+  setTimeout(placeYT, 520);
   if (player.playing) startViz();
 }
 const closeNP = () => { if (S.npOpen) popOverlay(); };
@@ -583,6 +587,7 @@ function toast(msg) {
 async function toggleLike(t) {
   if (!t) return;
   t.liked = !t.liked;
+  if (t.liked && t.source) t.saved = true;
   t.likedAt = t.liked ? Date.now() : 0;
   bump();
   await db.put('tracks', t);
@@ -608,10 +613,12 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     { id: 'pl', icon: 'list-add', label: 'Ajouter à une playlist' },
     inPlaylist && { id: 'unpl', icon: 'close', label: 'Retirer de cette playlist' },
     t.album && { id: 'album', icon: 'album', label: 'Voir l\'album' },
-    { id: 'artist', icon: 'user', label: 'Voir l\'artiste' },
-    { id: 'lyrics', icon: 'mic', label: t.lyrics ? 'Voir / modifier les paroles' : 'Ajouter les paroles' },
+    (!t.source || t.saved) && t.source !== 'radio' && { id: 'artist', icon: 'user', label: 'Voir l\'artiste' },
+    t.source !== 'radio' && { id: 'lyrics', icon: 'mic', label: t.lyrics ? 'Voir / modifier les paroles' : 'Ajouter les paroles' },
+    t.source && !t.saved && { id: 'save', icon: 'plus', label: t.source === 'radio' ? 'Ajouter à mes radios' : 'Ajouter à ma bibliothèque' },
     { id: 'edit', icon: 'edit', label: 'Modifier les infos' },
-    { id: 'del', icon: 'trash', label: 'Supprimer du téléphone', danger: true },
+    t.source && t.saved && { id: 'unsave', icon: 'close', label: t.source === 'radio' ? 'Retirer de mes radios' : 'Retirer de ma bibliothèque', danger: true },
+    !t.source && { id: 'del', icon: 'trash', label: 'Supprimer du téléphone', danger: true },
   ]), {
     like: () => { toggleLike(t); closeSheet(); },
     next: () => { player.addNext(t.id); toast('Sera lu ensuite'); closeSheet(); },
@@ -628,6 +635,8 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     artist: async () => { await closeAllOverlays(); goto('#/artist/' + encodeURIComponent(artistOf(t))); },
     edit: () => editSheet(t),
     lyrics: () => lyricsSheet(t),
+    save: async () => { t.saved = true; await db.put('tracks', t); bump(); await closeSheet(); toast('Ajouté'); render(true); },
+    unsave: async () => { t.saved = false; t.liked = false; await db.put('tracks', t); bump(); await closeSheet(); toast('Retiré'); render(true); },
     del: () => confirmSheet(`Supprimer « ${t.title} » ?`, 'Le fichier sera effacé de l\'application.', 'Supprimer', async () => {
       await deleteTracks([t.id]);
       toast('Titre supprimé');
@@ -676,6 +685,7 @@ function playlistPicker(ids) {
       const p = S.playlists.get(b.dataset.id);
       const add = ids.filter(id => !p.trackIds.includes(id));
       p.trackIds.push(...add);
+      for (const id of add) { const x = S.tracks.get(id); if (x?.source && !x.saved) { x.saved = true; await db.put('tracks', x); } }
       p.updatedAt = Date.now();
       await db.put('playlists', p); bump();
       await closeSheet();
@@ -941,6 +951,7 @@ document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer?
 // ======================================================================
 async function loadLyrics(t) {
   S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 };
+  if (t.source === 'radio') { S.lyr = { id: t.id, parsed: null }; renderLyrics(); return; }
   const stale = !t.lyricsChecked || Date.now() - t.lyricsChecked > 7 * 864e5;
   if (!S.lyr.parsed && S.settings.onlineLyrics && stale && navigator.onLine !== false) {
     S.lyr.loading = true;
@@ -999,7 +1010,8 @@ function openLyrics() {
   if (S.lyrOpen) return;
   S.lyrOpen = true;
   np.classList.add('lyr-open');
-  pushOverlay('lyr', () => { S.lyrOpen = false; np.classList.remove('lyr-open'); });
+  pushOverlay('lyr', () => { S.lyrOpen = false; np.classList.remove('lyr-open'); setTimeout(placeYT, 500); });
+  placeYT();
   if (S.lyr) { S.lyr.idx = -2; syncLyrics(true); }
 }
 np.addEventListener('click', e => {
@@ -1069,7 +1081,7 @@ async function attachLyricsFiles(files) {
 const anaQ = [];
 let analyzing = false;
 function queueAnalysis() {
-  for (const t of allTracksRaw()) if (!t.features && !t.featuresFailed && !anaQ.includes(t)) anaQ.push(t);
+  for (const t of allTracksRaw()) if (!t.source && !t.features && !t.featuresFailed && !anaQ.includes(t)) anaQ.push(t);
   runAnalysis();
 }
 async function runAnalysis() {
@@ -1182,11 +1194,24 @@ function afterAI(view) {
 async function aiSend(text, { navigate = true } = {}) {
   if (S.aiBusy || !text) return null;
   const tracks = allTracks();
-  if (!tracks.length) { toast('Importe d\'abord ta musique'); return { reply: 'Importe d\'abord ta musique pour que je puisse t\'aider.' }; }
+  if (!tracks.length && !S.settings.ytKey && !quickCommand(text)) { toast('Ajoute ta clé YouTube ou importe ta musique'); return { reply: 'Ajoute ta clé YouTube dans les réglages, ou importe ta musique, pour que je puisse t\'aider.' }; }
   if (navigate && S.route?.name !== 'ai') { S.pendingFwd = true; goto('#/ai'); await new Promise(r => setTimeout(r, 60)); }
   S.chat.push({ role: 'user', text });
-  // Commandes directes (pause, suivant, « joue … »)
-  const quick = quickCommand(text);
+  // Commandes directes (pause, suivant, « joue … »), puis YouTube si le titre n'est pas dans la bibliothèque
+  let quick = quickCommand(text);
+  if (!quick && S.settings.ytKey) {
+    const m = norm(text).match(/^(?:joue|jouer|mets|met|mais|lance|ecoute|play)\s+(?:moi\s+)?(.+)$/);
+    if (m && !/(pour|ambiance|truc|quelque chose|style|mix|playlist|genre|radio)/.test(m[1])) {
+      try {
+        const res = await Src.ytSearch(S.settings.ytKey, text.replace(/^\s*\S+\s+(moi\s+)?/i, ''), 10);
+        if (res.length) {
+          const ts = res.map(x => remoteTrack(x, 'yt'));
+          playIds(ts.map(t => t.id), 0, { context: { label: 'YouTube' } });
+          quick = `Je lance « ${ts[0].title} » de ${ts[0].artist} sur YouTube.`;
+        }
+      } catch { /* on laisse le Concierge répondre */ }
+    }
+  }
   if (quick) {
     S.chat.push({ role: 'assistant', text: quick });
     saveJSON('onde.chat', S.chat);
@@ -1300,7 +1325,7 @@ async function startVoice({ navigate = false } = {}) {
     return;
   }
   if (S.voiceOn) { Voice.stopListening(); return; }
-  if (!allTracks().length) return toast('Importe d\'abord ta musique');
+  if (!allTracks().length && !S.settings.ytKey) return toast('Ajoute ta clé YouTube (Réglages) ou importe ta musique');
   S.voiceOn = true;
   Voice.stopSpeaking();
   const said = $('.v-said', vbox), ans = $('.v-answer', vbox);
@@ -1344,6 +1369,143 @@ function closeVoice() {
 $('.v-close', vbox).addEventListener('click', closeVoice);
 $('.v-orb', vbox).addEventListener('click', () => Voice.stopListening());
 
+
+// ======================================================================
+// Sources en ligne : YouTube (lecteur officiel) & radios
+// ======================================================================
+const ytbox = $('#ytbox');
+function placeYT() {
+  const on = player.kind === 'yt' && !!player.current;
+  ytbox.classList.toggle('on', on);
+  ytbox.classList.toggle('over', !!S.npOpen);
+  if (!on) return;
+  if (S.npOpen && !S.lyrOpen) {
+    const r = $('.np-cover-track', np).getBoundingClientRect();
+    const h = r.width; // zone carrée de la pochette
+    Object.assign(ytbox.style, { left: r.left + 'px', top: (r.top + (r.height - h) / 2) + 'px', width: r.width + 'px', height: h + 'px' });
+    ytbox.classList.add('in-np');
+  } else {
+    ytbox.classList.remove('in-np');
+    Object.assign(ytbox.style, { left: '', top: '', width: '', height: '' });
+  }
+}
+window.addEventListener('resize', () => placeYT());
+$('.yt-shield', ytbox).addEventListener('click', () => { if (!S.npOpen) openNP(); else player.toggle(); });
+
+function remoteTrack(item, source) {
+  const id = source === 'yt' ? 'yt-' + item.ytId : 'rd-' + item.radioId;
+  let t = S.tracks.get(id);
+  if (t) return t;
+  const coverId = item.thumb ? 'u:' + item.thumb : null;
+  if (coverId) S.covers.set(coverId, item.thumb);
+  t = {
+    id, source, title: item.title || 'Sans titre', artist: item.artist || '', album: '', albumArtist: '', genre: source === 'radio' ? 'Radio' : '',
+    duration: item.duration || (source === 'radio' ? 0 : 0), coverId, thumb: item.thumb || '',
+    ytId: item.ytId, url: item.url, addedAt: Date.now(), plays: 0, lastPlayed: 0, liked: false, saved: false, lyrics: '',
+  };
+  S.tracks.set(id, t);
+  return t;
+}
+
+function onlineRow(t, i, listKey) {
+  const live = t.source === 'radio';
+  return `<div class="row ${t.id === player.currentId ? 'playing' : ''}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
+    ${trackCover(t, live ? 'radio-cv' : 'wide')}
+    <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${live ? '<span class="live-dot">EN DIRECT</span> ' : '<span class="src-yt">YouTube</span> '}${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}</small></div>
+    <button class="ib sm more" aria-label="Options">${icon('more')}</button>
+  </div>`;
+}
+
+let searchSeq = 0;
+async function onlineSearch(q) {
+  const box = $('#results');
+  if (!box) return;
+  const seq = ++searchSeq;
+  const src = S.settings.searchSrc;
+  const show = html => { if (seq === searchSeq && $('#results')) $('#results').innerHTML = html; };
+  q = (q || '').trim();
+  try {
+    if (src === 'radio') {
+      if (!q) {
+        show(`${radioFavs()}<h2 class="sec-title">Genres</h2><div class="browse">${Src.RADIO_GENRES.map(([tag, l], i) => `<button class="browse-tile" data-act="radio-tag" data-tag="${esc(tag)}" data-label="${esc(l)}" style="--h:${placeholderHue(tag)};--d:${i * 25}ms"><b>${esc(l)}</b>${icon('radio')}</button>`).join('')}</div>
+          <h2 class="sec-title">Les plus écoutées en France</h2><div class="list" id="top-radios"><div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div></div>`);
+        const top = await Src.radioTop('FR', 25);
+        if (seq !== searchSeq) return;
+        const ts = top.map(x => remoteTrack(x, 'radio'));
+        const key = registerList('radios-top', ts.map(t => t.id), 'Radios');
+        $('#top-radios').innerHTML = ts.map((t, i) => onlineRow(t, i, key)).join('');
+        return;
+      }
+      show('<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>');
+      const res = await Src.radioSearch(q);
+      const ts = res.map(x => remoteTrack(x, 'radio'));
+      const key = registerList('radios-q', ts.map(t => t.id), 'Radios');
+      return show(ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : `<div class="no-res"><b>Aucune radio trouvée</b></div>`);
+    }
+    // YouTube
+    const link = Src.parseYouTubeUrl(q);
+    if (link?.list && S.settings.ytKey) {
+      show('<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span><p>Import de la playlist…</p></div>');
+      const pl = await Src.ytPlaylist(S.settings.ytKey, link.list);
+      const ts = pl.tracks.map(x => { const t = remoteTrack(x, 'yt'); t.saved = true; db.put('tracks', t); return t; });
+      const p = { id: uid(), name: pl.name, trackIds: ts.map(t => t.id), createdAt: Date.now(), updatedAt: Date.now() };
+      S.playlists.set(p.id, p); await db.put('playlists', p); bump();
+      toast(`Playlist « ${pl.name} » importée : ${plural(ts.length, 'titre')}`);
+      S.pendingFwd = true; return goto('#/playlist/' + p.id);
+    }
+    if (link?.video) {
+      const info = S.settings.ytKey ? (await Src.ytVideos(S.settings.ytKey, [link.video]))[0] : await Src.ytInfoNoKey(link.video);
+      const t = remoteTrack(info || { ytId: link.video, title: 'Vidéo YouTube' }, 'yt');
+      const key = registerList('yt-link', [t.id], t.title);
+      show(`<div class="list">${onlineRow(t, 0, key)}</div>${link.list ? '<p class="hint">Ajoute ta clé YouTube dans les Réglages pour importer la playlist entière.</p>' : ''}`);
+      playIds([t.id], 0, { context: { label: 'YouTube' } });
+      return;
+    }
+    if (!S.settings.ytKey) {
+      return show(`<div class="yt-nokey">${icon('search')}<b>Recherche YouTube</b>
+        <p>Pour chercher n'importe quel son, ajoute ta clé YouTube gratuite (5 min, une seule fois).</p>
+        <button class="btn primary" data-act="yt-key">Ajouter ma clé</button>
+        <p class="hint">Déjà possible sans clé : colle un lien YouTube (partager → copier le lien) dans la barre de recherche.</p></div>
+        ${savedOnline()}`);
+    }
+    if (!q) return show(savedOnline() || `<div class="no-res"><b>Cherche un artiste ou un titre</b><p>Tout YouTube est là.</p></div>`);
+    show('<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>');
+    const res = await Src.ytSearch(S.settings.ytKey, q);
+    const ts = res.map(x => remoteTrack(x, 'yt'));
+    const key = registerList('yt-q', ts.map(t => t.id), `YouTube « ${q} »`);
+    show(ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : `<div class="no-res"><b>Aucun résultat</b></div>`);
+  } catch (e) {
+    show(`<div class="no-res"><b>Impossible de charger</b><p>${esc(e.message || 'Vérifie ta connexion.')}</p></div>`);
+  }
+}
+
+function savedOnline() {
+  const ts = allTracks().filter(t => t.source === 'yt').sort((a, b) => (b.lastPlayed || b.addedAt) - (a.lastPlayed || a.addedAt)).slice(0, 30);
+  if (!ts.length) return '';
+  const key = registerList('yt-saved', ts.map(t => t.id), 'YouTube');
+  return `<h2 class="sec-title">Tes sons YouTube</h2><div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>`;
+}
+function radioFavs() {
+  const ts = savedRadios();
+  if (!ts.length) return '';
+  const key = registerList('radios-fav', ts.map(t => t.id), 'Mes radios');
+  return `<h2 class="sec-title">Mes radios</h2><div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>`;
+}
+
+async function showRadios(tag, label) {
+  const seq = ++searchSeq;
+  $('#results').innerHTML = `<h2 class="sec-title">${esc(label)}</h2><div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>`;
+  try {
+    const res = await Src.radioByTag(tag);
+    if (seq !== searchSeq) return;
+    const ts = res.map(x => remoteTrack(x, 'radio'));
+    const key = registerList('radios-' + tag, ts.map(t => t.id), 'Radio ' + label);
+    $('#results').innerHTML = `<button class="link back-link" data-act="src" data-src="radio">${icon('back')} Tous les genres</button><h2 class="sec-title">${esc(label)}</h2>` +
+      (ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : '<div class="no-res"><b>Aucune radio</b></div>');
+  } catch (e) {
+    $('#results').innerHTML = `<div class="no-res"><b>Radios indisponibles</b><p>${esc(e.message)}</p></div>`;
+  }
+}
 // ======================================================================
 // Vues
 // ======================================================================
@@ -1382,8 +1544,12 @@ function emptyState() {
   return `<div class="empty">
     <div class="empty-art"><div class="disc"></div><span class="eq big"><i></i><i></i><i></i><i></i></span></div>
     <h2>Ta musique, chez toi.</h2>
-    <p>Importe les fichiers audio de ton téléphone. Pas de pub, pas de compte, pas d'internet : tout reste sur ton appareil.</p>
-    <button class="btn primary" data-act="import">${icon('import')} Importer ma musique</button>
+    <p>Écoute directement YouTube et des milliers de radios, ou importe les fichiers de ton téléphone pour les avoir hors ligne.</p>
+    <div class="empty-btns">
+      <a class="btn primary" href="#/search?src=yt">${icon('search')} Chercher sur YouTube</a>
+      <a class="btn ghost" href="#/search?src=radio">${icon('radio')} Écouter la radio</a>
+      <button class="btn ghost" data-act="import">${icon('import')} Importer mes fichiers</button>
+    </div>
   </div>`;
 }
 
@@ -1439,15 +1605,19 @@ function viewHome() {
   `;
 }
 
-function viewSearch() {
+function viewSearch(params) {
+  if (params?.get('src')) S.settings.searchSrc = params.get('src');
+  const src = S.settings.searchSrc || 'yt';
+  const ph = { yt: 'Artiste, titre, ou colle un lien YouTube', radio: 'Nom d\'une radio (Skyrock, NRJ…)', lib: 'Dans ta bibliothèque…' }[src];
   return `<header class="page-head"><h1>Rechercher</h1></header>
-    <div class="search-sticky"><div class="search-box">${icon('search')}<input type="search" id="q" placeholder="Titres, artistes, albums…" value="${esc(S.searchQ)}" autocomplete="off" enterkeyhint="search"><button class="ib sm clear-q" aria-label="Effacer" ${S.searchQ ? '' : 'hidden'}>${icon('close')}</button></div></div>
-    <div id="results">${searchResults(S.searchQ)}</div>`;
+    <div class="search-sticky"><div class="search-box">${icon('search')}<input type="search" id="q" placeholder="${ph}" value="${esc(S.searchQ)}" autocomplete="off" enterkeyhint="search"><button class="ib sm clear-q" aria-label="Effacer" ${S.searchQ ? '' : 'hidden'}>${icon('close')}</button></div>
+    <div class="chips src-chips">${[['yt', 'YouTube'], ['radio', 'Radios'], ['lib', 'Ma bibliothèque']].map(([k, l]) => `<button class="chip ${k === src ? 'on' : ''}" data-act="src" data-src="${k}">${l}</button>`).join('')}</div></div>
+    <div id="results">${src === 'lib' ? searchResults(S.searchQ) : '<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>'}</div>`;
 }
 
 function searchResults(q) {
   const nq = norm(q.trim());
-  if (!allTracks().length) return emptyState();
+  if (!allTracks().length) return `<div class="no-res"><b>Ta bibliothèque est vide</b><p>Cherche sur YouTube ou importe tes fichiers.</p></div>`;
   if (!nq) {
     const genres = new Map();
     for (const t of allTracks()) if (t.genre) genres.set(t.genre, (genres.get(t.genre) || 0) + 1);
@@ -1606,6 +1776,16 @@ function viewSettings() {
     <section class="set-group"><h3>Toi</h3>
       <label class="set-item"><div><b>Ton prénom</b><small>Pour que l'app te parle à toi</small></div><input class="set-input" id="set-name" value="${esc(S.settings.name)}" maxlength="30" autocomplete="given-name"></label>
     </section>
+    <section class="set-group"><h3>YouTube</h3>
+      <label class="set-item col"><div><b>Clé YouTube (gratuite)</b><small>Pour chercher sur YouTube et importer tes playlists. Sans clé, tu peux déjà coller un lien YouTube dans la recherche.</small></div><input class="set-input wide" id="set-yt" type="password" value="${esc(S.settings.ytKey)}" placeholder="AIza…" autocomplete="off"></label>
+      <details class="set-help"><summary>Comment obtenir ma clé (5 min)</summary><ol>
+        <li>Va sur <b>console.cloud.google.com</b> et connecte-toi avec ton compte Google.</li>
+        <li>Crée un projet (nom au choix).</li>
+        <li>Menu « API et services » → « Bibliothèque » → cherche <b>YouTube Data API v3</b> → <b>Activer</b>.</li>
+        <li>« Identifiants » → « Créer des identifiants » → <b>Clé API</b>. Copie-la ici.</li>
+        <li>Conseillé : restreins la clé à « YouTube Data API v3 ».</li>
+      </ol><p>Gratuit, environ 100 recherches par jour. La clé reste sur ton téléphone.</p></details>
+    </section>
     <section class="set-group"><h3>Paroles</h3>
       <label class="set-item toggle"><div><b>Chercher les paroles en ligne</b><small>Paroles synchronisées gratuites (LRCLIB) quand ton fichier n'en contient pas. Seuls le titre et l'artiste sont envoyés.</small></div><input type="checkbox" id="set-lyr" ${S.settings.onlineLyrics ? 'checked' : ''}><span class="sw"></span></label>
       <p class="set-note">Tu peux aussi importer des fichiers <b>.lrc</b> avec le même nom que tes musiques, ou coller les paroles depuis le menu ⋯ d'un titre.</p>
@@ -1666,7 +1846,7 @@ function render(keepScroll = false) {
   S.lists = {};
   let html;
   switch (r.name) {
-    case 'search': html = viewSearch(); break;
+    case 'search': html = viewSearch(r.params); break;
     case 'ai': html = viewAI(); break;
     case 'mix': html = viewMix(r.arg); break;
     case 'library': html = viewLibrary(r.params); break;
@@ -1711,17 +1891,22 @@ function afterRender(view, r) {
   if (r.name === 'search') {
     const q = $('#q', view);
     const clr = $('.clear-q', view);
+    let deb;
     q.addEventListener('input', () => {
       S.searchQ = q.value;
       clr.hidden = !q.value;
-      S.lists = {};
-      $('#results').innerHTML = searchResults(q.value);
+      if (S.settings.searchSrc === 'lib') { S.lists = {}; $('#results').innerHTML = searchResults(q.value); return; }
+      clearTimeout(deb);
+      deb = setTimeout(() => onlineSearch(q.value), Src.parseYouTubeUrl(q.value) ? 0 : 650);
     });
+    q.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(deb); onlineSearch(q.value); q.blur(); } });
+    if (S.settings.searchSrc !== 'lib') onlineSearch(S.searchQ);
     clr.addEventListener('click', () => { q.value = ''; q.dispatchEvent(new Event('input')); q.focus(); });
   }
   if (r.name === 'ai') afterAI(view);
   if (r.name === 'settings') {
     $('#set-name', view).addEventListener('change', e => { S.settings.name = e.target.value.trim(); saveSettings(); toast('Enchanté, ' + (S.settings.name || 'toi') + ' ✦'); });
+    $('#set-yt', view).addEventListener('change', e => { S.settings.ytKey = e.target.value.trim(); saveSettings(); toast(S.settings.ytKey ? 'Clé YouTube enregistrée ✦' : 'Clé supprimée'); });
     $('#set-voice', view).addEventListener('change', e => { S.settings.voiceReply = e.target.checked; saveSettings(); });
     $('#set-lyr', view).addEventListener('change', e => { S.settings.onlineLyrics = e.target.checked; saveSettings(); });
     $('#set-key', view).addEventListener('change', e => { S.settings.apiKey = e.target.value.trim(); saveSettings(); toast(S.settings.apiKey ? 'Clé enregistrée sur ce téléphone' : 'Clé supprimée'); });
@@ -1825,6 +2010,9 @@ document.addEventListener('click', e => {
       case 'mix-save': return saveMixAsPlaylist(S.mixes[act.dataset.key]);
       case 'ai-send': return aiSend(act.dataset.text);
       case 'voice': return startVoice({ navigate: S.route?.name === 'ai' });
+      case 'src': S.settings.searchSrc = act.dataset.src; saveSettings(); return render(true);
+      case 'radio-tag': return showRadios(act.dataset.tag, act.dataset.label);
+      case 'yt-key': S.pendingFwd = true; return goto('#/settings');
       case 'ai-clear': S.chat = []; saveJSON('onde.chat', S.chat); return render(true);
       case 'ai-play': { const m = S.mixes[act.dataset.key]; if (m?.tracks.length) playIds(m.tracks.map(t => t.id), 0, { context: { label: m.name, route: '#/mix/' + m.key } }); return; }
     }
@@ -1900,7 +2088,7 @@ async function loadCovers() {
 async function boot() {
   try {
     const [tracks, pls] = await Promise.all([db.all('tracks'), db.all('playlists')]);
-    tracks.forEach(t => S.tracks.set(t.id, t));
+    tracks.forEach(t => { S.tracks.set(t.id, t); if (t.thumb) S.covers.set(t.coverId, t.thumb); });
     pls.forEach(p => S.playlists.set(p.id, p));
     await loadCovers();
   } catch (e) {
