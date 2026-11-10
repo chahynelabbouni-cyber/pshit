@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 140" role="img" aria-label="Le Dernier Pshit">
+<defs>
+<linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6df8f"/><stop offset=".5" stop-color="#d9a93a"/><stop offset="1" stop-color="#9c6d17"/></linearGradient>
+<linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7a3cff"/><stop offset=".6" stop-color="#4a1fb8"/><stop offset="1" stop-color="#220a66"/></linearGradient>
+<linearGradient id="s" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+</defs>
+<rect x="38" y="4" width="44" height="22" rx="5" fill="url(#g)"/>
+<rect x="49" y="26" width="22" height="10" rx="2" fill="url(#g)"/>
+<rect x="20" y="36" width="80" height="84" rx="14" fill="url(#v)" stroke="url(#g)" stroke-width="2.5"/>
+<path d="M28 46h22v66h-12q-10 0-10-10z" fill="url(#s)"/>
+<path d="M4 104C30 88 56 112 80 100C98 91 108 82 118 70C108 96 90 116 66 118C44 120 24 102 4 104Z" fill="url(#g)"/>
+<path d="M4 58C20 50 40 50 58 58" fill="none" stroke="url(#g)" stroke-width="2.5" stroke-linecap="round" opacity=".0"/>
+</svg>

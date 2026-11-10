@@ -48,7 +48,7 @@ code{font-family:var(--f-ui);font-weight:800;color:var(--gold-pale);letter-spaci
 .fallback3d{display:none;position:absolute;inset:0;z-index:2;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-family:var(--f-ui);font-size:.9rem;padding:24px}
 .no-webgl .fallback3d{display:flex}.no-webgl canvas{display:none}
 .floor-line{position:absolute;z-index:1;left:0;right:0;bottom:0;height:22%;background:linear-gradient(180deg,transparent,rgba(0,0,0,.6));pointer-events:none}
-.ghost{position:absolute;z-index:1;left:0;right:0;top:50%;text-align:center;pointer-events:none;user-select:none;font-family:var(--f-ui);font-weight:800;line-height:.8;letter-spacing:-.05em;font-size:clamp(9rem,31vw,31rem);transform:translateY(-58%)}
+.ghost{position:absolute;z-index:1;left:0;right:0;top:55%;text-align:center;pointer-events:none;user-select:none;font-family:var(--f-ui);font-weight:800;line-height:.8;letter-spacing:-.05em;font-size:clamp(7rem,min(30vw,40vh),26rem);transform:translateY(-50%)}
 .ghost span{display:inline-block;padding-inline:.01em;background:linear-gradient(180deg,rgba(255,255,255,.13) 6%,rgba(255,255,255,.04) 50%,rgba(var(--acc-rgb),.4) 112%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
 .chs{position:absolute;inset:0;z-index:4;pointer-events:none}
 .ch{position:absolute;inset:0;display:flex;align-items:center;visibility:hidden;opacity:0;transform:translateY(34px);transition:opacity .25s ease,transform .25s ease,visibility 0s .25s;padding:88px max(16px,env(safe-area-inset-right,0px)) 40px max(16px,5vw)}
@@ -362,3 +362,23 @@ body.lock{overflow:hidden}
 .sm-list li em{font-family:inherit}.sm-list li b,.sm-list li small{font-family:inherit}
 
 .maquette{grid-template-columns:1fr}.maquette .lead{max-width:62ch}
+@media (max-width:860px){.ghost{top:24%;font-size:clamp(5rem,25vw,9rem);transform:translateY(-50%)}}
+
+.foot-logo{display:inline-flex;align-items:center;gap:14px;height:auto;width:auto;font-size:1.5rem}.foot-logo img{height:54px;width:auto}.foot-logo b{font-weight:800}
+.brand .mark{height:38px;width:auto}
+@media (max-width:860px){
+  .demo{display:flex;flex-direction:column;gap:14px;align-items:stretch}
+  .demo-stage{order:-1;position:sticky;top:64px;z-index:6;height:min(44vh,360px);box-shadow:0 14px 30px rgba(8,5,20,.7)}
+  .steps{gap:6px;margin-bottom:18px}
+  .steps button{padding:10px 6px;align-items:center;text-align:center;font-size:.74rem;min-height:56px;justify-content:center}
+  .steps button b{font-size:1rem}
+  .swatches{grid-template-columns:repeat(4,1fr);gap:10px;max-width:none}
+  .swatches button{border-radius:14px;min-height:64px}
+  .sb .btn{width:100%;justify-content:center;min-height:52px}
+  .sb p{max-width:none}
+}
+@media (max-width:860px){
+  .ghost{display:none}
+  .demo-stage{height:min(40vh,330px)}
+  .sb .sname{order:1;min-height:0}.sb .swatches{order:2}.sb .btn[data-next]{order:3}
+}
