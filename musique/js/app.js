@@ -1,10 +1,10 @@
-import { db } from './db.js';
-import { readTags } from './tags.js';
-import { Player, isIOS } from './player.js';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js';
-import * as AI from './ai.js';
-import * as Voice from './voice.js';
-import * as Src from './sources.js';
+import { db } from './db.js?v=6';
+import { readTags } from './tags.js?v=6';
+import { Player, isIOS } from './player.js?v=6';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=6';
+import * as AI from './ai.js?v=6';
+import * as Voice from './voice.js?v=6';
+import * as Src from './sources.js?v=6';
 
 const BRAND = 'Maison Chahyn';
 

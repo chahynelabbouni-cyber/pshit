@@ -1,8 +1,9 @@
 // Service worker : l'application fonctionne entièrement hors connexion.
-const CACHE = 'maison-chahyn-v5';
+const CACHE = 'maison-chahyn-v6';
+const V = '?v=6';
 const SHELL = [
-  './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/app.js', 'js/db.js', 'js/tags.js', 'js/player.js', 'js/lyrics.js', 'js/ai.js', 'js/voice.js', 'js/sources.js',
+  './', 'index.html', 'manifest.webmanifest', 'css/app.css' + V,
+  ...['app', 'db', 'tags', 'player', 'lyrics', 'ai', 'voice', 'sources'].map(f => `js/${f}.js${V}`),
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
@@ -29,6 +30,6 @@ self.addEventListener('fetch', e => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
         return res;
       })
-      .catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('index.html')))
+      .catch(() => caches.match(req).then(r => r || caches.match('index.html')))
   );
 });
