@@ -580,3 +580,45 @@ body.has-mini .ai-foot { bottom: calc(var(--tabs-h) + var(--mini-h) + var(--safe
 .v-answer:not(:empty) { animation: rise .4s var(--ease); }
 .v-hint { position: absolute; bottom: calc(var(--safe-b) + 28px); left: 24px; right: 24px; margin: 0; color: var(--muted); font-size: 13px; }
 .voice:not(.listening) .v-hint { opacity: 0; }
+
+/* =================== YouTube & radios =================== */
+.src-chips { margin: 10px -16px 0; }
+.src-chips .chip { border: 1px solid var(--line); }
+.online-loading { text-align: center; padding: 40px 0; color: var(--gold); }
+.online-loading p { color: var(--muted); }
+.cv.wide { width: 64px !important; aspect-ratio: 16/9; border-radius: 6px; }
+.row > .cv.wide { width: 74px !important; }
+.cv.radio-cv { background: radial-gradient(circle at 30% 25%, #2a2213, #0d0b08); }
+.cv.radio-cv img { object-fit: contain; padding: 6px; }
+.src-yt { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .04em; color: #ff5a5a; margin-right: 2px; }
+.live-dot { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 800; letter-spacing: .06em; color: #ff5a5a; }
+.live-dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #ff3b3b; animation: dot 1.4s infinite; }
+.yt-nokey { text-align: center; padding: 30px 12px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.yt-nokey > svg { width: 40px; height: 40px; color: var(--gold); }
+.yt-nokey b { font-family: var(--serif); font-size: 22px; font-weight: 500; }
+.yt-nokey p { color: var(--muted); margin: 0; max-width: 340px; }
+.hint { color: var(--muted); font-size: 13px; text-align: center; }
+.browse-tile { text-align: left; color: var(--text); }
+.browse-tile > svg { position: absolute; right: 10px; bottom: 10px; width: 34px; height: 34px; color: var(--gold); opacity: .7; }
+.back-link { margin-top: 10px; }
+.empty-btns { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 300px; }
+.set-help { background: var(--bg2); border-radius: 12px; padding: 12px 14px; color: var(--muted); font-size: 14px; }
+.set-help summary { color: var(--gold); font-weight: 700; cursor: pointer; }
+.set-help ol { padding-left: 20px; line-height: 1.6; }
+.set-help b { color: var(--text); }
+
+/* Lecteur YouTube officiel : toujours visible (exigence YouTube) */
+.ytbox { position: fixed; z-index: 22; right: 12px; bottom: calc(var(--tabs-h) + var(--mini-h) + var(--safe-b) + 12px); width: 200px; height: 200px; border-radius: 12px; overflow: hidden; background: #000; box-shadow: 0 16px 40px rgba(0,0,0,.6), 0 0 0 1px rgba(217,178,106,.35); opacity: 0; pointer-events: none; transform: scale(.8); transition: opacity .3s, transform .4s var(--spring), left .45s var(--ease), top .45s var(--ease), width .45s var(--ease), height .45s var(--ease); }
+.ytbox.on { opacity: 1; pointer-events: auto; transform: none; }
+.ytbox.over { z-index: 45; }
+.ytbox.in-np { z-index: 45; border-radius: 8px; box-shadow: 0 30px 70px -18px rgba(0,0,0,.8); }
+.yt-host, .yt-host iframe { position: absolute; inset: 0; width: 100% !important; height: 100% !important; border: 0; }
+.yt-shield { position: absolute; inset: 0; cursor: pointer; }
+.yt-badge { position: absolute; left: 8px; top: 8px; font-size: 10px; font-weight: 800; background: rgba(0,0,0,.6); color: #fff; padding: 2px 6px; border-radius: 4px; pointer-events: none; }
+.np.lyr-open ~ .ytbox, body:has(#sheet:not([hidden])) .ytbox:not(.in-np) { }
+.np-live { display: none; margin-top: 16px; text-align: center; color: var(--muted); font-size: 13px; }
+.np.live .np-live { display: block; }
+.np.live .np-seek, .np.live .np-shuffle, .np.live .np-repeat { visibility: hidden; }
+.np.live .np-seek { height: 8px; overflow: hidden; }
+
+.np.live .np-lyr-btn { visibility: hidden; }

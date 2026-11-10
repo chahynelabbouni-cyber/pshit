@@ -3,6 +3,8 @@
 Le lecteur de musique personnel de Chahyn : noir & or, sans pub, hors connexion.
 
 ## Ce qu'il y a dedans
+- **YouTube intégré** (lecteur officiel) : recherche dans l'app avec une clé gratuite (Réglages), ou colle un lien. Import de playlists YouTube. Les sons peuvent être likés et ajoutés à tes playlists.
+- **Radios** : des milliers de radios par genre (rap FR, afro, RnB…), en direct, sans clé.
 - **Ta musique** : import de fichiers ou dossiers (MP3, M4A, FLAC, OGG, WAV…), lecture des titres, artistes, albums, pochettes.
 - **Accueil** personnalisé (« Bonsoir, Chahyn »), recherche, bibliothèque, titres likés, playlists.
 - **Lecteur plein écran** : fond tiré de la pochette (flou + couleurs), visualiseur doré, glisser la pochette pour changer de titre, fondu enchaîné entre morceaux.
