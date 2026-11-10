@@ -3,7 +3,7 @@ import { DAY, startOfDay } from './dates.js';
 
 const KEY = 'agenda-chahyn-v1';
 
-export const CATS = {
+export const BASE_CATS = {
   cours:    { label: 'Cours',      color: '#5b8def', emoji: '📚' },
   exam:     { label: 'Examens',    color: '#ff5d6c', emoji: '⚠️' },
   echeance: { label: 'Échéances',  color: '#ff9f43', emoji: '⏳' },
@@ -12,22 +12,38 @@ export const CATS = {
   sport:    { label: 'Sport',      color: '#c47dff', emoji: '🥊' },
   pro:      { label: 'Pro',        color: '#d9b26a', emoji: '💼' },
   perso:    { label: 'Perso',      color: '#f472b6', emoji: '✨' },
-  ferie:    { label: 'Fériés & vacances', color: '#8b95a7', emoji: '🌴' },
+  ferie:    { label: 'Vacances & dates clés', color: '#8b95a7', emoji: '🌴' },
 };
+
+// Catégories effectives (base + personnalisations), mises à jour par refreshCats()
+export const CATS = {};
+export function refreshCats() {
+  Object.keys(CATS).forEach(k => delete CATS[k]);
+  const st = state?.settings || {};
+  const o = st.catOverrides || {};
+  for (const [k, v] of Object.entries(BASE_CATS)) CATS[k] = { ...v, ...(o[k] || {}) };
+  for (const c of st.customCats || []) CATS[c.key] = { label: c.label, color: c.color, emoji: c.emoji, custom: true };
+}
 
 export const norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’`]/g, "'");
 
 // Devine la catégorie d'un événement à partir de son titre.
 export function guessCat(title, extra = '') {
   const t = norm(title) + ' ' + norm(extra);
-  if (/(jour ferie|vacances|ferie|toussaint|noel|paques|armistice|nouvel an|ascension|pentecote|assomption|fete du travail|fete nationale)/.test(t)) return 'ferie';
-  if (/(ophtalm|medecin|medecine|docteur|\bdr\b|pneumo|dentiste|kine|fond d'(oe|œ)il|consultation|pharmacie|prise de sang|hopital|radio|dermato|psy|osteo|vaccin|sante)/.test(t)) return 'sante';
+  const st = state?.settings;
+  // 1. tes règles perso
+  for (const r of st?.rules || []) if (r.kw && CATS[r.cat] && t.includes(norm(r.kw))) return r.cat;
+  // 2. tes catégories perso (mots-clés)
+  for (const c of st?.customCats || []) if ((c.keywords || []).some(k => k && t.includes(norm(k)))) return c.key;
+  if (/(debut des cours|fin des cours|jour ferie|vacances|ferie|toussaint|noel|paques|armistice|nouvel an|ascension|pentecote|assomption|fete du travail|fete nationale)/.test(t)) return 'ferie';
+  if (/(ophtalm|medecin|medecine|docteur|\bdr\b|pneumo|dentiste|kine|fond d'(oe|œ)il|consultation|pharmacie|prise de sang|ologue|iatre|hopital|radio|dermato|psy|osteo|vaccin|sante)/.test(t)) return 'sante';
   if (/(date limite|remise|a rendre|deadline|depot|reception du|version finale)/.test(t)) return 'echeance';
+  if (/^(revis|reviser|revision)/.test(t)) return 'revision';
   if (/(\bcc\d?\b|partiel|controle|\bexam|examen|\bds\b|soutenance|⚠)/.test(t)) return 'exam';
   if (/(revis|reviser|revision|bachoter|fiches)/.test(t)) return 'revision';
   if (/(date limite|remise|a rendre|rendre|deadline|echeance|envoi|dossier)/.test(t)) return 'echeance';
-  if (/(\bcm\b|\btd\b|\btp\b|cours|amphi|conference|atelier|lecon)/.test(t)) return 'cours';
-  if (/(boxe|muscu|sport|foot|running|course a pied|salle|piscine|natation|basket|gym|seance|entrainement)/.test(t)) return 'sport';
+  if (/(\bcm\b|\btd\b|\btp\b|\bppe\b|cours|amphi|conference|atelier|lecon)/.test(t)) return 'cours';
+  if (/(boxe|muscu|sport|foot|running|course a pied|salle de sport|piscine|natation|basket|gym|seance|entrainement)/.test(t)) return 'sport';
   if (/(entretien|adecco|stage|\bcv\b|job|travail|reunion|alternance|interim|boulot|taf|client)/.test(t)) return 'pro';
   return 'perso';
 }
@@ -58,11 +74,50 @@ function blank() {
       lastSync: 0,
       voiceReply: false,
       calView: 'month',
+      // personnalisation
+      avatar: '🥊',
+      palette: 'or',
+      accent: '',
+      textSize: 1,
+      contrast: false,
+      homeModules: DEFAULT_HOME.map(id => ({ id, on: true })),
+      catOverrides: {},
+      customCats: [],
+      rules: [],
+      subjectColors: {},
+      travelMin: 0,
+      goals: [
+        { id: 'g-boxe', emoji: '🥊', label: 'Boxe', kind: 'count', kw: 'boxe', cat: '', target: 3 },
+        { id: 'g-rev', emoji: '🧠', label: 'Révisions', kind: 'hours', kw: '', cat: 'revision', target: 5 },
+        { id: 'g-dodo', emoji: '😴', label: 'Couché avant minuit', kind: 'check', kw: '', cat: '', target: 5 },
+      ],
+      focusRun: null,
     },
+    focus: [],      // séances de focus terminées {start, end, subject}
+    checks: {},     // habitudes cochées {goalId: ['2026-11-10', ...]}
+    countdowns: [], // {id, title, date, emoji}
   };
 }
 
+export const HOME_MODULES = {
+  brief: '☀️ Briefing du jour',
+  now: '⏱ En ce moment / prochain',
+  quick: '✦ Ajout rapide & raccourcis',
+  insights: '💡 Conseils perso',
+  day: '📅 Ma journée',
+  due: '⏳ Échéances',
+  goals: '🎯 Objectifs',
+  focus: '🧠 Focus',
+  countdowns: '⌛ Comptes à rebours',
+  subjects: '📚 Mes matières',
+  notes: '📌 Notes épinglées',
+  tomorrow: '🌙 Demain',
+  week: '📊 Ma semaine',
+};
+const DEFAULT_HOME = Object.keys(HOME_MODULES);
+
 let state = load();
+refreshCats();
 const listeners = new Set();
 
 function load() {
@@ -71,7 +126,12 @@ function load() {
     if (raw) {
       const s = JSON.parse(raw);
       const b = blank();
-      return { ...b, ...s, settings: { ...b.settings, ...(s.settings || {}) } };
+      const out = { ...b, ...s, settings: { ...b.settings, ...(s.settings || {}) } };
+      // ajoute les nouveaux modules d'accueil apparus depuis
+      const have = new Set(out.settings.homeModules.map(m => m.id));
+      for (const id of Object.keys(HOME_MODULES)) if (!have.has(id)) out.settings.homeModules.push({ id, on: true });
+      out.settings.homeModules = out.settings.homeModules.filter(m => HOME_MODULES[m.id]);
+      return out;
     }
   } catch { /* stockage indisponible */ }
   return blank();
@@ -88,8 +148,21 @@ export function save() {
 
 export const S = () => state;
 export const onChange = fn => listeners.add(fn);
-export function replaceAll(s) { const b = blank(); state = { ...b, ...s, settings: { ...b.settings, ...(s.settings || {}) } }; save(); }
-export function resetAll() { state = blank(); save(); }
+export function replaceAll(s) { const b = blank(); state = { ...b, ...s, settings: { ...b.settings, ...(s.settings || {}) } }; refreshCats(); save(); }
+export function resetAll() { state = blank(); refreshCats(); save(); }
+
+// Recalcule la catégorie des événements (après changement de règles)
+export function recategorize() {
+  let n = 0;
+  for (const e of state.events) {
+    if (e.catLocked || e.cat === 'ferie') continue;
+    const c = guessCat(e.title, e.notes);
+    if (c !== e.cat) { e.cat = c; n++; }
+  }
+  for (const t of state.tasks) t.cat = guessCat(t.title);
+  save();
+  return n;
+}
 
 // ---------- Événements ----------
 export function addEvent(e) {

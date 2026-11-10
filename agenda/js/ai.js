@@ -3,7 +3,27 @@
 // - Avec ta clé Claude (Réglages) : comprend n'importe quelle demande et agit sur l'agenda.
 import { S, CATS, eventsBetween, deadlines, duplicateIds } from './store.js';
 import { parseFr } from './parse.js';
-import { DAY, MIN, startOfDay, startOfWeek, addDays, fmtDay, hm, relDay, localIso, cap, countdown, dayDiff } from './dates.js';
+import { DAY, MIN, startOfDay, startOfWeek, addDays, fmtDay, hm, relDay, localIso, cap, countdown, dayDiff, fmtDuration } from './dates.js';
+import { briefing, stats, subjects, goalProgress } from './insights.js';
+import { norm, CATS as C2 } from './store.js';
+
+// Trouve l'événement dont on parle (« la boxe de jeudi », « mon rdv coiffeur »)
+const FILLER = /\b(deplace|decale|bouge|avance|recule|repousse|reporte|mets|met|supprime|annule|efface|retire|enleve|mon|ma|mes|le|la|les|l|de|du|des|a|au|pour|rdv|rendez|vous|seance|cours|prochain|prochaine|aujourd|hui|demain|apres|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|matin|soir|midi|\d+h?\d*|h|et|en|sur|ce|cette|cet|stp|plutot|plus|tard|tot|heure|heures|min|minutes)\b/g;
+function findEvent(text, p) {
+  const words = norm(text).replace(/[^a-z0-9 ]/g, ' ').replace(FILLER, ' ').split(/\s+/).filter(w => w.length > 2);
+  if (!words.length) return null;
+  const now = Date.now();
+  let pool = eventsBetween(now - DAY, now + 60 * DAY);
+  const scored = pool.map(e => {
+    const t = norm(e.title + ' ' + e.location);
+    const sc = words.filter(w => t.includes(w)).length;
+    return { e, sc };
+  }).filter(x => x.sc > 0);
+  if (!scored.length) return null;
+  const best = Math.max(...scored.map(x => x.sc));
+  let cands = scored.filter(x => x.sc === best).map(x => x.e).filter(e => e.end > now);
+  return cands[0] || null;
+}
 
 // ---------------------------------------------------------------------
 // Créneaux libres (utilisé pour « planifie mes révisions »)
@@ -98,6 +118,57 @@ function answerQuery(text, p) {
 export function localAssistant(text) {
   const p = parseFr(text);
   const t = text.toLowerCase();
+  const tn = norm(text);
+  // briefing
+  if (/(resume|résume|briefing|recap|récap|comment se presente|ma journee|ma journée)/.test(tn) && !/(ajoute|programme)/.test(tn)) {
+    return { reply: briefing(p.day || new Date()), actions: [] };
+  }
+  // combien d'heures
+  if (/combien/.test(tn) && /(heure|h\b|seance|fois|cours|boxe|sport)/.test(tn)) {
+    const st = stats(/mois/.test(tn) ? 'month' : 'week');
+    const lbl = /mois/.test(tn) ? 'ce mois-ci' : 'cette semaine';
+    const catKey = Object.keys(C2).find(k => tn.includes(norm(C2[k].label).slice(0, 5)) || tn.includes(k));
+    const bits = Object.entries(st.byCat).filter(([k]) => k !== 'ferie').sort((a, b) => b[1] - a[1]).map(([k, h]) => `• ${C2[k]?.emoji || ''} ${C2[k]?.label || k} : ${Math.round(h * 10) / 10} h`);
+    if (/boxe|sport/.test(tn)) return { reply: `${cap(lbl)} : ${st.sport} séance${st.sport > 1 ? 's' : ''} de sport.`, actions: [] };
+    if (catKey && st.byCat[catKey] != null) return { reply: `${cap(lbl)} : ${Math.round(st.byCat[catKey] * 10) / 10} h de ${C2[catKey].label.toLowerCase()}.`, actions: [] };
+    return { reply: `${cap(lbl)}, ${Math.round(st.total)} h programmées :\n${bits.join('\n')}`, actions: [] };
+  }
+  // prochain X / quand est X
+  const nm = /(?:quand|prochain|prochaine|c'est quand)\b.*?\b(?:mon|ma|mes|le|la|l'|de|du)?\s*([a-zàâçéèêëîïôûùüÿñæœ' -]{3,})\s*\??$/i.exec(text);
+  if (nm && /^(quand|c'est quand|.*prochain)/i.test(t) && !/(ajoute|programme|mets)/.test(tn)) {
+    const kw = norm(nm[1]).replace(/^(mon|ma|le|la|les|l'|de|du|prochaine?|est)\s+/g, '').replace(/\?/g, '').trim();
+    const words = kw.split(/\s+/).filter(w => w.length > 2 && !/^(est|mon|prochain|prochaine)$/.test(w));
+    const now = Date.now();
+    const isExam = /(examen|exam|controle|partiel|cc)/.test(kw);
+    const e = eventsBetween(now, now + 200 * DAY).sort((a, b) => a.start - b.start).find(ev => isExam ? ev.cat === 'exam' : words.length && words.every(w => norm(ev.title + ' ' + ev.location).includes(w)));
+    if (e) return { reply: `${e.title} : ${relDay(e.start)}${e.allDay ? '' : ' à ' + hm(e.start)} (${countdown(e.start)})${e.location ? ', ' + e.location : ''}.`, actions: [] };
+    if (words.length) return { reply: `Je ne trouve rien de prévu pour « ${nm[1].trim()} ».`, actions: [] };
+  }
+  // supprimer / annuler
+  if (/^(supprime|annule|efface|retire|enleve|enlève)/.test(tn)) {
+    const e = findEvent(text, p);
+    if (!e) return { reply: 'Je ne vois pas de quel événement tu parles. Donne-moi son nom (ex : « annule la boxe de vendredi »).', actions: [] };
+    return { reply: `J'ai supprimé « ${e.title} » (${relDay(e.start)}${e.allDay ? '' : ' ' + hm(e.start)}).`, actions: [{ type: 'delete_event', id: e.id }] };
+  }
+  // déplacer
+  if (/^(deplace|decale|bouge|avance|recule|repousse|reporte|change)/.test(tn)) {
+    const e = findEvent(text, p);
+    if (!e) return { reply: 'Je ne vois pas quel événement déplacer. Ex : « déplace la boxe à 21h ».', actions: [] };
+    const dur = e.end - e.start;
+    let start;
+    const shift = /(\d+)\s?(min|h)/.exec(tn);
+    if (/(avance|recule|repousse|plus tard|plus tot)/.test(tn) && shift && !p.explicitDay && !/\ba\s?\d/.test(tn)) {
+      const m = +shift[1] * (shift[2] === 'h' ? 60 : 1) * (/(avance|plus tot)/.test(tn) ? -1 : 1);
+      start = e.start + m * MIN;
+    } else if (p.start) {
+      const base = new Date(p.explicitDay ? p.start : e.start);
+      if (p.hasTime) { const n = new Date(p.start); base.setHours(n.getHours(), n.getMinutes(), 0, 0); }
+      else { const o = new Date(e.start); base.setHours(o.getHours(), o.getMinutes(), 0, 0); }
+      start = base.getTime();
+    }
+    if (!start) return { reply: `À quel moment veux-tu déplacer « ${e.title} » ?`, actions: [] };
+    return { reply: `« ${e.title} » est déplacé à ${relDay(start)} ${hm(start)}.`, actions: [{ type: 'update_event', id: e.id, start, end: start + dur }] };
+  }
   // demandes spéciales
   if (/(planifi|organise|pr[ée]vois).*(r[ée]vision|r[ée]viser)/.test(t)) {
     const exams = deadlines({ from: Date.now() }).filter(d => d.kind === 'event' && d.cat === 'exam' && !d.done);
@@ -174,7 +245,9 @@ function context() {
   const ev = evs.map((e, i) => `#E${i} | ${e.allDay ? localIso(e.start).slice(0, 10) + ' (journée)' : localIso(e.start) + ' → ' + localIso(e.end).slice(11)} | ${e.title} | ${CATS[e.cat]?.label || ''}${e.location ? ' | ' + e.location : ''}`).join('\n');
   const tk = st.tasks.map((t, i) => `#T${i} | ${t.done ? '✔' : '☐'} ${t.title}${t.due ? ' | pour ' + localIso(t.due) : ''} | ${t.priority}`).join('\n');
   const nt = st.notes.slice(-25).map(n => `- ${(n.title ? n.title + ' : ' : '') + n.text.slice(0, 160).replace(/\n/g, ' / ')}`).join('\n');
-  return { ev, tk, nt };
+  const sb = subjects().map(m => `- ${m.name}${m.nextExam ? ' | prochain contrôle : ' + localIso(m.nextExam.start) : ''}`).join('\n');
+  const gl = st.settings.goals.map(g => { const p = goalProgress(g); return `- ${g.emoji} ${g.label} : ${p.done}/${g.target}${p.unit} cette semaine (prévu ${p.planned})`; }).join('\n');
+  return { ev, tk, nt, sb, gl };
 }
 
 const parseLocal = s => {
@@ -188,7 +261,7 @@ export async function askClaude(text) {
   const st = S();
   const { default: Anthropic } = await import(SDK_URL);
   const client = new Anthropic({ apiKey: st.settings.claudeKey, dangerouslyAllowBrowser: true });
-  const { ev, tk, nt } = context();
+  const { ev, tk, nt, sb, gl } = context();
   const now = new Date();
   const system = [
     `Tu es l'assistant personnel intégré à l'agenda de ${st.settings.name}. Tu gères son calendrier, son échéancier (tâches avec date) et ses notes.`,
@@ -204,6 +277,8 @@ export async function askClaude(text) {
     'AGENDA (7 jours passés → 60 jours) :', ev || '(vide)',
     '', 'TÂCHES :', tk || '(aucune)',
     '', 'NOTES :', nt || '(aucune)',
+    '', 'MATIÈRES :', sb || '(aucune)',
+    '', 'OBJECTIFS DE LA SEMAINE :', gl || '(aucun)',
   ].join('\n');
   const messages = [...st.chat.filter(m => m.role === 'user' || m.role === 'assistant').slice(-8).map(m => ({ role: m.role, content: m.text })), { role: 'user', content: text }];
   // l'API exige une alternance user/assistant commençant par user
