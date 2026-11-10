@@ -1,10 +1,10 @@
-import { db } from './db.js?v=7';
-import { readTags } from './tags.js?v=7';
-import { Player, isIOS } from './player.js?v=7';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=7';
-import * as AI from './ai.js?v=7';
-import * as Voice from './voice.js?v=7';
-import * as Src from './sources.js?v=7';
+import { db } from './db.js?v=8';
+import { readTags } from './tags.js?v=8';
+import { Player, isIOS } from './player.js?v=8';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=8';
+import * as AI from './ai.js?v=8';
+import * as Voice from './voice.js?v=8';
+import * as Src from './sources.js?v=8';
 
 const BRAND = 'Maison Chahyn';
 
@@ -271,10 +271,24 @@ function setMarquee(box, text) {
   });
 }
 
+// Glisser le mini-lecteur vers le bas : arrête la musique et range la barre
+function dismissMini() {
+  player.pause();
+  S.miniGone = true;
+  mini.style.transition = '';
+  mini.classList.add('gone');
+  document.body.classList.remove('has-mini');
+  ytbox.classList.remove('on');
+  setTimeout(() => { if (S.miniGone) mini.hidden = true; }, 350);
+}
+player.addEventListener('state', () => {
+  if (S.miniGone && player.playing) { S.miniGone = false; mini.classList.remove('gone'); updateNowPlaying(); placeYT(); }
+});
+
 function updateNowPlaying() {
   const t = player.current;
-  mini.hidden = !t;
-  document.body.classList.toggle('has-mini', !!t);
+  mini.hidden = !t || !!S.miniGone;
+  document.body.classList.toggle('has-mini', !!t && !S.miniGone);
   if (!t) { if (S.npOpen) closeNP(); return; }
   const seed = t.album || t.artist || t.title;
   // mini
@@ -413,11 +427,16 @@ gesture(mini, {
     openNP();
   },
   end: (dx, dy) => {
+    mini.style.transform = ''; mini.style.opacity = '';
+    if (dy > 45 && Math.abs(dy) > Math.abs(dx)) return dismissMini();
     if (dy < -40 && Math.abs(dy) > Math.abs(dx)) return openNP();
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) { dx < 0 ? player.next() : player.prev(); }
   },
-  move: (dx, dy) => { $('.mini-in', mini).style.transform = Math.abs(dx) > Math.abs(dy) ? `translateX(${dx * 0.4}px)` : ''; },
-  reset: () => { $('.mini-in', mini).style.transform = ''; },
+  move: (dx, dy) => {
+    if (dy > 0 && Math.abs(dy) > Math.abs(dx)) { mini.style.transition = 'none'; mini.style.transform = `translateY(${dy}px)`; mini.style.opacity = Math.max(0.2, 1 - dy / 120); $('.mini-in', mini).style.transform = ''; return; }
+    $('.mini-in', mini).style.transform = Math.abs(dx) > Math.abs(dy) ? `translateX(${dx * 0.4}px)` : '';
+  },
+  reset: () => { $('.mini-in', mini).style.transform = ''; mini.style.transform = ''; mini.style.opacity = ''; mini.style.transition = ''; },
 });
 
 // Gestes : lecteur plein écran (glisser vers le bas pour fermer, gauche/droite sur la pochette)
@@ -1383,7 +1402,7 @@ $('.v-orb', vbox).addEventListener('click', () => Voice.stopListening());
 // ======================================================================
 const ytbox = $('#ytbox');
 function placeYT() {
-  const on = player.kind === 'yt' && !!player.current;
+  const on = player.kind === 'yt' && !!player.current && !S.miniGone;
   ytbox.classList.toggle('on', on);
   ytbox.classList.toggle('over', !!S.npOpen);
   if (!on) return;
@@ -1614,7 +1633,8 @@ function viewHome() {
   const tracks = allTracks();
   const head = `<header class="page-head home-head"><div><div class="brand-line"><svg><use href="#i-logo"/></svg><span>MAISON <b>CHAHYN</b></span></div><h1>${greeting()}</h1></div>
     <div class="head-btns"><button class="ib gold-ib" data-act="voice" aria-label="Commande vocale">${icon('mic')}</button><button class="ib" data-act="import" aria-label="Importer">${icon('plus')}</button><a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a></div></header>`;
-  if (!tracks.length) return head + emptyState();
+  const discover = homeDiscover();
+  if (!tracks.length) return head + discover.top + discover.rest + `<section class="import-card">${icon('import')}<div><b>Tes propres fichiers</b><small>Importe des MP3 du téléphone pour les écouter hors ligne.</small></div><button class="btn ghost sm" data-act="import">Importer</button></section>`;
 
   const al = [...albums().values()];
   const pls = [...S.playlists.values()].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -1643,7 +1663,7 @@ function viewHome() {
   const top = tracks.filter(t => t.plays).sort((a, b) => b.plays - a.plays).slice(0, 5);
   const topKey = registerList('top', top.map(t => t.id), 'Tes titres les plus écoutés');
 
-  return head + `
+  return head + discover.top + `
     <div class="quick-grid">${quick.join('')}</div>
     <button class="mix-btn" data-act="shuffle-list" data-list="${allKey}">${icon('shuffle')}<span><b>Lecture aléatoire</b><small>${plural(tracks.length, 'titre')} · ${fmtTotal(tracks.reduce((s, t) => s + t.duration, 0))}</small></span>${icon('play', 'mix-play')}</button>
     ${tracks.length >= 4 ? shelf(`Composé pour toi${S.settings.name ? ', ' + S.settings.name : ''}`, HOME_MIXES.map(k => mixCard(getMix(k)))) : ''}
@@ -1653,7 +1673,30 @@ function viewHome() {
     ${shelf('Tes artistes', arts, '#/library?f=artists')}
     ${pls.length ? shelf('Tes playlists', pls.slice(0, 12).map(playlistCard), '#/library?f=playlists') : ''}
     ${top.length ? `<section class="shelf"><div class="shelf-head"><h2>Tes titres les plus écoutés</h2></div><div class="list">${top.map((t, i) => trackRow(t, i, topKey)).join('')}</div></section>` : ''}
-  `;
+  ` + discover.rest;
+}
+
+// Sections « découverte » de l'accueil : utiles même sans aucune musique importée
+function homeDiscover() {
+  const anyRecent = [...S.tracks.values()].filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 14);
+  const rk = registerList('home-recent', anyRecent.map(t => t.id), 'Écoutés récemment');
+  const recentCards = anyRecent.map((t, i) => `<div class="card track-card ${t.source === 'radio' ? 'radio-card' : ''}" data-tid="${t.id}" data-i="${i}" data-list="${rk}"><div class="card-art">${trackCover(t, t.source === 'radio' ? 'radio-cv' : '')}${t.source === 'radio' ? '<span class="live-dot card-live">LIVE</span>' : ''}</div><b>${esc(t.title)}</b><small>${esc(t.source === 'radio' ? 'Radio' : t.source === 'podcast' ? 'Podcast' : artistOf(t))}</small></div>`);
+  const radios = savedRadios();
+  const radiosKey = registerList('home-radios', radios.map(t => t.id), 'Mes radios');
+  const top = `
+    <a class="home-search" href="#/search?src=yt">${icon('search')}<span>Que veux-tu écouter ?</span></a>
+    ${anyRecent.length ? shelf('Reprendre', recentCards) : ''}`;
+  const stations = Src.FR_STATIONS.slice(0, 14).map((n, i) => `<button class="station" data-act="radio-name" data-name="${esc(n)}" style="--h:${placeholderHue(n)};--d:${i * 25}ms"><span class="st-wave"><i></i><i></i><i></i></span><b>${esc(n)}</b><small>En direct</small></button>`);
+  const topics = Src.PODCAST_TOPICS.slice(0, 10).map((x, i) => `<button class="topic" data-act="pc-home" data-q="${esc(x)}" style="--h:${placeholderHue(x)};--d:${i * 25}ms">${icon('mic')}<b>${esc(x)}</b></button>`);
+  const rest = `
+    ${radios.length ? shelf('Mes radios', radios.map((t, i) => `<div class="card track-card radio-card" data-tid="${t.id}" data-i="${i}" data-list="${radiosKey}"><div class="card-art">${trackCover(t, 'radio-cv')}<span class="live-dot card-live">LIVE</span></div><b>${esc(t.title)}</b><small>Radio</small></div>`)) : ''}
+    ${shelf('Radios en direct', stations, '#/search?src=radio')}
+    <section class="shelf yt-promo">
+      <div class="yt-promo-in">${icon('play')}<div><b>Tout YouTube dans ta Maison</b><small>${S.settings.ytKey ? 'Cherche n\'importe quel artiste, garde tes sons, crée tes playlists.' : 'Ajoute ta clé gratuite pour chercher n\'importe quel son.'}</small></div></div>
+      <a class="btn primary sm" href="${S.settings.ytKey ? '#/search?src=yt' : '#/settings'}">${S.settings.ytKey ? 'Chercher' : 'Configurer'}</a>
+    </section>
+    ${shelf('Podcasts', topics, '#/search?src=podcast')}`;
+  return { top, rest };
 }
 
 function viewSearch(params) {
@@ -2066,6 +2109,7 @@ document.addEventListener('click', e => {
       case 'radio-name': return playRadioByName(act.dataset.name, act);
       case 'pc-topic': { const q = $('#q'); if (q) { q.value = act.dataset.q; S.searchQ = act.dataset.q; } return onlineSearch(act.dataset.q); }
       case 'pc-show': return showPodcast(act.dataset.id);
+      case 'pc-home': S.settings.searchSrc = 'podcast'; S.searchQ = act.dataset.q; saveSettings(); S.pendingFwd = true; return goto('#/search');
       case 'yt-key': S.pendingFwd = true; return goto('#/settings');
       case 'ai-clear': S.chat = []; saveJSON('onde.chat', S.chat); return render(true);
       case 'ai-play': { const m = S.mixes[act.dataset.key]; if (m?.tracks.length) playIds(m.tracks.map(t => t.id), 0, { context: { label: m.name, route: '#/mix/' + m.key } }); return; }
