@@ -1,10 +1,10 @@
-import { db } from './db.js?v=9';
-import { readTags } from './tags.js?v=9';
-import { Player, isIOS } from './player.js?v=9';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=9';
-import * as AI from './ai.js?v=9';
-import * as Voice from './voice.js?v=9';
-import * as Src from './sources.js?v=9';
+import { db } from './db.js?v=10';
+import { readTags } from './tags.js?v=10';
+import { Player, isIOS } from './player.js?v=10';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=10';
+import * as AI from './ai.js?v=10';
+import * as Voice from './voice.js?v=10';
+import * as Src from './sources.js?v=10';
 
 const BRAND = 'Maison Chahyn';
 
@@ -16,7 +16,7 @@ const S = {
   playlists: new Map(),
   covers: new Map(),       // coverId -> objectURL
   colors: loadJSON('onde.colors', {}),
-  settings: Object.assign({ name: 'Chahyn', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt' }, loadJSON('onde.settings', {})),
+  settings: Object.assign({ name: 'Chahyn', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true }, loadJSON('onde.settings', {})),
   mixes: {},
   chat: loadJSON('onde.chat', []),
   version: 0,
@@ -498,6 +498,8 @@ np.addEventListener('click', e => {
   if (b.classList.contains('np-like')) return toggleLike(player.current);
   if (b.classList.contains('np-queue')) return queueSheet();
   if (b.classList.contains('np-sleep')) return sleepSheet();
+  if (b.classList.contains('np-fwd')) return podSkip(30);
+  if (b.classList.contains('np-back')) return podSkip(-15);
   if (b.classList.contains('np-voice')) return startVoice();
   if (b.classList.contains('np-artist')) { const n = artistOf(player.current); S.pendingFwd = true; return closeAllOverlays().then(() => goto('#/artist/' + encodeURIComponent(n))); }
 });
@@ -637,6 +639,7 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     t.album && { id: 'album', icon: 'album', label: 'Voir l\'album' },
     (!t.source || t.saved) && !['radio', 'podcast'].includes(t.source) && { id: 'artist', icon: 'user', label: 'Voir l\'artiste' },
     !['radio', 'podcast'].includes(t.source) && { id: 'lyrics', icon: 'mic', label: t.lyrics ? 'Voir / modifier les paroles' : 'Ajouter les paroles' },
+    t.source === 'podcast' && podPrefs[showKey(t)] && { id: 'podreset', icon: 'refresh', label: 'Ne plus sauter automatiquement le début / la fin' },
     t.source && !t.saved && { id: 'save', icon: 'plus', label: t.source === 'radio' ? 'Ajouter à mes radios' : t.source === 'podcast' ? 'Garder cet épisode' : 'Ajouter à ma bibliothèque' },
     { id: 'edit', icon: 'edit', label: 'Modifier les infos' },
     t.source && t.saved && { id: 'unsave', icon: 'close', label: t.source === 'radio' ? 'Retirer de mes radios' : 'Retirer de ma bibliothèque', danger: true },
@@ -657,6 +660,7 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     artist: async () => { await closeAllOverlays(); goto('#/artist/' + encodeURIComponent(artistOf(t))); },
     edit: () => editSheet(t),
     lyrics: () => lyricsSheet(t),
+    podreset: () => { delete podPrefs[showKey(t)]; savePodPrefs(); closeSheet(); toast('Réglages anti-pub effacés pour cette émission'); },
     save: async () => { t.saved = true; await db.put('tracks', t); bump(); await closeSheet(); toast('Ajouté'); render(true); },
     unsave: async () => { t.saved = false; t.liked = false; await db.put('tracks', t); bump(); await closeSheet(); toast('Retiré'); render(true); },
     del: () => confirmSheet(`Supprimer « ${t.title} » ?`, 'Le fichier sera effacé de l\'application.', 'Supprimer', async () => {
@@ -1169,7 +1173,7 @@ async function saveMixAsPlaylist(m) {
 // ======================================================================
 // Le Concierge (chat IA)
 // ======================================================================
-const AI_SUGGEST = ['Une playlist pour l\'école', 'Motivation sport 45 min', 'Un truc chill pour ce soir', 'Mon mix du moment', 'Fais-moi redécouvrir des sons', 'Lance mes incontournables'];
+const AI_SUGGEST = ['Mets du rap', 'Mets Skyrock', 'Mets les infos', 'Mets de la musique classique', 'Lance LEGEND', 'Une playlist pour l\'école', 'Motivation sport 45 min', 'Un truc chill pour ce soir', 'Mon mix du moment', 'Fais-moi redécouvrir des sons', 'Lance mes incontournables'];
 
 function viewAI() {
   const has = true; // le Concierge marche aussi sans bibliothèque (radios, YouTube, commandes)
@@ -1218,27 +1222,9 @@ async function aiSend(text, { navigate = true } = {}) {
   const tracks = allTracks();
   if (navigate && S.route?.name !== 'ai') { S.pendingFwd = true; goto('#/ai'); await new Promise(r => setTimeout(r, 60)); }
   S.chat.push({ role: 'user', text });
-  // Commandes directes (pause, suivant, « joue … »), puis YouTube si le titre n'est pas dans la bibliothèque
-  let quick = quickCommand(text);
-  if (!quick) {
-    const n = norm(text);
-    const st = Src.FR_STATIONS.find(x => n.includes(norm(x)) && /(mets|met|mais|lance|joue|ecoute|radio)/.test(n));
-    if (st) quick = await playRadioByName(st) || null;
-    else if (/\b(infos?|actu|actualites?|journal|flash)\b/.test(n) && n.split(' ').length <= 6) quick = await playNewsFlash(0) || null;
-  }
-  if (!quick && S.settings.ytKey) {
-    const m = norm(text).match(/^(?:joue|jouer|mets|met|mais|lance|ecoute|play)\s+(?:moi\s+)?(.+)$/);
-    if (m && !/(pour|ambiance|truc|quelque chose|style|mix|playlist|genre|radio)/.test(m[1])) {
-      try {
-        const res = await Src.ytSearch(S.settings.ytKey, text.replace(/^\s*\S+\s+(moi\s+)?/i, ''), 10);
-        if (res.length) {
-          const ts = res.map(x => remoteTrack(x, 'yt'));
-          playIds(ts.map(t => t.id), 0, { context: { label: 'YouTube' } });
-          quick = `Je lance « ${ts[0].title} » de ${ts[0].artist} sur YouTube.`;
-        }
-      } catch { /* on laisse le Concierge répondre */ }
-    }
-  }
+  // Commandes directes et recherches dans toutes les sources (bibliothèque, YouTube, radios, podcasts)
+  let quick = null;
+  try { quick = await smartCommand(text); } catch (e) { console.warn(e); }
   if (!quick && !tracks.length) quick = 'Ta bibliothèque est vide pour l\'instant. Demande-moi une radio (« mets Skyrock »), ajoute ta clé YouTube dans les Réglages pour que je trouve n\'importe quel son, ou importe tes fichiers.';
   if (quick) {
     S.chat.push({ role: 'assistant', text: quick });
@@ -1298,6 +1284,165 @@ async function aiSend(text, { navigate = true } = {}) {
   return res;
 }
 
+
+// ======================================================================
+// Compréhension des demandes (texte et voix)
+// ======================================================================
+const GENRES = [
+  ['classique', /\b(classique|classical|mozart|beethoven|chopin|bach|piano classique|orchestre|symphonie|opera)\b/, 'classical', 'musique classique'],
+  ['jazz', /\bjazz\b/, 'jazz', 'jazz'],
+  ['rap fr', /\b(rap fr|rap francais|rap)\b/, 'rap francais', 'rap français'],
+  ['hip-hop', /\b(hip hop|hiphop|hip-hop|us rap)\b/, 'hip-hop', 'hip hop'],
+  ['drill', /\bdrill\b/, 'drill', 'drill'],
+  ['rnb', /\b(rnb|r n b|r&b|r and b)\b/, 'rnb', 'rnb'],
+  ['afro', /\b(afro|afrobeat|afrobeats|amapiano)\b/, 'afrobeats', 'afrobeats'],
+  ['rai', /\b(rai)\b/, 'raï', 'raï'],
+  ['kompa', /\b(kompa|zouk)\b/, 'zouk', 'kompa zouk'],
+  ['reggaeton', /\b(reggaeton|latino|latin)\b/, 'reggaeton', 'reggaeton'],
+  ['reggae', /\breggae\b/, 'reggae', 'reggae'],
+  ['rock', /\brock\b/, 'rock', 'rock'],
+  ['metal', /\bmetal\b/, 'metal', 'metal'],
+  ['pop', /\bpop\b/, 'pop', 'pop'],
+  ['lofi', /\b(lofi|lo fi|lo-fi)\b/, 'lofi', 'lofi'],
+  ['electro', /\b(electro|electronique|techno|edm)\b/, 'electronic', 'electro'],
+  ['house', /\bhouse\b/, 'house', 'house music'],
+  ['soul', /\b(soul|funk|motown)\b/, 'soul', 'soul funk'],
+  ['kpop', /\b(kpop|k pop)\b/, 'k-pop', 'kpop'],
+  ['annees 80', /\b(annees 80|80s|eighties)\b/, '80s', 'années 80'],
+  ['annees 90', /\b(annees 90|90s)\b/, '90s', 'années 90'],
+  ['chanson francaise', /\b(chanson francaise|variete)\b/, 'chanson francaise', 'chanson française'],
+];
+const MOOD_RADIO = { ecole: ['lofi', 'lofi pour travailler'], sport: ['edm', 'musique sport motivation'], chill: ['chill', 'chill music'], soiree: ['dance', 'musique soirée'], nuit: ['ambient', 'musique douce pour dormir'], matin: ['pop', 'musique bonne humeur'], trajet: ['hits', 'hits du moment'] };
+
+function cleanAsk(text) {
+  let n = norm(text).replace(/[.!?,;:"«»]/g, ' ').replace(/['’`-]/g, ' ').replace(/\s+/g, ' ').trim();
+  n = n.replace(/^((hey|ok|okay|dis|allez|bon|alors|euh|concierge|maison)\s+)+/, '');
+  n = n.replace(/\b(s il te plait|s il vous plait|stp|svp|merci|please)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  n = n.replace(/^(est ce que |est ce qu )?(tu peux|tu pourrais|peux tu|pourrais tu|tu veux bien|je veux|je voudrais|j aimerais|j ai envie d ecouter|j ai envie de|j ai envie d|vas y|fais moi|on ecoute|on met)\s+/, '');
+  return n.trim();
+}
+
+function fmtDur(sec) { return sec >= 60 ? `${Math.floor(sec / 60)} min ${String(Math.round(sec % 60)).padStart(2, '0')}` : `${Math.round(sec)} s`; }
+
+async function smartCommand(text) {
+  const n = cleanAsk(text);
+  const words = n.split(' ').filter(Boolean).length;
+  const cur = player.current;
+  S.cmdPaused = false;
+  if (!n) return null;
+
+  // --- minuteur
+  let m = n.match(/(?:arrete|coupe|stop|eteins|pause).*?(?:dans|d ici|apres)\s*(\d+)\s*(min|minute|h|heure)/);
+  if (m) { const mins = m[2].startsWith('h') ? +m[1] * 60 : +m[1]; player.setSleep(mins); return `D'accord, j'arrête la musique dans ${mins} minutes.`; }
+  if (/(a la fin (du|de ce) (titre|son|morceau))/.test(n) && /(arrete|stop|coupe)/.test(n)) { player.setSleep('end'); return 'J\'arrête à la fin de ce titre.'; }
+
+  // --- contrôles de lecture
+  if (words <= 7) {
+    if (/\b(pause|stop|stoppe|arrete|arreter|coupe|silence|tais toi|chut)\b/.test(n) && !/\b(pas|plus de pub)\b/.test(n)) { player.pause(); S.cmdPaused = true; return 'Pause.'; }
+    if (/^(reprends?|reprendre|relance|relancer|remets?|remettre|continue|continuer|play|lecture|joue|vas y|go|allez|resume)( la musique| le son| la lecture| le morceau| le titre)?$/.test(n)) { if (!cur) return 'Il n\'y a rien en cours. Dis-moi quoi écouter.'; player.play(); return 'C\'est reparti.'; }
+    if (/(recommence|depuis le debut|au debut|reprends au debut)/.test(n)) { player.seek(0); player.play(); return 'Je reprends depuis le début.'; }
+    if (/\b(suivant|suivante|next|skip|zappe|zapper)\b|passe (a la suivante|au suivant|le son|la musique|ce son|cette musique|le titre|ce titre)|change (de )?(son|musique|titre|chanson|morceau)|une autre|j aime pas|nul$/.test(n)) { if (!cur) return 'Rien en cours.'; S.voiceNext = true; player.next(); return 'Titre suivant.'; }
+    if (/\b(precedent|precedente|d avant)\b|reviens (en arriere|au precedent|a la precedente)|remets la (derniere|precedente)/.test(n)) { player.prev(); return 'Titre précédent.'; }
+    m = n.match(/(avance|saute|passe|va)\s+(de\s+)?(\d+)\s*(s|sec|secondes?|min|minutes?)/);
+    if (m && cur) { const sec = +m[3] * (m[4].startsWith('m') ? 60 : 1); player.seek(player.time + sec); return `J'avance de ${fmtDur(sec)}.`; }
+    m = n.match(/(recule|reviens|retourne)\s+(de\s+)?(\d+)\s*(s|sec|secondes?|min|minutes?)/);
+    if (m && cur) { const sec = +m[3] * (m[4].startsWith('m') ? 60 : 1); player.seek(player.time - sec); return `Je recule de ${fmtDur(sec)}.`; }
+    m = n.match(/(volume|son)\s+(a\s+)?(\d+)/);
+    if (m) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume(+m[3] / 100); return `Volume à ${Math.round(v * 100)} %.`; }
+    if (/(monte|augmente|plus fort|hausse|monter) ?(le )?(son|volume)?|^plus fort$/.test(n) && !/\b(sport|energie)\b/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) + 0.2); return `Volume à ${Math.round(v * 100)} %.`; }
+    if (/(baisse|diminue|moins fort|plus bas|baisser) ?(le )?(son|volume)?/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) - 0.25); return `Volume à ${Math.round(v * 100)} %.`; }
+    if (/\b(aleatoire|shuffle|melange|melanger)\b/.test(n)) { player.toggleShuffle(); return player.shuffle ? 'Lecture aléatoire activée.' : 'Lecture aléatoire désactivée.'; }
+    if (/(en boucle|repete|repeter|boucle)/.test(n)) { player.repeat = /(arrete|plus|stop|desactive)/.test(n) ? 'off' : 'one'; player.emit('modes'); return player.repeat === 'one' ? 'Je répète ce titre.' : 'Répétition désactivée.'; }
+    if (cur && /(j aime|like|liker|coeur|favori|kiffe|ajoute (le |ce |aux? )?(titre |son )?(aux? )?(likes?|favoris|coups? de coeur))/.test(n) && !/(playlist|mix|pas)/.test(n)) { if (!cur.liked) toggleLike(cur); return `« ${cur.title} » est dans tes titres likés.`; }
+    if (cur && /(c est quoi|c quoi|quel est|qu est ce que c est|qui chante|comment (ca |il )?s appelle|c est qui|quelle (musique|chanson|radio|emission))/.test(n)) return cur.source === 'radio' ? `Tu écoutes ${cur.title} en direct.` : `C'est « ${cur.title} »${cur.artist ? ' de ' + cur.artist : ''}.`;
+    if (cur && /\bparoles?\b/.test(n)) { openNP(); setTimeout(openLyrics, 450); return 'Voici les paroles.'; }
+    if (/\b(file d attente|a suivre|apres)\b/.test(n) && /(quoi|qu est|c est)/.test(n)) { const nx = S.tracks.get(player.queue[player.index + 1]); return nx ? `Ensuite : « ${nx.title} »${nx.artist ? ' de ' + nx.artist : ''}.` : 'Rien à suivre pour l\'instant.'; }
+  }
+
+  // --- verbe d'action « mets / joue / lance … »
+  const vm = n.match(/^(?:mets?|mais|met|lance|lancer|joue|jouer|ecoute|ecouter|passe|play|trouve|cherche|chercher|trouve moi|cherche moi)\s+(?:moi\s+)?(.+)$/);
+  const ask = vm ? vm[1].trim() : n;
+
+  // --- infos
+  if (/\b(infos?|informations?|actu|actus|actualites?|journal|flash)\b/.test(ask) && !/podcast/.test(ask)) {
+    const i = /inter/.test(ask) ? 1 : /rfi/.test(ask) ? 2 : 0;
+    const live = /(direct|en continu|radio)/.test(ask);
+    if (live) return await playRadioByName(i === 1 ? 'France Inter' : i === 2 ? 'RFI' : 'franceinfo') || null;
+    return await playNewsFlash(i) || null;
+  }
+
+  // --- radios par nom
+  const stations = [...Src.FR_STATIONS, ...Src.NEWS_STATIONS];
+  const st = stations.filter(x => new RegExp(`\\b${norm(x).replace(/[^a-z0-9 ]/g, '.')}\\b`).test(ask)).sort((a, b) => b.length - a.length)[0];
+  if (st) return await playRadioByName(st) || null;
+
+  // --- podcasts (sélection) par nom, ou « podcast … »
+  const allPods = Src.PODCAST_CATEGORIES.flatMap(c => c.items);
+  const pod = allPods.find(p => ask.includes(norm(p.name).replace(/['’]/g, ' ')));
+  if (pod || /\bpodcast\b/.test(ask)) {
+    const q = pod ? pod.q : ask.replace(/\b(le |un |des |du )?(dernier |nouveau )?(episode |podcast )+(de |d )?/g, '').trim();
+    const cat = !pod && Src.PODCAST_CATEGORIES.find(c => new RegExp(c.id === 'horreur' ? 'horreur|peur|paranormal' : c.id === 'vraies' ? 'faits? divers|crime|histoire vraie' : c.id === 'humour' ? 'humour|drole|rire' : c.id === 'savoir' ? 'science|histoire' : c.id === 'parcours' ? 'interview|parcours|entrepreneur' : 'infos?|actu').test(ask));
+    try {
+      const show = await Src.findShow(cat ? (cat.items[0]?.q || cat.more) : (q || ask));
+      if (!show) return `Je n'ai pas trouvé ce podcast.`;
+      const p = await Src.podcastEpisodes(show.id, 3);
+      if (!p.episodes.length) return `Pas d'épisode disponible pour ${show.name}.`;
+      const t = remoteTrack(p.episodes[0], 'podcast');
+      playIds(p.episodes.map(e => remoteTrack(e, 'podcast').id), 0, { context: { label: show.name } });
+      return `Je lance le dernier épisode de ${show.name} : « ${t.title} ».`;
+    } catch (e) { return 'Les podcasts sont indisponibles pour le moment.'; }
+  }
+
+  // --- genres musicaux
+  const g = GENRES.find(([, re]) => re.test(ask));
+  if (g && (vm || /\b(musique|du|de la|son|sons|playlist|radio)\b/.test(n) || words <= 3)) {
+    const [label, , tag, ytq] = g;
+    const lib = allTracks().filter(t => t.genre && norm(t.genre).includes(norm(label).split(' ')[0]));
+    if (lib.length >= 5 && !/radio/.test(ask)) { playIds(lib.map(t => t.id), 0, { context: { label: label }, shuffle: true }); return `Je lance ${plural(lib.length, 'titre')} ${label} de ta bibliothèque.`; }
+    if (S.settings.ytKey && !/radio/.test(ask)) {
+      try {
+        const res = await Src.ytSearch(S.settings.ytKey, ytq, 20);
+        if (res.length) { const ts = res.map(x => remoteTrack(x, 'yt')); playIds(ts.map(t => t.id), 0, { context: { label: label } }); return `Je lance du ${label} sur YouTube.`; }
+      } catch { /* on tente la radio */ }
+    }
+    try {
+      const list = await Src.radioByTag(tag, 10);
+      if (list.length) { const ts = list.map(x => remoteTrack(x, 'radio')); playIds([ts[0].id], 0, { context: { label: 'Radio ' + label } }); return `Je lance une radio ${label} : ${ts[0].title}.`; }
+    } catch { /* rien */ }
+    return `Je n'ai rien trouvé en ${label} pour l'instant.`;
+  }
+
+  // --- ambiances quand la bibliothèque est petite : on passe par la radio / YouTube
+  if (allTracks().length < 8) {
+    const mood = [['ecole', /ecole|cours|devoir|revis|travail|bosser|focus|concentr|etud/], ['sport', /sport|muscu|salle|courir|running|cardio|motiv/], ['nuit', /dormir|dodo|sommeil|nuit/], ['chill', /chill|calme|detente|relax|tranquille|pluie/], ['soiree', /soiree|fete|danser|ambiance|apero/], ['matin', /matin|reveil/], ['trajet', /trajet|voiture|route/]].find(([, re]) => re.test(ask));
+    if (mood) {
+      const [tag, ytq] = MOOD_RADIO[mood[0]];
+      if (S.settings.ytKey) {
+        try { const res = await Src.ytSearch(S.settings.ytKey, ytq, 20); if (res.length) { const ts = res.map(x => remoteTrack(x, 'yt')); playIds(ts.map(t => t.id), 0, { context: { label: AI.MOODS[mood[0]]?.label || ytq } }); return `Je lance « ${AI.MOODS[mood[0]]?.label || ytq} » sur YouTube.`; } } catch { /* radio */ }
+      }
+      try { const list = await Src.radioByTag(tag, 5); if (list.length) { const t = remoteTrack(list[0], 'radio'); playIds([t.id], 0, { context: { label: 'Radio' } }); return `Pour ça, je te mets la radio ${t.title}.`; } } catch { /* rien */ }
+    }
+  }
+
+  // --- « joue X » : bibliothèque, puis YouTube, puis radios, puis podcasts
+  if (vm && ask && !/(pour|ambiance|truc|quelque chose|style|mix|playlist|genre)/.test(ask)) {
+    const local = quickCommand('joue ' + ask);
+    if (local) return local;
+    if (S.settings.ytKey) {
+      try {
+        const res = await Src.ytSearch(S.settings.ytKey, text.replace(/^.*?\b(mets?|mais|lance|joue|ecoute|passe|play|trouve|cherche)\s+(moi\s+)?/i, ''), 12);
+        if (res.length) { const ts = res.map(x => remoteTrack(x, 'yt')); playIds(ts.map(t => t.id), 0, { context: { label: 'YouTube' } }); return `Je lance « ${ts[0].title} »${ts[0].artist ? ' de ' + ts[0].artist : ''} sur YouTube.`; }
+      } catch { /* suite */ }
+    }
+    try {
+      const r = await Src.radioSearch(ask, 3);
+      if (r.length && norm(r[0].title).includes(ask.split(' ')[0])) { const t = remoteTrack(r[0], 'radio'); playIds([t.id], 0, { context: { label: 'Radio' } }); return `Je lance la radio ${t.title}.`; }
+    } catch { /* suite */ }
+    if (!S.settings.ytKey) return `Je n'ai pas « ${ask} » dans ta bibliothèque. Pour que je le trouve sur YouTube, il faut que ta clé YouTube marche (Réglages).`;
+    return `Je n'ai rien trouvé pour « ${ask} ».`;
+  }
+  return null;
+}
 // ======================================================================
 // Commandes directes (texte ou voix)
 // ======================================================================
@@ -1353,7 +1498,6 @@ async function startVoice({ navigate = false } = {}) {
     return;
   }
   if (S.voiceOn) { Voice.stopListening(); return; }
-  if (!allTracks().length && !S.settings.ytKey) return toast('Ajoute ta clé YouTube (Réglages) ou importe ta musique');
   S.voiceOn = true;
   Voice.stopSpeaking();
   const said = $('.v-said', vbox), ans = $('.v-answer', vbox);
@@ -1361,7 +1505,10 @@ async function startVoice({ navigate = false } = {}) {
   vbox.className = 'voice listening';
   vbox.hidden = false;
   requestAnimationFrame(() => vbox.classList.add('open'));
-  player.duck(true);
+  // Pendant que tu parles, la musique se met en pause (meilleure écoute), puis reprend
+  S.voiceWasPlaying = player.playing;
+  S.voiceTrack = player.currentId;
+  if (player.playing) player.pause();
   let text = '';
   try {
     text = await Voice.listen({ onPartial: t => { said.textContent = t; } });
@@ -1375,10 +1522,14 @@ async function startVoice({ navigate = false } = {}) {
     said.textContent = text;
     vbox.classList.replace('listening', 'thinking');
     const res = await aiSend(text, { navigate });
-    const reply = res?.reply || 'Je n\'ai pas compris, tu peux répéter ?';
+    const reply = res?.reply || 'Je n\'ai pas compris. Essaie par exemple « mets du rap », « mets Skyrock », « pause » ou « suivant ».';
     ans.textContent = reply;
     vbox.classList.replace('thinking', 'speaking');
-    if (S.settings.voiceReply) await Voice.speak(reply); else await new Promise(r => setTimeout(r, 1600));
+    const changed = player.currentId !== S.voiceTrack || player.playing;
+    if (changed) player.duck(true);
+    if (S.settings.voiceReply) await Voice.speak(reply); else await new Promise(r => setTimeout(r, 1400));
+    // On relance la musique si la commande ne l'a pas changée ni mise en pause
+    if (!changed && S.voiceWasPlaying && !S.cmdPaused) player.play();
   } else {
     if (!ans.textContent) ans.textContent = 'Je n\'ai rien entendu.';
     await new Promise(r => setTimeout(r, 1300));
@@ -1391,6 +1542,8 @@ function closeVoice() {
   Voice.stopListening();
   Voice.stopSpeaking();
   player.duck(false);
+  if (S.voiceWasPlaying && !player.playing && !S.cmdPaused && player.currentId === S.voiceTrack) player.play();
+  S.voiceWasPlaying = false;
   vbox.classList.remove('open');
   setTimeout(() => { if (!S.voiceOn) vbox.hidden = true; }, 350);
 }
@@ -1398,6 +1551,91 @@ $('.v-close', vbox).addEventListener('click', closeVoice);
 $('.v-orb', vbox).addEventListener('click', () => Voice.stopListening());
 
 
+
+// ======================================================================
+// Anti-pub : YouTube (SponsorBlock) et podcasts (début / fin appris)
+// ======================================================================
+const podPrefs = loadJSON('onde.podprefs', {});
+const savePodPrefs = () => saveJSON('onde.podprefs', podPrefs);
+const showKey = t => norm(t?.artist || '');
+let sbSegs = null, sbFor = null, podLearn = null, autoStartDone = null;
+
+player.addEventListener('track', async () => {
+  const t = player.current;
+  np.classList.toggle('pod', t?.source === 'podcast');
+  sbSegs = null; sbFor = t?.id; podLearn = null;
+  if (!t) return;
+  if (t.source === 'yt' && S.settings.skipAds) {
+    const segs = await Src.sponsorSegments(t.ytId);
+    if (sbFor === t.id) sbSegs = segs.map(x => ({ ...x, done: false }));
+  }
+  if (t.source === 'podcast' && S.settings.skipAds) {
+    const pr = podPrefs[showKey(t)];
+    if (pr?.start && autoStartDone !== t.id) {
+      autoStartDone = t.id;
+      const go = () => { if (player.currentId === t.id && player.time < pr.start - 3) { player.seek(pr.start); toast(`Début de l'émission sauté (${fmt(pr.start)})`); } };
+      setTimeout(go, 900);
+    }
+  }
+});
+
+player.addEventListener('time', () => {
+  const t = player.current;
+  if (!t || !S.settings.skipAds) return;
+  const now = player.time, d = player.duration;
+  if (sbSegs && t.source === 'yt') {
+    for (const sg of sbSegs) {
+      if (!sg.done && now >= sg.start && now < sg.end - 0.6) {
+        sg.done = true;
+        player.seek(sg.end);
+        toast({ sponsor: 'Pub sautée', selfpromo: 'Autopromo sautée', interaction: 'Passage hors sujet sauté', intro: 'Intro sautée', outro: 'Fin sautée', music_offtopic: 'Passage hors sujet sauté', preview: 'Aperçu sauté' }[sg.cat] || 'Passage sauté');
+        break;
+      }
+    }
+  }
+  if (t.source === 'podcast' && d && isFinite(d)) {
+    const pr = podPrefs[showKey(t)];
+    if (pr?.end && d - now <= pr.end && d - now > 1 && !t._endSkipped) { t._endSkipped = true; toast('Fin de l\'émission (pubs) sautée'); player.next(true); }
+  }
+});
+
+// Apprentissage : quand tu sautes la pub du début, je retiens où l'émission commence vraiment
+function podSkip(sec) {
+  const t = player.current;
+  if (!t) return;
+  const before = player.time;
+  player.seek(before + sec);
+  if (t.source !== 'podcast') return;
+  if (before < 400) {
+    clearTimeout(podLearn?.timer);
+    podLearn = { id: t.id, timer: setTimeout(() => {
+      if (player.currentId !== t.id || !player.playing) return;
+      const pos = Math.round(player.time - 8);
+      if (pos > 20 && pos < 480) {
+        const k = showKey(t);
+        podPrefs[k] = { ...(podPrefs[k] || {}), start: pos };
+        savePodPrefs();
+        toast(`C'est noté : pour « ${t.artist} », je sauterai directement à ${fmt(pos)}`);
+      }
+    }, 9000) };
+  }
+}
+// Passer au suivant près de la fin d'un épisode = je retiens la durée des pubs de fin
+player.addEventListener('queue', () => {
+  const prevId = S._lastPodId;
+  S._lastPodId = player.currentId;
+  if (!prevId || prevId === player.currentId) return;
+  const t = S.tracks.get(prevId);
+  if (t?.source !== 'podcast' || !S._lastPodPos) return;
+  const rem = (t.duration || 0) - S._lastPodPos;
+  if (rem > 25 && rem < 420 && S._lastPodPos > t.duration * 0.6 && !t._endSkipped) {
+    const k = showKey(t);
+    podPrefs[k] = { ...(podPrefs[k] || {}), end: Math.round(rem - 5) };
+    savePodPrefs();
+    toast(`C'est noté : je couperai les ${fmt(rem)} de fin de « ${t.artist} »`);
+  }
+});
+player.addEventListener('time', () => { if (player.current?.source === 'podcast') S._lastPodPos = player.time; });
 // ======================================================================
 // Sources en ligne : YouTube (lecteur officiel) & radios
 // ======================================================================
@@ -1472,7 +1710,8 @@ async function onlineSearch(q) {
     }
     if (src === 'info') {
       if (S.pendingShow) { const q2 = S.pendingShow; S.pendingShow = null; return openFeatured(q2); }
-      return show(newsModule(true));
+      show(newsModule(true));
+      return fillPodcastRows();
     }
     // YouTube
     const link = Src.parseYouTubeUrl(q);
@@ -1542,11 +1781,39 @@ function newsModule(full) {
   const flash = Src.NEWS_FLASH.map((f, i) => `<button class="flash ${i ? 'alt' : ''}" data-act="news-flash" data-i="${i}">${icon('play')}<span><b>${esc(f.label)}</b><small>Dernière édition</small></span></button>`).join('');
   const stations = Src.NEWS_STATIONS.map((n, i) => `<button class="station news" data-act="radio-name" data-name="${esc(n)}" style="--h:${placeholderHue(n)};--d:${i * 25}ms"><span class="st-wave"><i></i><i></i><i></i></span><b>${esc(n)}</b><small>En direct</small></button>`);
   const feat = Src.FEATURED_PODCASTS.map((p, i) => `<button class="feat" data-act="feat-pc" data-q="${esc(p.q)}" style="--h:${placeholderHue(p.name)};--d:${i * 30}ms"><b>${esc(p.name)}</b><small>${esc(p.desc)}</small></button>`);
+  const cats = full ? Src.PODCAST_CATEGORIES.map(c => {
+    const items = c.items.map((p, i) => `<button class="feat" data-act="feat-pc" data-q="${esc(p.q)}" style="--h:${placeholderHue(p.name)};--d:${i * 30}ms"><b>${esc(p.name)}</b><small>${esc(p.desc)}</small></button>`);
+    const more = `<button class="feat more" data-act="pc-more" data-q="${esc(c.more)}" data-name="${esc(c.name)}"><b>Plus de ${esc(c.name.toLowerCase())}</b>${icon('next-up')}</button>`;
+    return `<section class="shelf"><div class="shelf-head"><h2>${esc(c.name)}</h2></div><div class="shelf-row" ${c.search ? `data-fill="${esc(c.search.join('|'))}"` : ''}>${items.join('')}${c.search ? '<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>' : ''}${more}</div></section>`;
+  }).join('') : shelf('Podcasts à écouter', feat);
   return `<section class="shelf news-mod"><div class="shelf-head"><h2>${icon('radio')} Les infos</h2></div>
       <div class="flash-row">${flash}</div></section>
     ${shelf('Infos en direct', stations)}
-    ${shelf('Podcasts à écouter', feat)}
-    ${full ? podcastFavs() : ''}`;
+    ${full ? podcastFavs() : ''}
+    ${cats}`;
+}
+
+// Remplit les catégories sans sélection fixe (ex. horreur) avec les émissions les plus populaires
+async function fillPodcastRows() {
+  for (const row of $$('[data-fill]')) {
+    const terms = row.dataset.fill.split('|');
+    row.removeAttribute('data-fill');
+    const seen = new Set(), out = [];
+    for (const term of terms) {
+      try { for (const p of await Src.podcastSearch(term, 8)) if (!seen.has(p.id)) { seen.add(p.id); out.push(p); } } catch { /* hors ligne */ }
+    }
+    row.querySelector('.online-loading')?.remove();
+    row.insertAdjacentHTML('afterbegin', out.slice(0, 12).map((p, i) => `<button class="feat art" data-act="pc-show" data-id="${p.id}" style="--d:${i * 30}ms">${p.art ? `<img src="${esc(p.art)}" alt="" loading="lazy">` : ''}<b>${esc(p.name)}</b><small>${esc(p.author)}</small></button>`).join(''));
+  }
+}
+
+async function morePodcasts(q, name) {
+  $('#results').innerHTML = '<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>';
+  try {
+    const res = await Src.podcastSearch(q, 30);
+    $('#results').innerHTML = `<button class="link back-link" data-act="src" data-src="info">${icon('back')} Les infos</button><h2 class="sec-title">${esc(name)}</h2>` +
+      (res.length ? `<div class="pc-grid">${res.map((p, i) => `<button class="pc-card" data-act="pc-show" data-id="${p.id}" style="--d:${Math.min(i, 12) * 30}ms"><img src="${esc(p.art)}" alt="" loading="lazy"><b>${esc(p.name)}</b><small>${esc(p.author)}</small></button>`).join('')}</div>` : '<div class="no-res"><b>Rien trouvé</b></div>');
+  } catch (e) { $('#results').innerHTML = `<div class="no-res"><b>Podcasts indisponibles</b><p>${esc(e.message)}</p></div>`; }
 }
 
 async function playNewsFlash(i, btn) {
@@ -1917,6 +2184,9 @@ function viewSettings() {
         <li>Conseillé : restreins la clé à « YouTube Data API v3 ».</li>
       </ol><p>Gratuit, environ 100 recherches par jour. La clé reste sur ton téléphone.</p></details>
     </section>
+    <section class="set-group"><h3>Anti-pub</h3>
+      <label class="set-item toggle"><div><b>Sauter les pubs et passages hors sujet</b><small>YouTube : sponsors, autopromo, intros (base collaborative SponsorBlock). Podcasts : quand tu sautes la pub du début ou de la fin, l'app s'en souvient pour les épisodes suivants de la même émission.</small></div><input type="checkbox" id="set-ads" ${S.settings.skipAds ? 'checked' : ''}><span class="sw"></span></label>
+    </section>
     <section class="set-group"><h3>Paroles</h3>
       <label class="set-item toggle"><div><b>Chercher les paroles en ligne</b><small>Paroles synchronisées gratuites (LRCLIB) quand ton fichier n'en contient pas. Seuls le titre et l'artiste sont envoyés.</small></div><input type="checkbox" id="set-lyr" ${S.settings.onlineLyrics ? 'checked' : ''}><span class="sw"></span></label>
       <p class="set-note">Tu peux aussi importer des fichiers <b>.lrc</b> avec le même nom que tes musiques, ou coller les paroles depuis le menu ⋯ d'un titre.</p>
@@ -2038,6 +2308,7 @@ function afterRender(view, r) {
   if (r.name === 'settings') {
     $('#set-name', view).addEventListener('change', e => { S.settings.name = e.target.value.trim(); saveSettings(); toast('Enchanté, ' + (S.settings.name || 'toi') + ' ✦'); });
     $('#set-yt', view).addEventListener('change', e => { S.settings.ytKey = e.target.value.trim(); saveSettings(); toast(S.settings.ytKey ? 'Clé YouTube enregistrée ✦' : 'Clé supprimée'); });
+    $('#set-ads', view).addEventListener('change', e => { S.settings.skipAds = e.target.checked; saveSettings(); });
     $('#set-voice', view).addEventListener('change', e => { S.settings.voiceReply = e.target.checked; saveSettings(); });
     $('#set-lyr', view).addEventListener('change', e => { S.settings.onlineLyrics = e.target.checked; saveSettings(); });
     $('#set-key', view).addEventListener('change', e => { S.settings.apiKey = e.target.value.trim(); saveSettings(); toast(S.settings.apiKey ? 'Clé enregistrée sur ce téléphone' : 'Clé supprimée'); });
@@ -2146,6 +2417,7 @@ document.addEventListener('click', e => {
       case 'radio-name': return playRadioByName(act.dataset.name, act);
       case 'pc-show': return showPodcast(act.dataset.id);
       case 'news-flash': return playNewsFlash(+act.dataset.i || 0, act);
+      case 'pc-more': return morePodcasts(act.dataset.q, act.dataset.name);
       case 'feat-pc': {
         if (S.route?.name === 'search') return openFeatured(act.dataset.q);
         S.settings.searchSrc = 'info'; S.searchQ = ''; S.pendingShow = act.dataset.q; saveSettings(); S.pendingFwd = true; return goto('#/search');

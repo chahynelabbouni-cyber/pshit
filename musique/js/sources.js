@@ -294,6 +294,48 @@ export const FEATURED_PODCASTS = [
   { name: 'L\'Heure du Crime', desc: 'Les plus grandes affaires criminelles', q: 'L\'heure du crime RTL' },
   { name: 'Méta de choc', desc: 'Curiosité, sciences et esprit critique', q: 'Méta de choc' },
 ];
+// Podcasts par catégories. « q » = recherche précise d'une émission, « more » = recherche pour voir plus.
+export const PODCAST_CATEGORIES = [
+  { id: 'infos', name: 'Infos & actu', more: 'actualité', items: [
+    { name: 'L\'Heure du Monde', desc: 'L\'actu décryptée par Le Monde', q: 'L\'Heure du Monde' },
+    { name: 'Code source', desc: 'Une histoire d\'actu racontée chaque jour', q: 'Code source Le Parisien' },
+  ] },
+  { id: 'vraies', name: 'Histoires vraies & faits divers', more: 'faits divers', items: [
+    { name: 'Hondelatte raconte', desc: 'Faits divers et grandes histoires', q: 'Hondelatte raconte' },
+    { name: 'Affaires sensibles', desc: 'Les grandes affaires d\'hier et d\'aujourd\'hui', q: 'Affaires sensibles France Inter' },
+    { name: 'L\'Heure du Crime', desc: 'Les plus grandes affaires criminelles', q: 'L\'heure du crime RTL' },
+    { name: 'Transfert', desc: 'Des histoires vraies racontées par ceux qui les ont vécues', q: 'Transfert Slate' },
+    { name: 'Les Pieds sur terre', desc: 'Reportages et témoignages', q: 'Les Pieds sur terre France Culture' },
+  ] },
+  { id: 'horreur', name: 'Horreur & paranormal', more: 'horreur paranormal', items: [], search: ['histoires horreur', 'paranormal', 'creepypasta'] },
+  { id: 'parcours', name: 'Interviews & parcours', more: 'interview parcours', items: [
+    { name: 'LEGEND', desc: 'Les histoires incroyables de Guillaume Pley', q: 'LEGEND Guillaume Pley' },
+    { name: 'Génération Do It Yourself', desc: 'Entrepreneurs et parcours inspirants', q: 'Génération Do It Yourself' },
+    { name: 'Le Gratin', desc: 'Les secrets de ceux qui réussissent', q: 'Le Gratin Pauline Laigneau' },
+  ] },
+  { id: 'savoir', name: 'Sciences & histoire', more: 'histoire sciences', items: [
+    { name: 'Méta de choc', desc: 'Curiosité, sciences et esprit critique', q: 'Méta de choc' },
+    { name: 'La Méthode scientifique', desc: 'La science expliquée', q: 'La Méthode scientifique France Culture' },
+    { name: 'Le Cours de l\'histoire', desc: 'Les grands moments de l\'Histoire', q: 'Le Cours de l\'histoire France Culture' },
+  ] },
+  { id: 'humour', name: 'Humour', more: 'humour', items: [
+    { name: 'Les Grosses Têtes', desc: 'L\'émission culte de RTL', q: 'Les Grosses Têtes RTL' },
+    { name: 'Floodcast', desc: 'Discussions sans filtre entre potes', q: 'Floodcast' },
+  ] },
+];
+
+// SponsorBlock : base collaborative des passages sponsorisés / hors sujet dans les vidéos YouTube
+export async function sponsorSegments(videoId) {
+  const cats = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'music_offtopic', 'preview'];
+  const p = new URLSearchParams({ videoID: videoId, categories: JSON.stringify(cats) });
+  try {
+    const r = await fetch(`https://sponsor.ajay.app/api/skipSegments?${p}`);
+    if (!r.ok) return [];
+    const j = await r.json();
+    return j.filter(x => x.actionType !== 'mute' && x.actionType !== 'full').map(x => ({ start: x.segment[0], end: x.segment[1], cat: x.category }));
+  } catch { return []; }
+}
+
 export async function findShow(q) {
   const r = await podcastSearch(q, 3);
   return r[0] || null;

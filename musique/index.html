@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/app.css?v=9">
+<link rel="stylesheet" href="css/app.css?v=10">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -116,10 +116,12 @@
     </div>
     <div class="np-ctrls">
       <button class="ib sm np-shuffle" aria-label="Aléatoire"><svg><use href="#i-shuffle"/></svg></button>
+      <button class="ib sm np-back" aria-label="Reculer de 15 secondes"><b>−15</b></button>
       <button class="ib np-prev" aria-label="Précédent"><svg><use href="#i-prev"/></svg></button>
       <button class="np-play" aria-label="Lecture"><svg><use href="#i-play"/></svg></button>
       <button class="ib np-next" aria-label="Suivant"><svg><use href="#i-next"/></svg></button>
       <button class="ib sm np-repeat" aria-label="Répéter"><svg><use href="#i-repeat"/></svg><em>1</em></button>
+      <button class="ib sm np-fwd" aria-label="Avancer de 30 secondes (passer la pub)"><b>+30</b></button>
     </div>
     <div class="np-foot">
       <button class="ib sm np-sleep" aria-label="Minuteur de sommeil"><svg><use href="#i-timer"/></svg><em></em></button>
@@ -156,6 +158,6 @@
 <input type="file" id="pick-files" accept="audio/*,.mp3,.m4a,.aac,.flac,.ogg,.opus,.wav,.webm" multiple hidden>
 <input type="file" id="pick-folder" webkitdirectory multiple hidden>
 
-<script type="module" src="js/app.js?v=9"></script>
+<script type="module" src="js/app.js?v=10"></script>
 </body>
 </html>

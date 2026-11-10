@@ -690,3 +690,16 @@ body.has-mini .ai-foot { bottom: calc(var(--tabs-h) + var(--mini-h) + var(--safe
 .feat:active { transform: scale(.95); }
 .feat b { font-family: var(--serif); font-size: 19px; font-weight: 500; line-height: 1.1; }
 .feat small { color: var(--muted); font-size: 12px; line-height: 1.3; }
+
+/* Podcasts : boutons ±, catégories */
+.np-back, .np-fwd { display: none !important; }
+.np.pod .np-back, .np.pod .np-fwd { display: inline-grid !important; }
+.np.pod .np-shuffle, .np.pod .np-repeat { display: none !important; }
+.np-back b, .np-fwd b { font-size: 14px; font-weight: 800; color: rgba(255,255,255,.85); border: 2px solid rgba(255,255,255,.5); border-radius: 50%; width: 38px; height: 38px; display: grid; place-items: center; }
+.np-fwd b { border-color: var(--gold); color: var(--gold); }
+.feat.more { justify-content: center; align-items: flex-start; background: var(--bg2); }
+.feat.more svg { color: var(--gold); margin-top: 6px; }
+.feat.art { justify-content: flex-start; background: var(--bg2); width: 150px; }
+.feat.art img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; margin-bottom: 6px; }
+.feat.art b { font-family: inherit; font-size: 14px; font-weight: 700; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.shelf-row .online-loading { padding: 30px 20px; }
