@@ -73,14 +73,18 @@ function blank() {
       googleConnected: false,
       lastSync: 0,
       voiceReply: false,
-      calView: 'month',
+      calView: 'week',
+      uiVersion: 3,
+      onboarded: false,
+      googleAddPrompt: true,
+      meSeg: 'goals',
       // personnalisation
       avatar: '🥊',
       palette: 'or',
       accent: '',
       textSize: 1,
       contrast: false,
-      homeModules: DEFAULT_HOME.map(id => ({ id, on: true })),
+      homeModules: defaultHome(),
       catOverrides: {},
       customCats: [],
       rules: [],
@@ -99,22 +103,24 @@ function blank() {
   };
 }
 
+// Blocs de l'accueil : [titre, description]. Les 5 premiers sont affichés par défaut.
 export const HOME_MODULES = {
-  brief: '☀️ Briefing du jour',
-  now: '⏱ En ce moment / prochain',
-  quick: '✦ Ajout rapide & raccourcis',
-  insights: '💡 Conseils perso',
-  day: '📅 Ma journée',
-  due: '⏳ Échéances',
-  goals: '🎯 Objectifs',
-  focus: '🧠 Focus',
-  countdowns: '⌛ Comptes à rebours',
-  subjects: '📚 Mes matières',
-  notes: '📌 Notes épinglées',
-  tomorrow: '🌙 Demain',
-  week: '📊 Ma semaine',
+  now: ['⏱ Maintenant / ensuite', 'Ce que tu fais et ce qui arrive'],
+  quick: ['✦ Ajout rapide', 'Écrire ou dicter un événement'],
+  insights: ['💡 Le conseil du jour', 'Une seule suggestion utile'],
+  day: ["📅 Ma journée", "Tout ce qui est prévu aujourd'hui"],
+  due: ['⏳ À ne pas rater', 'Les 3 prochains examens, remises et tâches'],
+  brief: ['☀️ Résumé du jour', 'Ta journée en 2 phrases, à écouter'],
+  tomorrow: ['🌙 Demain', 'Ce qui t\'attend demain'],
+  goals: ['🎯 Mes objectifs', 'Boxe, révisions, habitudes'],
+  focus: ['🧠 Minuteur de révision', 'Lancer une séance de travail'],
+  subjects: ['📚 Mes matières', 'Prochain cours et contrôle par matière'],
+  countdowns: ['⌛ Comptes à rebours', 'Vacances, examens, dates importantes'],
+  notes: ['📌 Notes épinglées', 'Ce que tu ne dois pas oublier'],
+  week: ['📊 Ma semaine en graphique', 'Heures occupées par jour'],
 };
-const DEFAULT_HOME = Object.keys(HOME_MODULES);
+const DEFAULT_ON = ['now', 'quick', 'insights', 'day', 'due'];
+function defaultHome() { return Object.keys(HOME_MODULES).map(id => ({ id, on: DEFAULT_ON.includes(id) })); }
 
 let state = load();
 refreshCats();
@@ -127,9 +133,13 @@ function load() {
       const s = JSON.parse(raw);
       const b = blank();
       const out = { ...b, ...s, settings: { ...b.settings, ...(s.settings || {}) } };
+      // nouvelle interface (v3) : accueil épuré, vue semaine, accueil guidé
+      if ((out.settings.uiVersion || 0) < 3) {
+        Object.assign(out.settings, { uiVersion: 3, homeModules: defaultHome(), calView: 'week', onboarded: false, textSize: Math.max(1, out.settings.textSize || 1) });
+      }
       // ajoute les nouveaux modules d'accueil apparus depuis
       const have = new Set(out.settings.homeModules.map(m => m.id));
-      for (const id of Object.keys(HOME_MODULES)) if (!have.has(id)) out.settings.homeModules.push({ id, on: true });
+      for (const id of Object.keys(HOME_MODULES)) if (!have.has(id)) out.settings.homeModules.push({ id, on: false });
       out.settings.homeModules = out.settings.homeModules.filter(m => HOME_MODULES[m.id]);
       return out;
     }
