@@ -1,8 +1,8 @@
 // Service worker : l'application fonctionne entièrement hors connexion.
-const CACHE = 'maison-chahyn-v2';
+const CACHE = 'maison-chahyn-v3';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/app.js', 'js/db.js', 'js/tags.js', 'js/player.js', 'js/lyrics.js', 'js/ai.js',
+  'js/app.js', 'js/db.js', 'js/tags.js', 'js/player.js', 'js/lyrics.js', 'js/ai.js', 'js/voice.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 

@@ -122,6 +122,7 @@
     <div class="np-foot">
       <button class="ib sm np-sleep" aria-label="Minuteur de sommeil"><svg><use href="#i-timer"/></svg><em></em></button>
       <button class="np-lyr-btn" aria-label="Paroles"><svg><use href="#i-mic"/></svg><span>Paroles</span></button>
+      <button class="ib sm np-voice" aria-label="Commande vocale"><svg><use href="#i-mic"/></svg></button>
       <button class="ib sm np-queue" aria-label="File d'attente"><svg><use href="#i-queue"/></svg></button>
     </div>
   </div>
@@ -135,6 +136,15 @@
 <div id="sheet" class="sheet" hidden>
   <div class="sheet-scrim"></div>
   <div class="sheet-panel"><div class="sheet-grip"></div><div class="sheet-body"></div></div>
+</div>
+
+<div id="voice" class="voice" hidden>
+  <button class="ib v-close" aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
+  <div class="v-orb" role="button" aria-label="Terminer"><i></i><i></i><i></i><svg><use href="#i-mic"/></svg></div>
+  <div class="v-status"><span class="s-l">Je t'écoute…</span><span class="s-t">Je réfléchis…</span><span class="s-s">Le Concierge</span></div>
+  <p class="v-said"></p>
+  <p class="v-answer"></p>
+  <p class="v-hint">Essaie : « Mets une playlist pour l'école », « Joue Nova Ray », « Suivant », « Pause », « C'est quoi ce son ? »</p>
 </div>
 
 <div id="toast" class="toast" role="status"></div>

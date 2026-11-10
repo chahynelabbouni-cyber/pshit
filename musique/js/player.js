@@ -34,13 +34,14 @@ export class Player extends EventTarget {
     this.ctx = null;
     this.sleepAt = 0;
     this.sleepEndOfTrack = false;
+    this.gain = 1;
 
     this.els.forEach((el, i) => {
       el.preload = 'auto';
       el.addEventListener('timeupdate', () => i === this.cur && this.onTime());
       el.addEventListener('ended', () => i === this.cur && this.onEnded());
-      el.addEventListener('play', () => i === this.cur && this.emit('state'));
-      el.addEventListener('pause', () => i === this.cur && !this.fading && this.emit('state'));
+      el.addEventListener('play', () => { if (i === this.cur) { this.emit('state'); this.setMSState('playing'); } });
+      el.addEventListener('pause', () => { if (i === this.cur && !this.fading) { this.emit('state'); this.setMSState('paused'); } });
       el.addEventListener('loadedmetadata', () => i === this.cur && this.emit('time'));
       el.addEventListener('error', () => {
         if (i === this.cur && el.src) { this.emit('error'); }
@@ -73,10 +74,31 @@ export class Player extends EventTarget {
 
   cancelFade() {
     if (!this.fading) return;
-    cancelAnimationFrame(this.fading.raf);
+    clearInterval(this.fading.timer);
     this.fading = null;
     this.other.pause();
-    if (!isIOS) this.el.volume = 1;
+    if (!isIOS) this.el.volume = this.gain;
+  }
+
+  // Les minuteurs (contrairement aux animations) continuent quand l'écran est éteint
+  // ou l'app en arrière-plan : les fondus fonctionnent donc aussi en poche.
+  ramp(ms, onStep, onDone) {
+    const start = Date.now();
+    const id = setInterval(() => {
+      const p = Math.min(1, (Date.now() - start) / ms);
+      onStep(p);
+      if (p >= 1) { clearInterval(id); onDone?.(); }
+    }, 50);
+    return id;
+  }
+
+  // Baisse le son pendant que l'assistant vocal écoute ou parle
+  duck(on) {
+    this.gain = on ? 0.2 : 1;
+    if (isIOS || this.fading) return;
+    const el = this.el, from = el.volume, to = this.gain;
+    clearInterval(this._duckT);
+    this._duckT = this.ramp(350, p => { el.volume = from + (to - from) * p; });
   }
 
   async load(autoplay = true, startAt = 0) {
@@ -90,7 +112,7 @@ export class Player extends EventTarget {
       this.emit('error', e);
       return;
     }
-    this.el.volume = 1;
+    if (!isIOS) this.el.volume = this.gain;
     if (startAt) {
       const seek = () => { try { this.el.currentTime = startAt; } catch { /* ignore */ } };
       if (this.el.readyState >= 1) seek(); else this.el.addEventListener('loadedmetadata', seek, { once: true });
@@ -113,6 +135,10 @@ export class Player extends EventTarget {
       this.analyser.smoothingTimeConstant = 0.8;
       this.els.forEach(el => this.ctx.createMediaElementSource(el).connect(this.analyser));
       this.analyser.connect(this.ctx.destination);
+      // Si le système suspend le moteur audio (écran éteint), on le relance pour ne pas couper la musique
+      const wake = () => { if (this.ctx.state !== 'running' && this.playing) this.ctx.resume().catch(() => {}); };
+      this.ctx.addEventListener('statechange', wake);
+      document.addEventListener('visibilitychange', wake);
     } catch (e) {
       console.warn('Visualiseur indisponible', e);
       this.ctx = null; this.analyser = null;
@@ -272,20 +298,15 @@ export class Player extends EventTarget {
   fadeOutAndPause() {
     const el = this.el;
     if (isIOS) { el.pause(); return; }
-    const start = performance.now();
-    const step = now => {
-      const p = Math.min(1, (now - start) / 3000);
-      el.volume = 1 - p;
-      if (p < 1) requestAnimationFrame(step); else { el.pause(); el.volume = 1; this.emit('state'); }
-    };
-    requestAnimationFrame(step);
+    const v0 = el.volume;
+    this.ramp(3000, p => { el.volume = v0 * (1 - p); }, () => { el.pause(); el.volume = this.gain; this.emit('state'); });
   }
 
   async startCrossfade(len) {
     const n = this.nextIndex();
     const nextSlot = 1 - this.cur;
     const out = this.el;
-    this.fading = { raf: 0 };
+    this.fading = { timer: 0 };
     try {
       await this.srcFor(nextSlot, this.queue[n]);
     } catch { this.fading = null; return; }
@@ -300,18 +321,14 @@ export class Player extends EventTarget {
     this.emit('track');
     this.updateMediaSession();
     this.markPlayed();
-    const start = performance.now();
-    const dur = len * 1000;
-    const step = now => {
-      if (!this.fading) return;
-      const p = Math.min(1, (now - start) / dur);
-      // Courbe à puissance constante
-      out.volume = Math.cos(p * Math.PI / 2);
-      inc.volume = Math.sin(p * Math.PI / 2);
-      if (p < 1) this.fading.raf = requestAnimationFrame(step);
-      else { out.pause(); out.volume = 1; inc.volume = 1; this.fading = null; this.emit('state'); }
-    };
-    this.fading.raf = requestAnimationFrame(step);
+    const g = this.gain;
+    const finish = () => { out.pause(); out.volume = this.gain; inc.volume = this.gain; this.fading = null; this.emit('state'); };
+    // Courbe à puissance constante
+    this.fading.timer = this.ramp(len * 1000, p => {
+      out.volume = Math.cos(p * Math.PI / 2) * g;
+      inc.volume = Math.sin(p * Math.PI / 2) * g;
+    }, finish);
+    out.addEventListener('ended', () => { if (this.fading) { clearInterval(this.fading.timer); finish(); } }, { once: true });
   }
 
   onEnded() {
@@ -358,6 +375,10 @@ export class Player extends EventTarget {
       album: t.album || '',
       artwork: art ? [{ src: art, sizes: '512x512' }] : [],
     });
+  }
+
+  setMSState(st) {
+    try { if ('mediaSession' in navigator) navigator.mediaSession.playbackState = st; } catch { /* ignore */ }
   }
 
   updatePosition() {

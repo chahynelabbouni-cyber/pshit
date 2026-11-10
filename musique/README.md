@@ -11,6 +11,9 @@ Le lecteur de musique personnel de Chahyn : noir & or, sans pub, hors connexion.
   - Fonctionne sans internet ni compte.
   - Option : ajoute ta clé API Claude (Réglages) pour qu'il comprenne n'importe quelle demande.
 
+- **Lecture en arrière-plan** : la musique continue écran éteint ou dans une autre app, avec les commandes sur l'écran de verrouillage, le casque et la montre (fondus compris).
+- **Mode vocal** : bouton micro (accueil, lecteur, Concierge). Dis « mets une playlist pour l'école », « joue Nova Ray », « suivant », « pause », « c'est quoi ce son ? », « arrête dans 20 minutes »… Le Concierge exécute et répond à voix haute (désactivable dans les Réglages). La reconnaissance vocale utilise le service du téléphone (Chrome/Safari) et demande internet.
+
 ## Installer sur le téléphone
 1. Mettre le dossier `musique/` en ligne une fois en HTTPS (GitHub Pages : Settings → Pages → branche `main`, dossier `/`).
 2. Ouvrir `https://<utilisateur>.github.io/<dépôt>/musique/` sur le téléphone.

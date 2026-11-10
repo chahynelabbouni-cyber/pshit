@@ -3,6 +3,7 @@ import { readTags } from './tags.js';
 import { Player, isIOS } from './player.js';
 import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js';
 import * as AI from './ai.js';
+import * as Voice from './voice.js';
 
 const BRAND = 'Maison Chahyn';
 
@@ -14,7 +15,7 @@ const S = {
   playlists: new Map(),
   covers: new Map(),       // coverId -> objectURL
   colors: loadJSON('onde.colors', {}),
-  settings: Object.assign({ name: 'Chahyn', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '' }, loadJSON('onde.settings', {})),
+  settings: Object.assign({ name: 'Chahyn', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true }, loadJSON('onde.settings', {})),
   mixes: {},
   chat: loadJSON('onde.chat', []),
   version: 0,
@@ -471,6 +472,7 @@ np.addEventListener('click', e => {
   if (b.classList.contains('np-like')) return toggleLike(player.current);
   if (b.classList.contains('np-queue')) return queueSheet();
   if (b.classList.contains('np-sleep')) return sleepSheet();
+  if (b.classList.contains('np-voice')) return startVoice();
   if (b.classList.contains('np-artist')) { const n = artistOf(player.current); S.pendingFwd = true; return closeAllOverlays().then(() => goto('#/artist/' + encodeURIComponent(n))); }
 });
 seek.addEventListener('input', () => {
@@ -1146,7 +1148,7 @@ function viewAI() {
     <div class="ai-log" id="ai-log">${renderChat()}</div>
     <div class="ai-foot">
     ${has ? `<div class="ai-suggest">${AI_SUGGEST.map(x => `<button class="chip" data-act="ai-send" data-text="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : ''}
-    <form class="ai-input" id="ai-form"><input id="ai-q" placeholder="${has ? 'Demande une playlist, une ambiance…' : 'Importe ta musique pour commencer'}" autocomplete="off" enterkeyhint="send" ${has ? '' : 'disabled'}><button class="ai-send" aria-label="Envoyer">${icon('send')}</button></form>
+    <form class="ai-input" id="ai-form"><input id="ai-q" placeholder="${has ? 'Écris ou parle au Concierge…' : 'Importe ta musique pour commencer'}" autocomplete="off" enterkeyhint="send" ${has ? '' : 'disabled'}>${has ? `<button type="button" class="ai-mic" data-act="voice" aria-label="Parler au Concierge">${icon('mic')}</button>` : ''}<button class="ai-send" aria-label="Envoyer">${icon('send')}</button></form>
     </div>
   </div>`;
 }
@@ -1177,16 +1179,24 @@ function afterAI(view) {
   return log;
 }
 
-async function aiSend(text) {
-  if (S.aiBusy || !text) return;
+async function aiSend(text, { navigate = true } = {}) {
+  if (S.aiBusy || !text) return null;
   const tracks = allTracks();
-  if (!tracks.length) return toast('Importe d\'abord ta musique');
-  if (S.route?.name !== 'ai') { S.pendingFwd = true; goto('#/ai'); await new Promise(r => setTimeout(r, 60)); }
+  if (!tracks.length) { toast('Importe d\'abord ta musique'); return { reply: 'Importe d\'abord ta musique pour que je puisse t\'aider.' }; }
+  if (navigate && S.route?.name !== 'ai') { S.pendingFwd = true; goto('#/ai'); await new Promise(r => setTimeout(r, 60)); }
   S.chat.push({ role: 'user', text });
+  // Commandes directes (pause, suivant, « joue … »)
+  const quick = quickCommand(text);
+  if (quick) {
+    S.chat.push({ role: 'assistant', text: quick });
+    saveJSON('onde.chat', S.chat);
+    if (S.route?.name === 'ai') { $('#ai-log').innerHTML = renderChat(); main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' }); }
+    return { reply: quick };
+  }
   S.aiBusy = true;
   document.body.classList.add('ai-busy');
   const log = $('#ai-log');
-  log.insertAdjacentHTML('beforeend', `<div class="msg me"><p>${esc(text)}</p></div><div class="msg bot typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
+  log?.insertAdjacentHTML('beforeend', `<div class="msg me"><p>${esc(text)}</p></div><div class="msg bot typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
   main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
   let res;
   const t0 = Date.now();
@@ -1227,12 +1237,112 @@ async function aiSend(text) {
     $('#ai-log').innerHTML = renderChat();
     main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
   }
-  if (res.play && res.mix) {
+  if ((res.play || !navigate) && res.mix) {
     const key = 'chat-' + (S.chat.length - 1);
     const mx = S.mixes[key] || res.mix;
     playIds(mx.tracks.map(t => t.id), 0, { context: { label: mx.name, route: '#/mix/' + key } });
   }
+  return res;
 }
+
+// ======================================================================
+// Commandes directes (texte ou voix)
+// ======================================================================
+function quickCommand(text) {
+  const n = norm(text).replace(/[.!?,]/g, ' ').replace(/'/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = n.split(' ').length;
+  const cur = player.current;
+  if (words <= 4) {
+    if (/^(pause|stop|arrete|coupe|silence|tais)/.test(n)) { player.pause(); return 'Pause.'; }
+    if (/^(reprends|reprend|play|relance|continue|remets|lecture)$/.test(n)) { player.play(); return 'C\'est reparti.'; }
+    if (/(suivant|suivante|next|passe|skip|zappe|change)/.test(n)) { player.next(); return 'Titre suivant.'; }
+    if (/(precedent|precedente|reviens|d avant)/.test(n)) { player.prev(); return 'Titre précédent.'; }
+    if (/(aleatoire|shuffle|melange)/.test(n)) { player.toggleShuffle(); return player.shuffle ? 'Lecture aléatoire activée.' : 'Lecture aléatoire désactivée.'; }
+    if (/(en boucle|repete|boucle)/.test(n)) { player.repeat = 'one'; player.emit('modes'); return 'Je répète ce titre.'; }
+  }
+  if (cur && words <= 7 && /(j aime|like|coeur|favori|kiffe)/.test(n) && !/playlist|mix/.test(n)) {
+    if (!cur.liked) toggleLike(cur);
+    return `« ${cur.title} » est dans tes titres likés.`;
+  }
+  if (cur && /(c est quoi|quel est|qu est ce que|qui chante|c quoi).*(titre|son|musique|chanson|ca)|qui chante/.test(n)) return `C'est « ${cur.title} » de ${artistOf(cur)}.`;
+  if (cur && /paroles/.test(n) && words <= 6) { openNP(); setTimeout(openLyrics, 450); return 'Voici les paroles.'; }
+  const sl = n.match(/(?:minuteur|arrete|stop|coupe).*?(\d+)\s*(?:min|minute)/);
+  if (sl) { player.setSleep(+sl[1]); return `D'accord, j'arrête la musique dans ${sl[1]} minutes.`; }
+  const m = n.match(/^(?:joue|jouer|mets|met|mais|lance|ecoute|ecouter|play)\s+(?:moi\s+)?(.+)$/);
+  if (!m) return null;
+  const q0 = m[1].trim();
+  let q = m[1].replace(/^(la |le |les |l |du |des |un |une )/, '').replace(/^(chanson|titre|son|musique|morceau|album|playlist|artiste)\s+/, '').replace(/^(de |d )/, '').trim();
+  if (!q || /(pour|ambiance|truc|quelque chose|style|mix|playlist|genre)/.test(q)) return null;
+  const ctx = label => ({ context: { label } });
+  if (/titres? likes?|favoris|coups? de coeur/.test(q) && liked().length) { playIds(liked().map(t => t.id), 0, ctx('Titres likés')); return 'Je lance tes titres likés.'; }
+  const pl = [...S.playlists.values()].find(p => norm(p.name) === q || norm(p.name) === q0) || [...S.playlists.values()].find(p => norm(p.name).length > 2 && q.includes(norm(p.name)));
+  if (pl && pl.trackIds.length) { playIds(pl.trackIds.filter(id => S.tracks.has(id)), 0, ctx(pl.name)); return `Je lance ta playlist « ${pl.name} ».`; }
+  const tracks = allTracks();
+  const eq = x => x === q || x === q0;
+  const exact = tracks.find(t => eq(norm(t.title))) || tracks.find(t => norm(`${t.title} ${t.artist}`) === q.replace(/ de /, ' '));
+  if (exact) { playIds([exact.id, ...tracks.filter(t => t.artist === exact.artist && t.id !== exact.id).map(t => t.id)], 0, ctx(exact.title)); return `Voici « ${exact.title} » de ${artistOf(exact)}.`; }
+  const al = [...albums().values()].find(a => eq(norm(a.title)) || (norm(a.title).length > 3 && q0.includes(norm(a.title))));
+  if (al) { playIds(al.tracks.map(t => t.id), 0, ctx(al.title)); return `Je lance l'album « ${al.title} » de ${al.artist}.`; }
+  const ar = [...artists().values()].sort((a, b) => b.name.length - a.name.length).find(a => eq(norm(a.name)) || (norm(a.name).length > 2 && q0.includes(norm(a.name))));
+  if (ar) { playIds(ar.tracks.map(t => t.id), 0, { context: { label: ar.name }, shuffle: true }); return `Je lance ${ar.name}.`; }
+  const part = tracks.find(t => norm(t.title).length > 3 && (q.includes(norm(t.title)) || norm(t.title).includes(q)));
+  if (part) { playIds([part.id], 0, ctx(part.title)); return `Voici « ${part.title} » de ${artistOf(part)}.`; }
+  return null;
+}
+
+// ======================================================================
+// Mode vocal
+// ======================================================================
+const vbox = $('#voice');
+async function startVoice({ navigate = false } = {}) {
+  if (!Voice.canListen) {
+    toast('La commande vocale n\'est pas disponible sur ce navigateur (essaie Chrome ou Safari à jour)');
+    return;
+  }
+  if (S.voiceOn) { Voice.stopListening(); return; }
+  if (!allTracks().length) return toast('Importe d\'abord ta musique');
+  S.voiceOn = true;
+  Voice.stopSpeaking();
+  const said = $('.v-said', vbox), ans = $('.v-answer', vbox);
+  said.textContent = ''; ans.textContent = '';
+  vbox.className = 'voice listening';
+  vbox.hidden = false;
+  requestAnimationFrame(() => vbox.classList.add('open'));
+  player.duck(true);
+  let text = '';
+  try {
+    text = await Voice.listen({ onPartial: t => { said.textContent = t; } });
+  } catch (e) {
+    ans.textContent = e.message === 'not-allowed' || e.message === 'service-not-allowed'
+      ? 'Autorise le micro pour cette app dans les réglages du navigateur.'
+      : e.message === 'network' ? 'La reconnaissance vocale a besoin d\'internet.' : 'Je n\'ai pas pu t\'écouter.';
+  }
+  if (!S.voiceOn) return;
+  if (text) {
+    said.textContent = text;
+    vbox.classList.replace('listening', 'thinking');
+    const res = await aiSend(text, { navigate });
+    const reply = res?.reply || 'Je n\'ai pas compris, tu peux répéter ?';
+    ans.textContent = reply;
+    vbox.classList.replace('thinking', 'speaking');
+    if (S.settings.voiceReply) await Voice.speak(reply); else await new Promise(r => setTimeout(r, 1600));
+  } else {
+    if (!ans.textContent) ans.textContent = 'Je n\'ai rien entendu.';
+    await new Promise(r => setTimeout(r, 1300));
+  }
+  closeVoice();
+}
+function closeVoice() {
+  if (!S.voiceOn) return;
+  S.voiceOn = false;
+  Voice.stopListening();
+  Voice.stopSpeaking();
+  player.duck(false);
+  vbox.classList.remove('open');
+  setTimeout(() => { if (!S.voiceOn) vbox.hidden = true; }, 350);
+}
+$('.v-close', vbox).addEventListener('click', closeVoice);
+$('.v-orb', vbox).addEventListener('click', () => Voice.stopListening());
 
 // ======================================================================
 // Vues
@@ -1286,7 +1396,7 @@ function greeting() {
 function viewHome() {
   const tracks = allTracks();
   const head = `<header class="page-head home-head"><div><div class="brand-line"><svg><use href="#i-logo"/></svg><span>MAISON <b>CHAHYN</b></span></div><h1>${greeting()}</h1></div>
-    <div class="head-btns"><button class="ib" data-act="import" aria-label="Importer">${icon('plus')}</button><a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a></div></header>`;
+    <div class="head-btns"><button class="ib gold-ib" data-act="voice" aria-label="Commande vocale">${icon('mic')}</button><button class="ib" data-act="import" aria-label="Importer">${icon('plus')}</button><a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a></div></header>`;
   if (!tracks.length) return head + emptyState();
 
   const al = [...albums().values()];
@@ -1501,6 +1611,7 @@ function viewSettings() {
       <p class="set-note">Tu peux aussi importer des fichiers <b>.lrc</b> avec le même nom que tes musiques, ou coller les paroles depuis le menu ⋯ d'un titre.</p>
     </section>
     <section class="set-group"><h3>Le Concierge (IA)</h3>
+      <label class="set-item toggle"><div><b>Réponses à voix haute</b><small>${Voice.canListen ? 'Quand tu parles au Concierge (bouton micro), il te répond aussi à l\'oral.' : 'La commande vocale n\'est pas disponible sur ce navigateur.'}</small></div><input type="checkbox" id="set-voice" ${S.settings.voiceReply ? 'checked' : ''}><span class="sw"></span></label>
       <div class="set-item"><div><b>Analyse de ta musique</b><small id="ana-stat">…</small></div></div>
       <div class="set-item"><div><b>Historique d'écoute</b><small>${plural(AI.historySize(), 'écoute')} mémorisée${AI.historySize() > 1 ? 's' : ''} pour apprendre tes goûts</small></div><button class="link" data-act="clear-hist">Effacer</button></div>
       <label class="set-item col"><div><b>Clé API Claude (optionnel)</b><small>Sans clé, le Concierge fonctionne déjà hors ligne. Avec une clé Anthropic, il comprend n'importe quelle demande. La clé reste sur ton téléphone ; ta liste de titres est envoyée à Anthropic seulement quand tu parles au Concierge.</small></div><input class="set-input wide" id="set-key" type="password" value="${esc(S.settings.apiKey)}" placeholder="sk-ant-…" autocomplete="off"></label>
@@ -1611,6 +1722,7 @@ function afterRender(view, r) {
   if (r.name === 'ai') afterAI(view);
   if (r.name === 'settings') {
     $('#set-name', view).addEventListener('change', e => { S.settings.name = e.target.value.trim(); saveSettings(); toast('Enchanté, ' + (S.settings.name || 'toi') + ' ✦'); });
+    $('#set-voice', view).addEventListener('change', e => { S.settings.voiceReply = e.target.checked; saveSettings(); });
     $('#set-lyr', view).addEventListener('change', e => { S.settings.onlineLyrics = e.target.checked; saveSettings(); });
     $('#set-key', view).addEventListener('change', e => { S.settings.apiKey = e.target.value.trim(); saveSettings(); toast(S.settings.apiKey ? 'Clé enregistrée sur ce téléphone' : 'Clé supprimée'); });
     const all = allTracksRaw(), done = all.filter(t => t.features).length;
@@ -1712,6 +1824,7 @@ document.addEventListener('click', e => {
       case 'mix-regen': S.mixes[act.dataset.key] = null; getMix(act.dataset.key); return render(true);
       case 'mix-save': return saveMixAsPlaylist(S.mixes[act.dataset.key]);
       case 'ai-send': return aiSend(act.dataset.text);
+      case 'voice': return startVoice({ navigate: S.route?.name === 'ai' });
       case 'ai-clear': S.chat = []; saveJSON('onde.chat', S.chat); return render(true);
       case 'ai-play': { const m = S.mixes[act.dataset.key]; if (m?.tracks.length) playIds(m.tracks.map(t => t.id), 0, { context: { label: m.name, route: '#/mix/' + m.key } }); return; }
     }
@@ -1764,7 +1877,7 @@ document.addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); player.toggle(); }
   if (e.code === 'ArrowRight' && e.shiftKey) player.next();
   if (e.code === 'ArrowLeft' && e.shiftKey) player.prev();
-  if (e.code === 'Escape') { if (overlays.length) popOverlay(); }
+  if (e.code === 'Escape') { if (S.voiceOn) closeVoice(); else if (overlays.length) popOverlay(); }
 });
 
 // ======================================================================
