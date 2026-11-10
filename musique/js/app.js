@@ -1,10 +1,10 @@
-import { db } from './db.js?v=12';
-import { readTags } from './tags.js?v=12';
-import { Player, isIOS } from './player.js?v=12';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=12';
-import * as AI from './ai.js?v=12';
-import * as Voice from './voice.js?v=12';
-import * as Src from './sources.js?v=12';
+import { db } from './db.js?v=13';
+import { readTags } from './tags.js?v=13';
+import { Player, isIOS } from './player.js?v=13';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=13';
+import * as AI from './ai.js?v=13';
+import * as Voice from './voice.js?v=13';
+import * as Src from './sources.js?v=13';
 
 const BRAND = 'Maison Chahyn';
 
@@ -469,19 +469,21 @@ gesture($('.np-head', np), {
 gesture($('.np-art', np), {
   move: (dx, dy) => {
     const tr = $('.np-cover-track');
-    if (Math.abs(dx) > Math.abs(dy)) { tr.style.transition = 'none'; tr.style.transform = `translateX(${dx}px) rotate(${dx / 40}deg)`; np.style.transform = ''; }
+    if (Math.abs(dx) > Math.abs(dy)) { tr.style.transition = 'none'; tr.style.transform = `translateX(${dx}px) rotate(${dx / 40}deg)`; np.style.transform = ''; ytbox.classList.add('moving'); }
+    else if (dy > 0) ytbox.classList.add('moving');
     else if (dy > 0) { np.style.transition = 'none'; np.style.transform = `translateY(${dy}px)`; }
   },
   end: (dx, dy) => {
     const tr = $('.np-cover-track');
     tr.style.transition = ''; tr.style.transform = '';
     np.style.transition = ''; np.style.transform = '';
+    setTimeout(placeYT, 480);
     if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy)) {
       S.swipeDir = dx < 0 ? 1 : -1;
       dx < 0 ? player.next() : player.prev();
     } else if (dy > 120) closeNP();
   },
-  reset: () => { const tr = $('.np-cover-track'); tr.style.transition = ''; tr.style.transform = ''; np.style.transform = ''; np.style.transition = ''; },
+  reset: () => { const tr = $('.np-cover-track'); tr.style.transition = ''; tr.style.transform = ''; np.style.transform = ''; np.style.transition = ''; setTimeout(placeYT, 300); },
 });
 
 function gesture(el, { tap, move, end, reset }) {
@@ -763,6 +765,7 @@ function newPlaylistSheet(ids = [], rename) {
           return;
         }
         const p = { id: uid(), name, trackIds: [...ids], createdAt: Date.now(), updatedAt: Date.now() };
+        S.lastPlaylistId = p.id;
         S.playlists.set(p.id, p);
         await db.put('playlists', p); bump();
         await closeSheet();
@@ -1189,8 +1192,10 @@ async function saveMixAsPlaylist(m) {
   if (!m?.tracks.length) return;
   const p = { id: uid(), name: m.name, trackIds: m.tracks.map(t => t.id), createdAt: Date.now(), updatedAt: Date.now() };
   S.playlists.set(p.id, p);
+  S.lastPlaylistId = p.id;
   await db.put('playlists', p); bump();
   toast(`Playlist « ${m.name} » enregistrée`);
+  return p;
 }
 
 // ======================================================================
@@ -1286,6 +1291,11 @@ async function aiSend(text, { navigate = true } = {}) {
     toast('Claude indisponible, je passe en mode hors ligne');
   }
   if (!res) {
+    if (!AI.hasIntent(text, tracks)) {
+      res = { reply: 'Je n\'ai pas compris. Tu peux me dire par exemple : « mets du rap », « fais-moi une playlist pour la salle », « supprime cette playlist », « pause », « mets Skyrock ».' };
+    }
+  }
+  if (!res) {
     const u = AI.understand(text, tracks);
     const m = u.mix;
     const dur = m.tracks.reduce((s, t) => s + t.duration, 0);
@@ -1368,6 +1378,10 @@ async function smartCommand(text) {
   S.cmdPaused = false;
   S.lastMix = null;
   if (!n) return null;
+
+  // --- gestion : supprimer / annuler / renommer / retirer / ajouter
+  const mg = await manageCommand(n);
+  if (mg) return mg;
 
   // --- minuteur
   let m = n.match(/(?:arrete|coupe|stop|eteins|pause).*?(?:dans|d ici|apres)\s*(\d+)\s*(min|minute|h|heure)/);
@@ -1566,6 +1580,92 @@ async function agentExec(name, a) {
     case 'navigate': { await closeAllOverlays(); S.pendingFwd = true; goto({ home: '#/', search: '#/search', library: '#/library', concierge: '#/ai', settings: '#/settings', liked: '#/liked' }[a.screen] || '#/'); return 'OK'; }
   }
   return 'Outil inconnu';
+}
+
+// Playlist visée : nommée dans la phrase, sinon celle qu'on vient de créer, sinon celle qui joue, sinon celle affichée
+function targetPlaylist(n) {
+  const pls = [...S.playlists.values()].sort((a, b) => norm(b.name).length - norm(a.name).length);
+  const key = x => norm(x).replace(/[^a-z0-9]+/g, ' ').trim();
+  const nk = ' ' + key(n) + ' ';
+  const named = pls.find(p => key(p.name).length > 2 && nk.includes(' ' + key(p.name) + ' '));
+  if (named) return named;
+  if (S.lastPlaylistId && S.playlists.has(S.lastPlaylistId)) return S.playlists.get(S.lastPlaylistId);
+  const playing = pls.find(p => p.name === player.context?.label);
+  if (playing) return playing;
+  if (S.route?.name === 'playlist') return S.playlists.get(S.route.arg) || null;
+  return null;
+}
+
+async function manageCommand(n) {
+  const cur = player.current;
+  // annuler la dernière suppression
+  if (/^(annule|annuler|reviens en arriere|remets la|recupere la)\b/.test(n) && S.deletedPlaylist) {
+    const p = S.deletedPlaylist; S.deletedPlaylist = null;
+    S.playlists.set(p.id, p); await db.put('playlists', p); bump(); render(true);
+    return `C'est annulé, la playlist « ${p.name} » est de retour.`;
+  }
+  const del = /\b(supprime|supprimer|efface|effacer|retire|enleve|vire|degage|jette|delete)\b/.test(n);
+  // retirer le son en cours des likes
+  if (del && cur && /\b(likes?|favoris|coups? de coeur|titres likes)\b/.test(n)) {
+    if (cur.liked) await toggleLike(cur);
+    return `« ${cur.title} » retiré de tes titres likés.`;
+  }
+  // retirer le son en cours d'une playlist
+  if (del && cur && /\b(ce son|ce titre|cette musique|ce morceau|la musique|le son|ca)\b/.test(n) && /playlist/.test(n)) {
+    const p = targetPlaylist(n);
+    if (!p) return 'De quelle playlist ? Dis-moi son nom.';
+    const i = p.trackIds.indexOf(cur.id);
+    if (i < 0) return `« ${cur.title} » n'est pas dans « ${p.name} ».`;
+    p.trackIds.splice(i, 1); p.updatedAt = Date.now(); await db.put('playlists', p); bump(); render(true);
+    return `« ${cur.title} » retiré de « ${p.name} ».`;
+  }
+  // supprimer une playlist
+  if (del && /\bplaylists?\b/.test(n)) {
+    const p = targetPlaylist(n);
+    if (!p) return S.playlists.size ? 'Quelle playlist ? Dis-moi son nom.' : 'Tu n\'as aucune playlist.';
+    S.playlists.delete(p.id); await db.del('playlists', p.id); bump();
+    S.deletedPlaylist = p; if (S.lastPlaylistId === p.id) S.lastPlaylistId = null;
+    if (S.route?.name === 'playlist' && S.route.arg === p.id) goto('#/library', true); else render(true);
+    return `Playlist « ${p.name} » supprimée. Dis « annule » si tu changes d'avis.`;
+  }
+  // supprimer le son en cours de la bibliothèque
+  if (del && cur && /\b(ce son|ce titre|cette musique|ce morceau)\b/.test(n) && /(bibliotheque|telephone|ma musique)/.test(n)) {
+    if (cur.source) { cur.saved = false; cur.liked = false; await db.put('tracks', cur); bump(); render(true); return `« ${cur.title} » retiré de ta bibliothèque.`; }
+    await deleteTracks([cur.id]); return 'Titre supprimé.';
+  }
+  // vider la file d'attente
+  if (/(vide|efface|nettoie|supprime) (la )?file/.test(n)) { player.queue.splice(player.index + 1); player.emit('queue'); return 'File d\'attente vidée.'; }
+  // renommer une playlist
+  let m = n.match(/renomm\w* (?:la playlist |ma playlist |cette playlist )?(.*?)\s*(?:en|par|comme) (.+)$/);
+  if (m) {
+    const p = m[1] ? targetPlaylist(m[1]) : targetPlaylist(n);
+    if (!p) return 'Quelle playlist veux-tu renommer ?';
+    const name = m[2].replace(/^(la |le )/, '').trim();
+    const old = p.name;
+    p.name = name.charAt(0).toUpperCase() + name.slice(1); p.updatedAt = Date.now(); await db.put('playlists', p); bump(); render(true);
+    return `« ${old} » s'appelle maintenant « ${p.name} ».`;
+  }
+  // ajouter le son en cours à une playlist
+  m = n.match(/(?:ajoute|mets|met|range|sauvegarde|garde) (?:ce son|ca|ce titre|cette musique|ce morceau|la musique|le son)(?: (?:dans|a|sur) (?:la |ma )?(?:playlist )?(.+))?$/);
+  if (m && cur) {
+    const name = (m[1] || '').replace(/^(playlist )/, '').trim();
+    if (!name || /^(mes )?(likes?|favoris)$/.test(name)) { if (!cur.liked) await toggleLike(cur); return `« ${cur.title} » ajouté à tes titres likés.`; }
+    if (/^(la )?file/.test(name)) { player.addToQueue(cur.id); return 'Ajouté à la file.'; }
+    let p = [...S.playlists.values()].find(x => norm(x.name) === name) || [...S.playlists.values()].find(x => norm(x.name).includes(name));
+    if (!p) { p = { id: uid(), name: name.charAt(0).toUpperCase() + name.slice(1), trackIds: [], createdAt: Date.now(), updatedAt: Date.now() }; S.playlists.set(p.id, p); }
+    if (!p.trackIds.includes(cur.id)) p.trackIds.push(cur.id);
+    if (cur.source && !cur.saved) { cur.saved = true; await db.put('tracks', cur); }
+    p.updatedAt = Date.now(); S.lastPlaylistId = p.id; await db.put('playlists', p); bump(); render(true);
+    return `« ${cur.title} » ajouté à « ${p.name} ».`;
+  }
+  // créer une playlist vide nommée
+  m = n.match(/^(?:cree|creer|fais|nouvelle) (?:moi )?(?:une )?(?:nouvelle )?playlist (?:nommee|appelee|qui s appelle) (.+)$/);
+  if (m) {
+    const p = { id: uid(), name: m[1].charAt(0).toUpperCase() + m[1].slice(1), trackIds: [], createdAt: Date.now(), updatedAt: Date.now() };
+    S.playlists.set(p.id, p); S.lastPlaylistId = p.id; await db.put('playlists', p); bump(); render(true);
+    return `Playlist « ${p.name} » créée. Dis « ajoute ce son à ${p.name} » pendant l'écoute pour la remplir.`;
+  }
+  return null;
 }
 // ======================================================================
 // Commandes directes (texte ou voix)
@@ -1801,12 +1901,16 @@ function placeYT() {
   mini.classList.toggle('yt', on);
   np.classList.toggle('yt-on', on && S.npOpen && !S.lyrOpen);
   if (!on) return;
-  let target, inNp = false;
-  if (S.npOpen && S.lyrOpen) target = $('.lyr-head .cv', np);
-  else if (S.npOpen) { target = $('.np-cover .cv', np) || $('.np-cover-track', np); inNp = true; }
-  else target = $('.mini-cover', mini);
-  if (!target) return;
-  const r = target.getBoundingClientRect();
+  let r, inNp = false;
+  if (S.npOpen && S.lyrOpen) r = $('.lyr-head .cv', np)?.getBoundingClientRect();
+  else if (S.npOpen) {
+    // zone carrée de la pochette, calculée sans tenir compte des animations en cours
+    const a = $('.np-art', np).getBoundingClientRect();
+    const size = Math.min(a.width, window.innerHeight * 0.52);
+    r = { left: a.left + (a.width - size) / 2, top: a.top + (a.height - size) / 2, width: size, height: size };
+    inNp = true;
+  } else r = $('.mini-cover', mini)?.getBoundingClientRect();
+  if (!r) return;
   ytbox.classList.add('moving');
   Object.assign(ytbox.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px', borderRadius: inNp ? '8px' : '5px' });
   ytbox.classList.toggle('in-np', inNp);
