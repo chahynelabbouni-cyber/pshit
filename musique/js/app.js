@@ -1,10 +1,10 @@
-import { db } from './db.js?v=13';
-import { readTags } from './tags.js?v=13';
-import { Player, isIOS } from './player.js?v=13';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=13';
-import * as AI from './ai.js?v=13';
-import * as Voice from './voice.js?v=13';
-import * as Src from './sources.js?v=13';
+import { db } from './db.js?v=14';
+import { readTags } from './tags.js?v=14';
+import { Player, isIOS } from './player.js?v=14';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=14';
+import * as AI from './ai.js?v=14';
+import * as Voice from './voice.js?v=14';
+import * as Src from './sources.js?v=14';
 
 const BRAND = 'Maison Chahyn';
 
@@ -150,7 +150,7 @@ const likedCover = (cls = '') => `<div class="cv liked-cv ${cls}">${icon('heart-
 function colorFor(coverId, seed) {
   if (coverId && S.colors[coverId]) return S.colors[coverId];
   if (!coverId) return `hsl(${placeholderHue(seed)} 45% 32%)`;
-  return '#3a3550';
+  return '#2a2217';
 }
 
 async function computeColor(coverId) {
@@ -251,6 +251,7 @@ player.addEventListener('error', () => {
 
 function playIds(ids, i = 0, opts = {}) {
   if (S.miniGone) { S.miniGone = false; mini.classList.remove('gone'); }
+  try { pushCtxHist(ids, i, opts); } catch { /* ignore */ }
   player.playList(ids, i, opts);
   setTimeout(() => { updateNowPlaying(); placeYT(); }, 60);
 }
@@ -1208,7 +1209,7 @@ function viewAI() {
   return `<div class="ai">
     <header class="ai-head">
       <div class="ai-orb"><i></i><i></i><i></i></div>
-      <div><h1>Le Concierge</h1><small>${S.settings.apiKey ? 'Propulsé par Claude' : 'IA personnelle · hors ligne'} · apprend de tes écoutes</small></div>
+      <div><h1>Le Concierge</h1><small>${S.settings.apiKey ? 'Propulsé par Claude' : 'IA personnelle'}</small></div>
       <button class="ib sm" data-act="ai-clear" aria-label="Nouvelle conversation">${icon('refresh')}</button>
     </header>
     <div class="ai-log" id="ai-log">${renderChat()}</div>
@@ -1221,7 +1222,7 @@ function viewAI() {
 
 function renderChat() {
   const name = S.settings.name;
-  const intro = `<div class="msg bot"><p>Bienvenue dans ta Maison${name ? ', ' + esc(name) : ''}. Je connais toute ta musique et j'apprends ce que tu écoutes, et quand. Dis-moi ce que tu fais (l'école, le sport, une soirée, dormir…) et je te compose la playlist parfaite.</p></div>`;
+  const intro = `<div class="msg bot"><p>Bienvenue dans ta Maison${name ? ', ' + esc(name) : ''}. Dis-moi ce que tu veux écouter ou ce que tu fais, je m'occupe du reste.</p></div>`;
   return intro + S.chat.map((m, i) => {
     if (m.role === 'user') return `<div class="msg me"><p>${esc(m.text)}</p></div>`;
     let mixHtml = '';
@@ -2210,73 +2211,127 @@ function greeting() {
   return S.settings.name ? `${g}, ${esc(S.settings.name)}` : g;
 }
 
-function viewHome() {
-  const tracks = allTracks();
-  const head = `<header class="page-head home-head"><div><div class="brand-line"><svg><use href="#i-logo"/></svg><span>MAISON <b>CHAHYN</b></span></div><h1>${greeting()}</h1></div>
-    <div class="head-btns"><button class="ib gold-ib" data-act="voice" aria-label="Commande vocale">${icon('mic')}</button><button class="ib" data-act="import" aria-label="Importer">${icon('plus')}</button><a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a></div></header>`;
-  const discover = homeDiscover();
-  if (!tracks.length) return head + discover.top + discover.rest + `<section class="import-card">${icon('import')}<div><b>Tes propres fichiers</b><small>Importe des MP3 du téléphone pour les écouter hors ligne.</small></div><button class="btn ghost sm" data-act="import">Importer</button></section>`;
-
-  const al = [...albums().values()];
-  const pls = [...S.playlists.values()].sort((a, b) => b.updatedAt - a.updatedAt);
-  const lk = liked();
-
-  // tuiles rapides
-  const quick = [];
-  if (lk.length) quick.push(`<a class="quick" href="#/liked">${likedCover()}<b>Titres likés</b></a>`);
-  pls.slice(0, 3).forEach(p => quick.push(`<a class="quick" href="#/playlist/${p.id}">${playlistCover(p)}<b>${esc(p.name)}</b></a>`));
-  al.filter(a => a.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).forEach(a => {
-    if (quick.length < 6) quick.push(`<a class="quick" href="#/album/${encodeURIComponent(a.key)}">${cover({ coverId: a.coverId, seed: a.title, kind: 'album' })}<b>${esc(a.title)}</b></a>`);
-  });
-  if (quick.length < 6) quick.push(`<a class="quick" href="#/all">${cover({ seed: 'tous', kind: 'playlist' })}<b>Tous les titres</b></a>`);
-
-  const allKey = registerList('all-shuffle', tracks.map(t => t.id), 'Toute ta musique');
-
-  const recent = tracks.filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 12);
-  const recentKey = registerList('recent', recent.map(t => t.id), 'Écoutés récemment');
-  const recentCards = recent.map((t, i) => `<div class="card track-card" data-tid="${t.id}" data-i="${i}" data-list="${recentKey}"><div class="card-art">${trackCover(t)}</div><b>${esc(t.title)}</b><small>${esc(artistOf(t))}</small></div>`);
-
-  const newAlbums = al.sort((a, b) => b.addedAt - a.addedAt).slice(0, 12).map(albumCard);
-  const newSingles = tracks.filter(t => !t.album).sort((a, b) => b.addedAt - a.addedAt).slice(0, 12);
-  const singlesKey = registerList('new-singles', newSingles.map(t => t.id), 'Ajoutés récemment');
-  const singleCards = newSingles.map((t, i) => `<div class="card track-card" data-tid="${t.id}" data-i="${i}" data-list="${singlesKey}"><div class="card-art">${trackCover(t)}</div><b>${esc(t.title)}</b><small>${esc(artistOf(t))}</small></div>`);
-  const arts = [...artists().values()].sort((a, b) => b.plays - a.plays || b.tracks.length - a.tracks.length).slice(0, 12).map(artistCard);
-  const top = tracks.filter(t => t.plays).sort((a, b) => b.plays - a.plays).slice(0, 5);
-  const topKey = registerList('top', top.map(t => t.id), 'Tes titres les plus écoutés');
-
-  return head + discover.top + `
-    <div class="quick-grid">${quick.join('')}</div>
-    <button class="mix-btn" data-act="shuffle-list" data-list="${allKey}">${icon('shuffle')}<span><b>Lecture aléatoire</b><small>${plural(tracks.length, 'titre')} · ${fmtTotal(tracks.reduce((s, t) => s + t.duration, 0))}</small></span>${icon('play', 'mix-play')}</button>
-    ${tracks.length >= 4 ? shelf(`Composé pour toi${S.settings.name ? ', ' + S.settings.name : ''}`, HOME_MIXES.map(k => mixCard(getMix(k)))) : ''}
-    ${shelf('Écoutés récemment', recentCards)}
-    ${shelf('Albums ajoutés récemment', newAlbums, '#/library?f=albums')}
-    ${shelf('Titres ajoutés récemment', singleCards, '#/all')}
-    ${shelf('Tes artistes', arts, '#/library?f=artists')}
-    ${pls.length ? shelf('Tes playlists', pls.slice(0, 12).map(playlistCard), '#/library?f=playlists') : ''}
-    ${top.length ? `<section class="shelf"><div class="shelf-head"><h2>Tes titres les plus écoutés</h2></div><div class="list">${top.map((t, i) => trackRow(t, i, topKey)).join('')}</div></section>` : ''}
-  ` + discover.rest;
+// ---------- Accueil façon Spotify : filtres, accès rapide, 3–4 étagères maximum ----------
+function ctxHist() { return loadJSON('onde.ctxHist', []).filter(h => h.route ? true : (h.ids || []).some(id => S.tracks.has(id))); }
+function pushCtxHist(ids, i, opts) {
+  const t = S.tracks.get(ids[i]);
+  if (!t) return;
+  const c = opts.context || {};
+  const radio = t.source === 'radio';
+  const key = radio ? 'radio:' + t.id : c.route || 'ctx:' + (c.label || t.title);
+  const entry = { key, label: radio ? t.title : (c.label || t.title), route: radio ? null : c.route || null, ids: radio ? [t.id] : ids.slice(0, 80), coverId: t.coverId || null, kind: t.source || 'local', at: Date.now() };
+  const list = loadJSON('onde.ctxHist', []).filter(h => h.key !== key);
+  list.unshift(entry);
+  saveJSON('onde.ctxHist', list.slice(0, 10));
 }
 
-// Sections « découverte » de l'accueil : utiles même sans aucune musique importée
-function homeDiscover() {
-  const anyRecent = [...S.tracks.values()].filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 14);
-  const rk = registerList('home-recent', anyRecent.map(t => t.id), 'Écoutés récemment');
-  const recentCards = anyRecent.map((t, i) => `<div class="card track-card ${t.source === 'radio' ? 'radio-card' : ''}" data-tid="${t.id}" data-i="${i}" data-list="${rk}"><div class="card-art">${trackCover(t, t.source === 'radio' ? 'radio-cv' : '')}${t.source === 'radio' ? '<span class="live-dot card-live">LIVE</span>' : ''}</div><b>${esc(t.title)}</b><small>${esc(t.source === 'radio' ? 'Radio' : t.source === 'podcast' ? 'Podcast' : artistOf(t))}</small></div>`);
-  const radios = savedRadios();
-  const radiosKey = registerList('home-radios', radios.map(t => t.id), 'Mes radios');
-  const top = `
-    <a class="home-search" href="#/search?src=yt">${icon('search')}<span>Que veux-tu écouter ?</span></a>
-    ${anyRecent.length ? shelf('Reprendre', recentCards) : ''}`;
-  const stations = Src.FR_STATIONS.slice(0, 14).map((n, i) => `<button class="station" data-act="radio-name" data-name="${esc(n)}" style="--h:${placeholderHue(n)};--d:${i * 25}ms"><span class="st-wave"><i></i><i></i><i></i></span><b>${esc(n)}</b><small>En direct</small></button>`);
-  const rest = `
-    ${radios.length ? shelf('Mes radios', radios.map((t, i) => `<div class="card track-card radio-card" data-tid="${t.id}" data-i="${i}" data-list="${radiosKey}"><div class="card-art">${trackCover(t, 'radio-cv')}<span class="live-dot card-live">LIVE</span></div><b>${esc(t.title)}</b><small>Radio</small></div>`)) : ''}
-    ${shelf('Radios en direct', stations, '#/search?src=radio')}
-    <section class="shelf yt-promo">
-      <div class="yt-promo-in">${icon('play')}<div><b>Tout YouTube dans ta Maison</b><small>${S.settings.ytKey ? 'Cherche n\'importe quel artiste, garde tes sons, crée tes playlists.' : 'Ajoute ta clé gratuite pour chercher n\'importe quel son.'}</small></div></div>
-      <a class="btn primary sm" href="${S.settings.ytKey ? '#/search?src=yt' : '#/settings'}">${S.settings.ytKey ? 'Chercher' : 'Configurer'}</a>
-    </section>
-    ${newsModule(false)}`;
-  return { top, rest };
+function quickTile({ href, act = '', data = '', cov, title, live = false, playing = false }) {
+  const attrs = href ? `href="${href}"` : `data-act="${act}" ${data}`;
+  const tag = href ? 'a' : 'button';
+  return `<${tag} class="quick ${playing ? 'playing' : ''}" ${attrs}>${cov}<b>${playing ? '<span class="eq"><i></i><i></i><i></i></span>' : ''}${esc(title)}</b>${live ? '<i class="live"></i>' : ''}</${tag}>`;
+}
+const stationArt = (name, cls = '') => `<div class="cv st-art ${cls}" style="--h:${placeholderHue(name)}"><span>${esc(name.replace(/^(radio |la |le )/i, '').slice(0, 2).toUpperCase())}</span></div>`;
+function stationCard(name, i = 0) {
+  return `<button class="card" data-act="radio-name" data-name="${esc(name)}"><div class="card-art">${stationArt(name)}</div><b>${esc(name)}</b><small><i class="live-sm"></i>En direct</small></button>`;
+}
+
+function viewHome() {
+  const f = S.settings.homeFilter || 'all';
+  const chips = [['all', 'Tout'], ['music', 'Musique'], ['radio', 'Radios'], ['info', 'Infos']];
+  const head = `<header class="page-head home-head"><h1 class="home-h">${greeting()}</h1>
+      <div class="head-btns"><a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a></div></header>
+    <div class="home-chips">${chips.map(([k, l]) => `<button class="chip ${k === f ? 'on' : ''}" data-act="home-f" data-f="${k}">${l}</button>`).join('')}</div>`;
+  if (f === 'radio') return head + homeRadios();
+  if (f === 'info') return head + `<div class="home-info">${newsModule(false)}</div>`;
+  const tracks = allTracks();
+  if (f === 'all' && !tracks.length && !ctxHist().length) return head + homeEmpty();
+  const seen = new Set();
+  return head + homeQuick(f, seen) + homeShelves(f, seen);
+}
+
+function homeQuick(f, seen) {
+  const tiles = [];
+  const cur = player.context?.label;
+  const add = (key, tile) => { if (seen.has(key) || tiles.length >= 8) return; seen.add(key); tiles.push(tile); };
+  const lk = liked();
+  if (lk.length) add('#/liked', quickTile({ href: '#/liked', cov: likedCover(), title: 'Titres likés', playing: cur === 'Titres likés' }));
+  ctxHist().forEach((h, i) => {
+    if (f === 'music' && (h.kind === 'radio' || h.kind === 'podcast')) return;
+    const cov = h.kind === 'radio' ? (coverURL(h.coverId) ? cover({ coverId: h.coverId }, 'radio-cv') : stationArt(h.label)) : cover({ coverId: h.coverId, seed: h.label, kind: 'playlist' });
+    const playing = h.kind === 'radio' ? player.currentId === h.ids[0] : cur === h.label;
+    if (h.route) add(h.route, quickTile({ href: h.route, cov, title: h.label, playing }));
+    else add(h.key, quickTile({ act: 'ctx-play', data: `data-k="${esc(h.key)}"`, cov, title: h.label, live: h.kind === 'radio', playing }));
+  });
+  [...S.playlists.values()].sort((a, b) => b.updatedAt - a.updatedAt).forEach(p => add('#/playlist/' + p.id, quickTile({ href: '#/playlist/' + p.id, cov: playlistCover(p), title: p.name, playing: cur === p.name })));
+  if (allTracks().length >= 4) ['moment', 'favoris'].forEach(k => { const m = getMix(k); if (m.tracks.length) add('#/mix/' + k, quickTile({ href: '#/mix/' + k, cov: mixCover(m), title: m.name, playing: cur === m.name })); });
+  if (allTracks().length) add('#/all', quickTile({ href: '#/all', cov: cover({ seed: 'tous', kind: 'playlist' }), title: 'Tous les titres' }));
+  const n = tiles.length >= 2 ? tiles.length - (tiles.length % 2) : tiles.length;
+  return n ? `<div class="quick-grid">${tiles.slice(0, n).join('')}</div>` : '';
+}
+
+function homeShelves(f, seen) {
+  const tracks = allTracks();
+  let out = '';
+  if (tracks.length >= 4) {
+    const mixes = HOME_MIXES.filter(k => !seen.has('#/mix/' + k)).map(k => getMix(k)).filter(m => m.tracks.length).slice(0, 6);
+    mixes.forEach(m => seen.add('#/mix/' + m.key));
+    out += shelf(`Composé pour toi`, mixes.map(mixCard));
+  }
+  // Ajouts récents : albums et titres seuls mélangés, sans doublon avec ce qui est déjà affiché
+  const items = [
+    ...[...albums().values()].map(a => ({ at: a.addedAt, key: '#/album/' + encodeURIComponent(a.key), html: () => albumCard(a) })),
+    ...tracks.filter(t => !t.album).map(t => ({ at: t.addedAt, key: 't:' + t.id, t })),
+  ].filter(x => !seen.has(x.key)).sort((a, b) => b.at - a.at).slice(0, 10);
+  if (items.length >= 3) {
+    const singles = items.filter(x => x.t).map(x => x.t.id);
+    const sk = registerList('home-new', singles, 'Ajouts récents');
+    out += shelf('Ajouts récents', items.map(x => {
+      seen.add(x.key);
+      if (x.html) return x.html();
+      return `<div class="card track-card" data-tid="${x.t.id}" data-i="${singles.indexOf(x.t.id)}" data-list="${sk}"><div class="card-art">${trackCover(x.t)}</div><b>${esc(x.t.title)}</b><small>${esc(artistOf(x.t))}</small></div>`;
+    }), '#/library?f=all');
+  }
+  if (f === 'music') {
+    const arts = [...artists().values()].sort((a, b) => b.plays - a.plays || b.tracks.length - a.tracks.length).slice(0, 10).map(artistCard);
+    out += shelf('Tes artistes', arts, '#/library?f=artists');
+  } else {
+    out += shelf('Radios en direct', radioCards(seen), '#/search?src=radio');
+    if (tracks.length < 10) out += `<button class="lib-item flash-row" data-act="news-flash" data-i="0">${stationArt('franceinfo')}<div><b>Le journal franceinfo</b><small>Dernière édition · un appui pour écouter</small></div></button>`;
+  }
+  return out;
+}
+
+function radioCards(seen = new Set()) {
+  const saved = savedRadios();
+  const sk = registerList('home-radios', saved.map(t => t.id), 'Mes radios');
+  const savedCards = saved.filter(t => !seen.has('radio:' + t.id)).map((t, i) => `<div class="card track-card" data-tid="${t.id}" data-i="${i}" data-list="${sk}"><div class="card-art">${coverURL(t.coverId) ? trackCover(t, 'radio-cv') : stationArt(t.title)}</div><b>${esc(t.title)}</b><small><i class="live-sm"></i>En direct</small></div>`);
+  const savedNames = new Set(saved.map(t => norm(t.title)));
+  const stations = Src.FR_STATIONS.filter(n => !savedNames.has(norm(n))).map(stationCard);
+  return [...savedCards, ...stations].slice(0, 10);
+}
+
+function homeRadios() {
+  const saved = savedRadios();
+  const sk = registerList('home-radios-g', saved.map(t => t.id), 'Mes radios');
+  const mine = saved.slice(0, 8).map((t, i) => `<div class="quick" data-tid="${t.id}" data-i="${i}" data-list="${sk}">${coverURL(t.coverId) ? trackCover(t, 'radio-cv') : stationArt(t.title)}<b>${esc(t.title)}</b><i class="live"></i></div>`);
+  const pop = Src.FR_STATIONS.slice(0, 12).map(n => quickTile({ act: 'radio-name', data: `data-name="${esc(n)}"`, cov: stationArt(n), title: n, live: true, playing: player.current?.source === 'radio' && norm(player.current.title).startsWith(norm(n)) }));
+  return `${mine.length ? `<h2 class="sec-title">Mes radios</h2><div class="quick-grid">${mine.join('')}</div>` : ''}
+    <h2 class="sec-title">Radios populaires</h2><div class="quick-grid">${pop.join('')}</div>
+    <a class="link more-link" href="#/search?src=radio">Voir toutes les radios et les genres ${icon('next-up')}</a>`;
+}
+
+function homeEmpty() {
+  const tiles = [
+    quickTile({ act: 'radio-name', data: 'data-name="Skyrock"', cov: stationArt('Skyrock'), title: 'Skyrock', live: true }),
+    quickTile({ act: 'radio-name', data: 'data-name="NRJ"', cov: stationArt('NRJ'), title: 'NRJ', live: true }),
+    quickTile({ act: 'news-flash', data: 'data-i="0"', cov: stationArt('franceinfo'), title: 'Le journal franceinfo' }),
+    quickTile({ href: '#/search?src=yt', cov: `<div class="cv st-art search-art">${icon('search')}</div>`, title: 'Chercher sur YouTube' }),
+  ];
+  const feat = Src.FEATURED_PODCASTS.slice(0, 8).map(p => `<button class="card" data-act="feat-pc" data-q="${esc(p.q)}"><div class="card-art"><div class="cv st-art pod-art" style="--h:${placeholderHue(p.name)}"><span>${esc(p.name)}</span></div></div><b>${esc(p.name)}</b><small>${esc(p.desc)}</small></button>`);
+  return `<div class="quick-grid">${tiles.join('')}</div>
+    ${shelf('Radios en direct', radioCards(), '#/search?src=radio')}
+    ${shelf('Podcasts à écouter', feat)}
+    <button class="lib-item import-row" data-act="import"><div class="cv st-art search-art">${icon('import')}</div><div><b>Importer tes fichiers</b><small>Pour écouter hors ligne</small></div></button>`;
 }
 
 function viewSearch(params) {
@@ -2417,7 +2472,7 @@ function viewLiked() {
   const lk = liked();
   return collectionView({
     kind: 'liked', title: 'Titres likés', sub: 'Playlist', coverHtml: likedCover(),
-    ids: lk.map(t => t.id), listKey: 'liked', label: 'Titres likés', color: 'hsl(258 60% 38%)',
+    ids: lk.map(t => t.id), listKey: 'liked', label: 'Titres likés', color: 'hsl(40 55% 30%)',
     emptyMsg: 'Appuie sur le cœur d\'un titre pour le retrouver ici.',
   });
 }
@@ -2439,7 +2494,7 @@ function viewGenre(g) {
 }
 
 function viewSettings() {
-  return `<div class="coll settings" style="--tint:#2a2540">
+  return `<div class="coll settings" style="--tint:#1c1a17">
     <div class="topbar show"><button class="ib" data-act="back" aria-label="Retour">${icon('back')}</button><b class="topbar-title">Réglages</b></div>
     <div class="set-wrap">
     <h1 class="set-h">Réglages</h1>
@@ -2549,6 +2604,7 @@ function render(keepScroll = false) {
   view.innerHTML = html;
   const old = $('#view');
   view.id = 'view';
+  if (sameView) view.classList.add('static');
   if (!sameView && prev) {
     const toTab = TAB_ROUTES.includes(r.name);
     view.classList.add(toTab && (S.navDir === 'fwd' || TAB_ROUTES.includes(prev.name)) ? 'enter-fade' : S.navDir === 'fwd' ? 'enter-fwd' : 'enter-back');
@@ -2641,7 +2697,7 @@ function onScroll() {
   const y = main.scrollTop;
   const hero = $('.coll-hero', coll);
   const tb = $('.topbar', coll);
-  const h = hero ? hero.offsetHeight : 200;
+  const h = +coll.dataset.h || (coll.dataset.h = hero ? hero.offsetHeight : 200);
   tb.classList.toggle('show', y > h - 60 || coll.classList.contains('settings'));
   const cv = $('.coll-cover', coll);
   if (cv) {
@@ -2650,7 +2706,8 @@ function onScroll() {
     cv.style.opacity = 1 - p * 0.9;
   }
 }
-main.addEventListener('scroll', onScroll, { passive: true });
+let scrollRaf = 0;
+main.addEventListener('scroll', () => { if (!scrollRaf) scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; onScroll(); }); }, { passive: true });
 
 // ======================================================================
 // Clics globaux (délégation)
@@ -2706,6 +2763,8 @@ document.addEventListener('click', e => {
       case 'pc-show': return showPodcast(act.dataset.id);
       case 'sound': return soundSheet();
       case 'voice-test': return Voice.speak(`Bonjour ${S.settings.name || ''}, je suis le Concierge de ta Maison.`);
+      case 'home-f': S.settings.homeFilter = act.dataset.f; saveSettings(); return render(true);
+      case 'ctx-play': { const h = ctxHist().find(x => x.key === act.dataset.k); if (h) playIds(h.ids.filter(id => S.tracks.has(id)), 0, { context: { label: h.label } }); return; }
       case 'news-flash': return playNewsFlash(+act.dataset.i || 0, act);
       case 'pc-more': return morePodcasts(act.dataset.q, act.dataset.name);
       case 'feat-pc': {
@@ -2738,7 +2797,7 @@ document.addEventListener('click', e => {
 // appui long sur un titre = menu
 let lpT;
 document.addEventListener('pointerdown', e => {
-  const row = e.target.closest('#view .row[data-tid]');
+  const row = e.target.closest('#view .row[data-tid], #view .card[data-tid], #view .quick[data-tid]');
   if (!row) return;
   lpT = setTimeout(() => {
     navigator.vibrate?.(12);
