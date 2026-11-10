@@ -1,0 +1,23 @@
+{
+  "name": "Agenda Chahyn",
+  "short_name": "Agenda",
+  "description": "Calendrier, échéancier, notes et assistant IA personnel.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#070707",
+  "theme_color": "#070707",
+  "categories": ["productivity", "education"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Assistant", "short_name": "Assistant", "url": "./?tab=ai", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Échéances", "short_name": "Échéances", "url": "./?tab=due", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Calendrier", "short_name": "Calendrier", "url": "./?tab=cal", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
