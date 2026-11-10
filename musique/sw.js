@@ -1,6 +1,6 @@
 // Service worker : l'application fonctionne entièrement hors connexion.
-const CACHE = 'maison-chahyn-v10';
-const V = '?v=10';
+const CACHE = 'maison-chahyn-v11';
+const V = '?v=11';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css' + V,
   ...['app', 'db', 'tags', 'player', 'lyrics', 'ai', 'voice', 'sources'].map(f => `js/${f}.js${V}`),

@@ -39,8 +39,12 @@ export function stopListening() {
 }
 
 let voice = null;
+let prefs = { name: '', rate: 1.04 };
+export function setVoicePrefs(p) { prefs = { ...prefs, ...p }; voice = null; }
+export function frenchVoices() { return canSpeak ? speechSynthesis.getVoices().filter(v => /^fr/i.test(v.lang)) : []; }
 function pickVoice() {
   if (voice) return voice;
+  if (prefs.name) { voice = speechSynthesis.getVoices().find(v => v.name === prefs.name) || null; if (voice) return voice; }
   const vs = speechSynthesis.getVoices().filter(v => /^fr/i.test(v.lang));
   // privilégie les voix naturelles / de qualité si disponibles
   voice = vs.find(v => /natural|neural|premium|enhanced|amélioré/i.test(v.name))
@@ -58,7 +62,7 @@ export function speak(text) {
     u.lang = 'fr-FR';
     const v = pickVoice();
     if (v) u.voice = v;
-    u.rate = 1.04;
+    u.rate = prefs.rate || 1.04;
     u.pitch = 1;
     u.onend = u.onerror = () => resolve();
     speechSynthesis.speak(u);

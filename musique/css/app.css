@@ -268,7 +268,7 @@ body.is-playing .eq i, .eq.big i { animation-play-state: running; }
 .np-seek input:active::-webkit-slider-thumb { transform: scale(1.35); }
 
 /* ---------- Barre d'onglets ---------- */
-.tabs { position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; padding-bottom: var(--safe-b); height: calc(var(--tabs-h) + var(--safe-b)); background: rgba(7,7,7,.96); backdrop-filter: blur(14px); }
+.tabs { position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; padding-bottom: var(--safe-b); height: calc(var(--tabs-h) + var(--safe-b)); background: #070707; }
 .tabs::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: calc(var(--mini-h) + 12px); background: linear-gradient(to top, rgba(7,7,7,.96), rgba(7,7,7,0)); pointer-events: none; }
 body:not(.has-mini) .tabs::before { height: 24px; }
 .tabs a { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--muted); font-size: 11px; font-weight: 600; transition: color .2s; }
@@ -354,7 +354,7 @@ body:not(.has-mini) .tabs::before { height: 24px; }
 
 /* ---------- Feuilles ---------- */
 .sheet { position: fixed; inset: 0; z-index: 60; }
-.sheet-scrim { position: absolute; inset: 0; background: rgba(0,0,0,.55); opacity: 0; transition: opacity .3s; backdrop-filter: blur(2px); }
+.sheet-scrim { position: absolute; inset: 0; background: rgba(0,0,0,.55); opacity: 0; transition: opacity .3s; }
 .sheet-panel { position: absolute; left: 0; right: 0; bottom: 0; max-height: 86vh; display: flex; flex-direction: column; background: #1b1a26; border-radius: 18px 18px 0 0; padding-bottom: calc(var(--safe-b) + 10px); transform: translateY(100%); transition: transform .38s var(--ease); max-width: 640px; margin: 0 auto; }
 .sheet.open .sheet-scrim { opacity: 1; }
 .sheet.open .sheet-panel { transform: none; }
@@ -534,7 +534,7 @@ body.ai-busy .ai-orb i { animation-duration: 1s; }
 .ai-suggest .chip { border: 1px solid var(--line); background: var(--bg2); color: var(--accent2); }
 .ai-foot { position: fixed; left: 0; right: 0; max-width: 900px; margin: 0 auto; bottom: calc(var(--tabs-h) + var(--safe-b) - 4px); z-index: 15; padding: 22px 16px 12px; background: linear-gradient(to bottom, rgba(7,7,7,0), #070707 30%); }
 body.has-mini .ai-foot { bottom: calc(var(--tabs-h) + var(--mini-h) + var(--safe-b) + 2px); }
-.ai-input { display: flex; gap: 8px; align-items: center; padding: 6px 6px 6px 16px; border-radius: 99px; background: rgba(28,26,23,.92); backdrop-filter: blur(14px); border: 1px solid rgba(217,178,106,.3); box-shadow: 0 10px 30px rgba(0,0,0,.5); z-index: 6; }
+.ai-input { display: flex; gap: 8px; align-items: center; padding: 6px 6px 6px 16px; border-radius: 99px; background: #1c1a17; border: 1px solid rgba(217,178,106,.3); box-shadow: 0 10px 30px rgba(0,0,0,.5); z-index: 6; }
 .ai-input input { flex: 1; background: none; border: 0; outline: 0; color: var(--text); font: inherit; font-size: 16px; min-width: 0; }
 .ai-send { width: 40px; height: 40px; border-radius: 50%; background: var(--grad); color: #140f06; display: grid; place-items: center; transition: transform .2s var(--spring); }
 .ai-send svg { width: 18px; height: 18px; }
@@ -703,3 +703,29 @@ body.has-mini .ai-foot { bottom: calc(var(--tabs-h) + var(--mini-h) + var(--safe
 .feat.art img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; margin-bottom: 6px; }
 .feat.art b { font-family: inherit; font-size: 14px; font-weight: 700; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .shelf-row .online-loading { padding: 30px 20px; }
+
+/* ===== Fluidité : effets lourds allégés ===== */
+.np-blob { display: none; }
+.np-bg-img { filter: blur(40px) saturate(1.3) brightness(.5); transform: scale(1.15); will-change: auto; }
+.row:nth-child(n+16), .lib-item:nth-child(n+16) { animation: none; }
+.np:not(.open) .np-in { visibility: hidden; }
+.shelf { content-visibility: auto; contain-intrinsic-size: auto 240px; }
+
+/* ===== YouTube : la vidéo remplace la pochette (plus de bulle flottante) ===== */
+.ytbox { right: auto; bottom: auto; width: 44px; height: 44px; border-radius: 5px; box-shadow: none; transform: none !important; transition: opacity .25s; z-index: 23; }
+.ytbox.on { opacity: 1; }
+.ytbox.moving { opacity: 0; transition: none; }
+.ytbox.in-np { border-radius: 8px; box-shadow: 0 30px 70px -18px rgba(0,0,0,.8); }
+.ytbox .yt-host, .ytbox .yt-host iframe { width: 178% !important; left: -39% !important; }
+.yt-badge { display: none; }
+body:not(.has-mini) .ytbox:not(.in-np) { opacity: 0; pointer-events: none; }
+.mini.yt .mini-cover { visibility: hidden; }
+.np.yt-on .np-cover { visibility: hidden; }
+
+/* Feuille Son */
+.eq-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 14px; }
+.eq-presets .chip.on { background: var(--grad); color: #140f06; }
+.vol-row { display: flex; align-items: center; gap: 12px; margin: 4px 0 18px; }
+.vol-row svg { color: var(--muted); flex: none; }
+.vol-row .range { margin: 0; }
+.set-select { background: var(--bg3); border: 1px solid var(--line); border-radius: 10px; color: var(--text); font: inherit; font-size: 15px; padding: 9px 10px; width: 100%; margin-top: 10px; }
