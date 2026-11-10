@@ -277,7 +277,27 @@ export async function podcastEpisodes(id, limit = 60) {
   return { name: show.collectionName || 'Podcast', author: show.artistName || '', art: show.artworkUrl600 || '', episodes: eps };
 }
 
-export const PODCAST_TOPICS = ['Rap', 'Football', 'Actualité', 'Humour', 'Histoire', 'Business', 'Faits divers', 'Cinéma', 'Sciences', 'Développement personnel', 'Jeux vidéo', 'Mangas'];
+// Module Infos : radios d'info en direct, flash info et une sélection de podcasts informatifs
+export const NEWS_STATIONS = ['franceinfo', 'France Inter', 'RFI', 'Europe 1', 'RTL', 'RMC', 'BFM Business', 'France Culture'];
+export const NEWS_FLASH = [
+  { label: 'Le journal franceinfo', q: 'franceinfo journal' },
+  { label: 'Le journal de 8h · France Inter', q: 'journal de 8h france inter' },
+  { label: 'RFI Journal', q: 'RFI journal français facile' },
+];
+export const FEATURED_PODCASTS = [
+  { name: 'LEGEND', desc: 'Les histoires incroyables de Guillaume Pley', q: 'LEGEND Guillaume Pley' },
+  { name: 'Hondelatte raconte', desc: 'Faits divers et grandes histoires', q: 'Hondelatte raconte' },
+  { name: 'Affaires sensibles', desc: 'Les grandes affaires d\'hier et d\'aujourd\'hui', q: 'Affaires sensibles France Inter' },
+  { name: 'Transfert', desc: 'Des histoires vraies racontées par ceux qui les ont vécues', q: 'Transfert Slate' },
+  { name: 'Les Pieds sur terre', desc: 'Reportages et témoignages', q: 'Les Pieds sur terre France Culture' },
+  { name: 'Génération Do It Yourself', desc: 'Entrepreneurs et parcours inspirants', q: 'Génération Do It Yourself' },
+  { name: 'L\'Heure du Crime', desc: 'Les plus grandes affaires criminelles', q: 'L\'heure du crime RTL' },
+  { name: 'Méta de choc', desc: 'Curiosité, sciences et esprit critique', q: 'Méta de choc' },
+];
+export async function findShow(q) {
+  const r = await podcastSearch(q, 3);
+  return r[0] || null;
+}
 
 function dedupe(a) {
   const seen = new Set();

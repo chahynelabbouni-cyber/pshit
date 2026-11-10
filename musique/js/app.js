@@ -1,10 +1,10 @@
-import { db } from './db.js?v=8';
-import { readTags } from './tags.js?v=8';
-import { Player, isIOS } from './player.js?v=8';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=8';
-import * as AI from './ai.js?v=8';
-import * as Voice from './voice.js?v=8';
-import * as Src from './sources.js?v=8';
+import { db } from './db.js?v=9';
+import { readTags } from './tags.js?v=9';
+import { Player, isIOS } from './player.js?v=9';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=9';
+import * as AI from './ai.js?v=9';
+import * as Voice from './voice.js?v=9';
+import * as Src from './sources.js?v=9';
 
 const BRAND = 'Maison Chahyn';
 
@@ -1224,6 +1224,7 @@ async function aiSend(text, { navigate = true } = {}) {
     const n = norm(text);
     const st = Src.FR_STATIONS.find(x => n.includes(norm(x)) && /(mets|met|mais|lance|joue|ecoute|radio)/.test(n));
     if (st) quick = await playRadioByName(st) || null;
+    else if (/\b(infos?|actu|actualites?|journal|flash)\b/.test(n) && n.split(' ').length <= 6) quick = await playNewsFlash(0) || null;
   }
   if (!quick && S.settings.ytKey) {
     const m = norm(text).match(/^(?:joue|jouer|mets|met|mais|lance|ecoute|play)\s+(?:moi\s+)?(.+)$/);
@@ -1469,13 +1470,9 @@ async function onlineSearch(q) {
       const key = registerList('radios-q', ts.map(t => t.id), 'Radios');
       return show(ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : `<div class="no-res"><b>Aucune radio trouvée</b></div>`);
     }
-    if (src === 'podcast') {
-      if (!q) {
-        return show(`${podcastFavs()}<h2 class="sec-title">Explorer</h2><div class="browse">${Src.PODCAST_TOPICS.map((x, i) => `<button class="browse-tile" data-act="pc-topic" data-q="${esc(x)}" style="--h:${placeholderHue(x)};--d:${i * 25}ms"><b>${esc(x)}</b>${icon('mic')}</button>`).join('')}</div>`);
-      }
-      show('<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>');
-      const res = await Src.podcastSearch(q);
-      return show(res.length ? `<div class="pc-grid">${res.map((p, i) => `<button class="pc-card" data-act="pc-show" data-id="${p.id}" style="--d:${Math.min(i, 12) * 30}ms"><img src="${esc(p.art)}" alt="" loading="lazy"><b>${esc(p.name)}</b><small>${esc(p.author)}</small></button>`).join('')}</div>` : '<div class="no-res"><b>Aucun podcast trouvé</b></div>');
+    if (src === 'info') {
+      if (S.pendingShow) { const q2 = S.pendingShow; S.pendingShow = null; return openFeatured(q2); }
+      return show(newsModule(true));
     }
     // YouTube
     const link = Src.parseYouTubeUrl(q);
@@ -1538,6 +1535,46 @@ async function playRadioByName(name, btn) {
     return `Je lance ${t.title} en direct.`;
   } catch (e) { toast(e.message || 'Radios indisponibles'); }
   finally { btn?.classList.remove('loading'); }
+}
+
+// ---------- Module Infos ----------
+function newsModule(full) {
+  const flash = Src.NEWS_FLASH.map((f, i) => `<button class="flash ${i ? 'alt' : ''}" data-act="news-flash" data-i="${i}">${icon('play')}<span><b>${esc(f.label)}</b><small>Dernière édition</small></span></button>`).join('');
+  const stations = Src.NEWS_STATIONS.map((n, i) => `<button class="station news" data-act="radio-name" data-name="${esc(n)}" style="--h:${placeholderHue(n)};--d:${i * 25}ms"><span class="st-wave"><i></i><i></i><i></i></span><b>${esc(n)}</b><small>En direct</small></button>`);
+  const feat = Src.FEATURED_PODCASTS.map((p, i) => `<button class="feat" data-act="feat-pc" data-q="${esc(p.q)}" style="--h:${placeholderHue(p.name)};--d:${i * 30}ms"><b>${esc(p.name)}</b><small>${esc(p.desc)}</small></button>`);
+  return `<section class="shelf news-mod"><div class="shelf-head"><h2>${icon('radio')} Les infos</h2></div>
+      <div class="flash-row">${flash}</div></section>
+    ${shelf('Infos en direct', stations)}
+    ${shelf('Podcasts à écouter', feat)}
+    ${full ? podcastFavs() : ''}`;
+}
+
+async function playNewsFlash(i, btn) {
+  const f = Src.NEWS_FLASH[i];
+  btn?.classList.add('loading');
+  try {
+    const show = await Src.findShow(f.q);
+    if (!show) throw new Error('Flash info introuvable');
+    const p = await Src.podcastEpisodes(show.id, 3);
+    if (!p.episodes.length) throw new Error('Pas d\'édition disponible');
+    const t = remoteTrack(p.episodes[0], 'podcast');
+    playIds([t.id], 0, { context: { label: f.label } });
+    toast(`${f.label} · ${t.title}`);
+    return `Voici ${f.label}.`;
+  } catch (e) { toast(e.message || 'Infos indisponibles'); return null; }
+  finally { btn?.classList.remove('loading'); }
+}
+
+async function openFeatured(q) {
+  $('#results').innerHTML = '<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>';
+  try {
+    const show = await Src.findShow(q);
+    if (!show) throw new Error('Podcast introuvable');
+    await showPodcast(show.id);
+    $('#results')?.insertAdjacentHTML('afterbegin', `<button class="link back-link" data-act="src" data-src="info">${icon('back')} Les infos</button>`);
+  } catch (e) {
+    $('#results').innerHTML = `<div class="no-res"><b>Indisponible</b><p>${esc(e.message)}</p></div>`;
+  }
 }
 
 function podcastFavs() {
@@ -1687,7 +1724,6 @@ function homeDiscover() {
     <a class="home-search" href="#/search?src=yt">${icon('search')}<span>Que veux-tu écouter ?</span></a>
     ${anyRecent.length ? shelf('Reprendre', recentCards) : ''}`;
   const stations = Src.FR_STATIONS.slice(0, 14).map((n, i) => `<button class="station" data-act="radio-name" data-name="${esc(n)}" style="--h:${placeholderHue(n)};--d:${i * 25}ms"><span class="st-wave"><i></i><i></i><i></i></span><b>${esc(n)}</b><small>En direct</small></button>`);
-  const topics = Src.PODCAST_TOPICS.slice(0, 10).map((x, i) => `<button class="topic" data-act="pc-home" data-q="${esc(x)}" style="--h:${placeholderHue(x)};--d:${i * 25}ms">${icon('mic')}<b>${esc(x)}</b></button>`);
   const rest = `
     ${radios.length ? shelf('Mes radios', radios.map((t, i) => `<div class="card track-card radio-card" data-tid="${t.id}" data-i="${i}" data-list="${radiosKey}"><div class="card-art">${trackCover(t, 'radio-cv')}<span class="live-dot card-live">LIVE</span></div><b>${esc(t.title)}</b><small>Radio</small></div>`)) : ''}
     ${shelf('Radios en direct', stations, '#/search?src=radio')}
@@ -1695,17 +1731,18 @@ function homeDiscover() {
       <div class="yt-promo-in">${icon('play')}<div><b>Tout YouTube dans ta Maison</b><small>${S.settings.ytKey ? 'Cherche n\'importe quel artiste, garde tes sons, crée tes playlists.' : 'Ajoute ta clé gratuite pour chercher n\'importe quel son.'}</small></div></div>
       <a class="btn primary sm" href="${S.settings.ytKey ? '#/search?src=yt' : '#/settings'}">${S.settings.ytKey ? 'Chercher' : 'Configurer'}</a>
     </section>
-    ${shelf('Podcasts', topics, '#/search?src=podcast')}`;
+    ${newsModule(false)}`;
   return { top, rest };
 }
 
 function viewSearch(params) {
   if (params?.get('src')) S.settings.searchSrc = params.get('src');
+  if (S.settings.searchSrc === 'podcast') S.settings.searchSrc = 'info';
   const src = S.settings.searchSrc || 'yt';
-  const ph = { yt: 'Artiste, titre, ou colle un lien YouTube', radio: 'Nom d\'une radio (Skyrock, NRJ…)', podcast: 'Nom d\'un podcast ou d\'un sujet', lib: 'Dans ta bibliothèque…' }[src];
+  const ph = { yt: 'Artiste, titre, ou colle un lien YouTube', radio: 'Nom d\'une radio (Skyrock, NRJ…)',  info: 'Les infos du moment', lib: 'Dans ta bibliothèque…' }[src];
   return `<header class="page-head"><h1>Rechercher</h1></header>
     <div class="search-sticky"><div class="search-box">${icon('search')}<input type="search" id="q" placeholder="${ph}" value="${esc(S.searchQ)}" autocomplete="off" enterkeyhint="search"><button class="ib sm clear-q" aria-label="Effacer" ${S.searchQ ? '' : 'hidden'}>${icon('close')}</button></div>
-    <div class="chips src-chips">${[['yt', 'YouTube'], ['radio', 'Radios'], ['podcast', 'Podcasts'], ['lib', 'Ma bibliothèque']].map(([k, l]) => `<button class="chip ${k === src ? 'on' : ''}" data-act="src" data-src="${k}">${l}</button>`).join('')}</div></div>
+    <div class="chips src-chips">${[['yt', 'YouTube'], ['radio', 'Radios'], ['info', 'Infos'], ['lib', 'Ma bibliothèque']].map(([k, l]) => `<button class="chip ${k === src ? 'on' : ''}" data-act="src" data-src="${k}">${l}</button>`).join('')}</div></div>
     <div id="results">${src === 'lib' ? searchResults(S.searchQ) : '<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>'}</div>`;
 }
 
@@ -2107,9 +2144,12 @@ document.addEventListener('click', e => {
       case 'src': S.settings.searchSrc = act.dataset.src; saveSettings(); if (location.hash.includes('src=')) return goto('#/search', true); return render(true);
       case 'radio-tag': return showRadios(act.dataset.tag, act.dataset.label);
       case 'radio-name': return playRadioByName(act.dataset.name, act);
-      case 'pc-topic': { const q = $('#q'); if (q) { q.value = act.dataset.q; S.searchQ = act.dataset.q; } return onlineSearch(act.dataset.q); }
       case 'pc-show': return showPodcast(act.dataset.id);
-      case 'pc-home': S.settings.searchSrc = 'podcast'; S.searchQ = act.dataset.q; saveSettings(); S.pendingFwd = true; return goto('#/search');
+      case 'news-flash': return playNewsFlash(+act.dataset.i || 0, act);
+      case 'feat-pc': {
+        if (S.route?.name === 'search') return openFeatured(act.dataset.q);
+        S.settings.searchSrc = 'info'; S.searchQ = ''; S.pendingShow = act.dataset.q; saveSettings(); S.pendingFwd = true; return goto('#/search');
+      }
       case 'yt-key': S.pendingFwd = true; return goto('#/settings');
       case 'ai-clear': S.chat = []; saveJSON('onde.chat', S.chat); return render(true);
       case 'ai-play': { const m = S.mixes[act.dataset.key]; if (m?.tracks.length) playIds(m.tracks.map(t => t.id), 0, { context: { label: m.name, route: '#/mix/' + m.key } }); return; }

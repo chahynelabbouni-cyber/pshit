@@ -1,7 +1,7 @@
 // Moteur de lecture : deux lecteurs audio pour les fondus enchaînés entre morceaux,
 // file d'attente, aléatoire, répétition, écran de verrouillage (Media Session).
-import { db } from './db.js?v=8';
-import { YouTubeElement } from './sources.js?v=8';
+import { db } from './db.js?v=9';
+import { YouTubeElement } from './sources.js?v=9';
 
 export const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
