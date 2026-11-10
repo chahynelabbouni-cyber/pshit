@@ -226,6 +226,13 @@ const INTENTS = [
   ['moment', /maintenant|moment|en ce moment|tout de suite|ce soir|aujourd/],
 ];
 
+export function hasIntent(text, tracks) {
+  const n = norm(text);
+  if (INTENTS.some(([, re]) => re.test(n))) return true;
+  if (/\b(playlist|mix|son|sons|musique|ecouter)\b/.test(n)) return true;
+  return tracks.some(t => (t.artist && t.artist.length > 2 && n.includes(norm(t.artist))) || (t.genre && t.genre.length > 2 && n.includes(norm(t.genre))));
+}
+
 export function understand(text, tracks) {
   const n = norm(text);
   let mood = null;
