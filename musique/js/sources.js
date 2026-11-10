@@ -36,13 +36,34 @@ function isoDuration(d) {
 // ---------------------------------------------------------------------
 const YT_API = 'https://www.googleapis.com/youtube/v3';
 
-export async function ytSearch(key, q, max = 20) {
-  const p = new URLSearchParams({ part: 'snippet', type: 'video', videoCategoryId: '10', maxResults: max, q, key, regionCode: 'FR', relevanceLanguage: 'fr' });
+// Ce qui n'est pas « un vrai son » : compilations, mix, albums entiers, vidéos de plusieurs heures…
+const NOT_A_SONG = /\b(mix|mixtape|compil|compilation|playlist|non ?stop|full album|album complet|best of|megamix|mashup|live set|dj set|medley|\d+\s*(h|hr|hrs|hour|hours|heures?)\b|top \d+|\d{2,}\s*(songs|titres|sons|hits)|reaction|tutorial|cover|karaoke|instrumental version|slowed|reverb|8d|sped up|lyrics compilation)\b/i;
+// Indices d'une source officielle (chaîne « - Topic » = audio officiel publié par la maison de disques)
+function officialScore(v) {
+  let s = 0;
+  if (/ - Topic$/i.test(v.channel)) s += 4;
+  if (/vevo$/i.test(v.channel)) s += 3;
+  if (/official|officiel|clip officiel|audio officiel|official audio|official video|official music video/i.test(v.rawTitle)) s += 2;
+  if (v.artist && v.channel && v.channel.toLowerCase().includes(v.artist.toLowerCase().slice(0, 6))) s += 1;
+  return s;
+}
+
+/** Recherche YouTube. songsOnly (par défaut) : uniquement de vrais morceaux (1 à 8 min, pas de compil), sources officielles d'abord. */
+export async function ytSearch(key, q, max = 20, { songsOnly = true } = {}) {
+  const p = new URLSearchParams({ part: 'snippet', type: 'video', videoCategoryId: '10', maxResults: Math.min(50, songsOnly ? max * 2 + 10 : max), q, key, regionCode: 'FR', relevanceLanguage: 'fr' });
   const r = await fetch(`${YT_API}/search?${p}`);
   const j = await r.json();
   if (!r.ok) throw new Error(j.error?.message || 'Recherche YouTube impossible');
   const ids = j.items.map(i => i.id.videoId).filter(Boolean);
-  return ytVideos(key, ids, j.items);
+  const all = await ytVideos(key, ids, j.items);
+  if (!songsOnly) return all.slice(0, max);
+  const songs = all.filter(v => !NOT_A_SONG.test(v.rawTitle) && (!v.duration || (v.duration >= 60 && v.duration <= 480)));
+  // tri stable : sources officielles d'abord, en gardant l'ordre de pertinence de YouTube
+  const ranked = songs.map((v, i) => ({ v, k: officialScore(v) * 3 - i * 0.15 })).sort((a, b) => b.k - a.k).map(x => x.v);
+  // un même titre une seule fois (clip + audio + lyrics…)
+  const seen = new Set();
+  const uniq = ranked.filter(v => { const k = (v.artist + '|' + v.title).toLowerCase().replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^a-z0-9|]/g, ''); if (seen.has(k)) return false; seen.add(k); return true; });
+  return (uniq.length ? uniq : all).slice(0, max);
 }
 
 export async function ytVideos(key, ids, snippets = []) {
@@ -58,7 +79,7 @@ export async function ytVideos(key, ids, snippets = []) {
     const sn = v.snippet;
     const { artist, title } = cleanYouTubeTitle(sn.title, sn.channelTitle);
     return {
-      ytId: id, title, artist,
+      ytId: id, title, artist, rawTitle: sn.title || '', channel: sn.channelTitle || '',
       duration: isoDuration(v.contentDetails?.duration),
       thumb: sn.thumbnails?.high?.url || sn.thumbnails?.medium?.url || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
     };
@@ -139,12 +160,13 @@ export class YouTubeElement extends EventTarget {
   set volume(v) { this._vol = v; try { this.player?.setVolume(Math.round(v * 100)); } catch { /* ignore */ } }
   fire(t) { this.dispatchEvent(new Event(t)); }
 
-  async load(id, duration = 0) {
+  async load(id, duration = 0, autoplay = false) {
     this.videoId = id;
     this.src = 'yt:' + id;
     this._dur = duration;
     const YT = await loadYT();
-    if (this.player) { this.player.cueVideoById(id); return; }
+    // loadVideoById démarre tout de suite (flèche « suivant ») ; cueVideoById prépare sans lancer
+    if (this.player) { this._userPause = false; autoplay ? this.player.loadVideoById(id) : this.player.cueVideoById(id); return; }
     await new Promise(resolve => {
       const div = document.createElement('div');
       this.host.innerHTML = '';
@@ -152,7 +174,7 @@ export class YouTubeElement extends EventTarget {
       this.player = new YT.Player(div, {
         videoId: id,
         width: '100%', height: '100%',
-        playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, iv_load_policy: 3, origin: location.origin },
+        playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, iv_load_policy: 3, autoplay: autoplay ? 1 : 0, origin: location.origin },
         events: {
           onReady: () => resolve(),
           onStateChange: e => this.onState(e.data),
