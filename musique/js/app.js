@@ -1,0 +1,1923 @@
+import { db } from './db.js';
+import { readTags } from './tags.js';
+import { Player, isIOS } from './player.js';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js';
+import * as AI from './ai.js';
+import * as Voice from './voice.js';
+
+const BRAND = 'Maison Chahyn';
+
+// ======================================================================
+// État
+// ======================================================================
+const S = {
+  tracks: new Map(),
+  playlists: new Map(),
+  covers: new Map(),       // coverId -> objectURL
+  colors: loadJSON('onde.colors', {}),
+  settings: Object.assign({ name: 'Chahyn', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true }, loadJSON('onde.settings', {})),
+  mixes: {},
+  chat: loadJSON('onde.chat', []),
+  version: 0,
+  cache: {},
+  lists: {},
+  route: null,
+  navCount: 0,
+  scroll: {},
+  searchQ: '',
+};
+
+function loadJSON(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }
+function saveJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* plein */ } }
+const saveSettings = () => saveJSON('onde.settings', S.settings);
+
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const icon = (n, cls = '') => `<svg class="${cls}"><use href="#i-${n}"/></svg>`;
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+const collator = new Intl.Collator('fr', { sensitivity: 'base', numeric: true });
+
+function hash(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function fmt(sec) {
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  if (m >= 60) return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+function fmtTotal(sec) {
+  const m = Math.round(sec / 60);
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+}
+function plural(n, w) { return `${n} ${w}${n > 1 ? 's' : ''}`; }
+function fmtSize(b) {
+  if (b > 1e9) return (b / 1e9).toFixed(2).replace('.', ',') + ' Go';
+  return Math.round(b / 1e6) + ' Mo';
+}
+const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+// ======================================================================
+// Bibliothèque : albums, artistes, etc.
+// ======================================================================
+const albumKey = t => t.album ? norm(t.albumArtist || t.artist || '') + '|' + norm(t.album) : null;
+const artistOf = t => t.artist || 'Artiste inconnu';
+
+function memo(name, fn) {
+  const c = S.cache[name];
+  if (c && c.v === S.version) return c.val;
+  const val = fn();
+  S.cache[name] = { v: S.version, val };
+  return val;
+}
+const allTracks = () => memo('all', () => [...S.tracks.values()]);
+
+const albums = () => memo('albums', () => {
+  const m = new Map();
+  for (const t of allTracks()) {
+    const k = albumKey(t);
+    if (!k) continue;
+    let a = m.get(k);
+    if (!a) m.set(k, a = { key: k, title: t.album, artist: t.albumArtist || artistOf(t), tracks: [], coverId: null, year: '', addedAt: 0, lastPlayed: 0 });
+    a.tracks.push(t);
+    if (!a.coverId && t.coverId) a.coverId = t.coverId;
+    if (t.year && !a.year) a.year = t.year;
+    a.addedAt = Math.max(a.addedAt, t.addedAt);
+    a.lastPlayed = Math.max(a.lastPlayed, t.lastPlayed || 0);
+  }
+  for (const a of m.values()) a.tracks.sort((x, y) => (x.track || 999) - (y.track || 999) || collator.compare(x.title, y.title));
+  return m;
+});
+
+const artists = () => memo('artists', () => {
+  const m = new Map();
+  const add = (name, t) => {
+    let a = m.get(name);
+    if (!a) m.set(name, a = { name, tracks: [], coverId: null, plays: 0, addedAt: 0 });
+    if (a.tracks.includes(t)) return;
+    a.tracks.push(t);
+    if (!a.coverId && t.coverId) a.coverId = t.coverId;
+    a.plays += t.plays || 0;
+    a.addedAt = Math.max(a.addedAt, t.addedAt);
+  };
+  for (const t of allTracks()) {
+    add(artistOf(t), t);
+    if (t.albumArtist && t.albumArtist !== t.artist) add(t.albumArtist, t);
+  }
+  return m;
+});
+
+const liked = () => memo('liked', () => allTracks().filter(t => t.liked).sort((a, b) => (b.likedAt || 0) - (a.likedAt || 0)));
+
+function bump() { S.version++; }
+
+// ======================================================================
+// Pochettes & couleurs
+// ======================================================================
+function coverURL(coverId) { return coverId ? S.covers.get(coverId) : null; }
+
+function placeholderHue(seed) { return hash(seed || 'x') % 360; }
+
+function cover(obj, cls = '') {
+  // obj: { coverId, seed, kind }
+  const url = coverURL(obj.coverId);
+  if (url) return `<div class="cv ${cls}"><img src="${url}" alt="" loading="lazy" decoding="async"></div>`;
+  const h = placeholderHue(obj.seed);
+  const ic = obj.kind === 'artist' ? 'user' : obj.kind === 'playlist' ? 'note' : obj.kind === 'album' ? 'album' : 'note';
+  return `<div class="cv ph ${cls}" style="--h:${h}">${icon(ic)}</div>`;
+}
+const trackCover = (t, cls) => cover({ coverId: t.coverId, seed: t.album || t.artist || t.title }, cls);
+
+function playlistCover(p, cls = '') {
+  const ids = [];
+  for (const id of p.trackIds) {
+    const t = S.tracks.get(id);
+    if (t?.coverId && !ids.includes(t.coverId)) ids.push(t.coverId);
+    if (ids.length === 4) break;
+  }
+  if (ids.length >= 4) return `<div class="cv mosaic ${cls}">${ids.map(c => `<img src="${coverURL(c)}" alt="" loading="lazy">`).join('')}</div>`;
+  if (ids.length) return cover({ coverId: ids[0] }, cls);
+  return cover({ seed: p.name, kind: 'playlist' }, cls);
+}
+const likedCover = (cls = '') => `<div class="cv liked-cv ${cls}">${icon('heart-f')}</div>`;
+
+function colorFor(coverId, seed) {
+  if (coverId && S.colors[coverId]) return S.colors[coverId];
+  if (!coverId) return `hsl(${placeholderHue(seed)} 45% 32%)`;
+  return '#3a3550';
+}
+
+async function computeColor(coverId) {
+  if (!coverId || S.colors[coverId]) return S.colors[coverId];
+  const url = coverURL(coverId);
+  if (!url) return null;
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = c.height = 20;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, 20, 20);
+    const d = g.getImageData(0, 0, 20, 20).data;
+    let r = 0, gr = 0, b = 0, w = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const R = d[i], G = d[i + 1], B = d[i + 2];
+      const max = Math.max(R, G, B), min = Math.min(R, G, B);
+      const sat = max ? (max - min) / max : 0;
+      const lum = (max + min) / 510;
+      const weight = 0.15 + sat * sat * 3 * (lum > 0.08 && lum < 0.92 ? 1 : 0.2);
+      r += R * weight; gr += G * weight; b += B * weight; w += weight;
+    }
+    r /= w; gr /= w; b /= w;
+    // passage en HSL pour garder une teinte lisible sur fond sombre
+    const [h, s, l] = rgbToHsl(r, gr, b);
+    const col = `hsl(${Math.round(h)} ${Math.round(Math.min(70, s * 100 + 10))}% ${Math.round(Math.max(24, Math.min(40, l * 100)))}%)`;
+    S.colors[coverId] = col;
+    saveJSON('onde.colors', S.colors);
+    return col;
+  } catch { return null; }
+}
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0; const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h *= 60;
+  }
+  return [h, s, l];
+}
+async function tint(el, coverId, seed, prop = '--tint') {
+  el.style.setProperty(prop, colorFor(coverId, seed));
+  if (coverId && !S.colors[coverId]) {
+    const c = await computeColor(coverId);
+    if (c) el.style.setProperty(prop, c);
+  }
+}
+
+// ======================================================================
+// Lecteur
+// ======================================================================
+const player = new Player(id => S.tracks.get(id), async t => coverURL(t.coverId));
+player.crossfade = S.settings.crossfade;
+player.visualizer = S.settings.visualizer;
+
+player.addEventListener('played', async e => {
+  const t = e.detail;
+  t.plays = (t.plays || 0) + 1;
+  t.lastPlayed = Date.now();
+  bump();
+  await db.put('tracks', t);
+});
+let listen = { id: null, max: 0 };
+player.addEventListener('track', () => {
+  if (listen.id && listen.id !== player.currentId && listen.max > 0.02) {
+    AI.logListen(listen.id, { skipped: listen.max < 0.35, ratio: Math.min(1, listen.max) });
+    S.mixes.moment = null;
+  }
+  listen = { id: player.currentId, max: 0 };
+  updateNowPlaying(); markPlaying();
+  const t = player.current;
+  if (t && S.lyr?.id !== t.id) loadLyrics(t);
+});
+player.addEventListener('time', () => {
+  if (player.currentId === listen.id && player.duration) listen.max = Math.max(listen.max, player.time / player.duration);
+  syncLyrics();
+});
+player.addEventListener('state', () => { updatePlayState(); player.updatePosition(); });
+player.addEventListener('time', updateTime);
+player.addEventListener('modes', updateModes);
+player.addEventListener('queue', () => { if (S.queueOpen) renderQueue(); });
+player.addEventListener('sleep', updateSleep);
+player.addEventListener('error', () => toast('Impossible de lire ce fichier'));
+
+function playIds(ids, i = 0, opts = {}) {
+  player.playList(ids, i, opts);
+}
+
+// ======================================================================
+// Mini-lecteur & lecteur plein écran
+// ======================================================================
+const mini = $('#mini');
+const np = $('#np');
+const seek = $('.np-seek input');
+let seeking = false;
+
+function setMarquee(box, text) {
+  const span = box.querySelector('span');
+  span.textContent = text;
+  box.classList.remove('run');
+  box.style.removeProperty('--dist');
+  requestAnimationFrame(() => {
+    const over = span.scrollWidth - box.clientWidth;
+    if (over > 4) {
+      box.style.setProperty('--dist', `-${over + 24}px`);
+      box.style.setProperty('--dur', `${Math.max(6, over / 18)}s`);
+      box.classList.add('run');
+    }
+  });
+}
+
+function updateNowPlaying() {
+  const t = player.current;
+  mini.hidden = !t;
+  document.body.classList.toggle('has-mini', !!t);
+  if (!t) { if (S.npOpen) closeNP(); return; }
+  const seed = t.album || t.artist || t.title;
+  // mini
+  const mc = $('.mini-cover', mini);
+  mc.innerHTML = trackCover(t);
+  mini.classList.remove('swap'); void mini.offsetWidth; mini.classList.add('swap');
+  setMarquee($('.mini-title', mini), t.title);
+  $('.mini-artist', mini).textContent = artistOf(t);
+  tint(mini, t.coverId, seed);
+  // plein écran
+  const nc = $('.np-cover', np);
+  nc.innerHTML = trackCover(t);
+  const track = $('.np-cover-track', np);
+  if (S.swipeDir) {
+    track.classList.remove('in-left', 'in-right'); void track.offsetWidth;
+    track.classList.add(S.swipeDir > 0 ? 'in-right' : 'in-left');
+    S.swipeDir = 0;
+  }
+  setMarquee($('.np-title', np), t.title);
+  $('.np-artist', np).textContent = artistOf(t);
+  $('.np-ctx b', np).textContent = player.context?.label || t.album || 'Ta bibliothèque';
+  tint(np, t.coverId, seed);
+  const bgi = $('.np-bg-img', np);
+  const cu = coverURL(t.coverId);
+  bgi.style.backgroundImage = cu ? `url("${cu}")` : 'none';
+  bgi.classList.remove('fade'); void bgi.offsetWidth; bgi.classList.add('fade');
+  $('.lyr-head', np).innerHTML = `${trackCover(t, 'xs2')}<div><b>${esc(t.title)}</b><small>${esc(artistOf(t))}</small></div>`;
+  updateLike();
+  updateTime();
+  updatePlayState();
+}
+
+function updateLike() {
+  const t = player.current;
+  const on = !!t?.liked;
+  for (const b of [$('.mini-like'), $('.np-like')]) {
+    b.classList.toggle('on', on);
+    b.querySelector('use').setAttribute('href', on ? '#i-heart-f' : '#i-heart');
+  }
+}
+
+function updatePlayState() {
+  const p = player.playing;
+  document.body.classList.toggle('is-playing', p);
+  for (const b of [$('.mini-play'), ...$$('.np-play')]) b.querySelector('use').setAttribute('href', p ? '#i-pause' : '#i-play');
+  np.classList.toggle('paused', !p);
+  $$('.hero-play').forEach(b => {
+    const mine = b.dataset.list && S.lists[b.dataset.list]?.ids.includes(player.currentId) && S.lists[b.dataset.list]?.label === player.context?.label;
+    b.querySelector('use').setAttribute('href', mine && p ? '#i-pause' : '#i-play');
+  });
+  if (p && S.npOpen) startViz();
+}
+
+function updateTime() {
+  const d = player.duration, c = player.time;
+  $('.mini-bar i').style.transform = `scaleX(${d ? c / d : 0})`;
+  if (!S.npOpen) return;
+  if (!seeking) {
+    seek.value = d ? Math.round(c / d * 1000) : 0;
+    $('.t-cur').textContent = fmt(c);
+  }
+  seek.style.setProperty('--p', `${seek.value / 10}%`);
+  $('.t-dur').textContent = fmt(d);
+}
+
+function updateModes() {
+  $('.np-shuffle').classList.toggle('on', player.shuffle);
+  const r = $('.np-repeat');
+  r.classList.toggle('on', player.repeat !== 'off');
+  r.classList.toggle('one', player.repeat === 'one');
+}
+
+function updateSleep() {
+  const b = $('.np-sleep');
+  const on = player.sleepAt || player.sleepEndOfTrack;
+  b.classList.toggle('on', !!on);
+  clearInterval(S.sleepTick);
+  const paint = () => {
+    if (player.sleepEndOfTrack) b.querySelector('em').textContent = 'fin';
+    else if (player.sleepAt) b.querySelector('em').textContent = Math.max(0, Math.ceil((player.sleepAt - Date.now()) / 60000)) + ' min';
+    else b.querySelector('em').textContent = '';
+  };
+  paint();
+  if (player.sleepAt) S.sleepTick = setInterval(paint, 15000);
+}
+
+function markPlaying() {
+  const id = player.currentId;
+  $$('[data-tid]').forEach(r => r.classList.toggle('playing', r.dataset.tid === id));
+}
+
+// --- ouverture/fermeture avec gestion du bouton retour Android ---
+const overlays = [];
+let ignorePop = 0;
+function pushOverlay(name, close) {
+  overlays.push({ name, close });
+  history.pushState({ overlay: name }, '');
+}
+function popOverlay() {
+  return new Promise(res => {
+    const o = overlays.pop();
+    if (!o) return res();
+    o.close();
+    ignorePop++;
+    const done = () => { window.removeEventListener('popstate', done); res(); };
+    window.addEventListener('popstate', done);
+    history.back();
+  });
+}
+async function closeAllOverlays() { while (overlays.length) await popOverlay(); }
+window.addEventListener('popstate', () => {
+  if (ignorePop) { ignorePop--; return; }
+  const o = overlays.pop();
+  if (o) o.close();
+});
+
+function openNP() {
+  if (!player.current || S.npOpen) return;
+  S.npOpen = true;
+  np.classList.add('open');
+  np.setAttribute('aria-hidden', 'false');
+  updateTime();
+  updateModes();
+  updateSleep();
+  pushOverlay('np', () => { S.npOpen = false; np.classList.remove('open'); np.style.transform = ''; np.setAttribute('aria-hidden', 'true'); stopViz(); });
+  if (player.playing) startViz();
+}
+const closeNP = () => { if (S.npOpen) popOverlay(); };
+
+// Gestes : mini-lecteur
+gesture(mini, {
+  tap: e => {
+    if (e.target.closest('.mini-play')) return player.toggle();
+    if (e.target.closest('.mini-like')) return toggleLike(player.current);
+    openNP();
+  },
+  end: (dx, dy) => {
+    if (dy < -40 && Math.abs(dy) > Math.abs(dx)) return openNP();
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) { dx < 0 ? player.next() : player.prev(); }
+  },
+  move: (dx, dy) => { $('.mini-in', mini).style.transform = Math.abs(dx) > Math.abs(dy) ? `translateX(${dx * 0.4}px)` : ''; },
+  reset: () => { $('.mini-in', mini).style.transform = ''; },
+});
+
+// Gestes : lecteur plein écran (glisser vers le bas pour fermer, gauche/droite sur la pochette)
+gesture($('.np-head', np), {
+  move: (dx, dy) => { if (dy > 0) { np.style.transition = 'none'; np.style.transform = `translateY(${dy}px)`; } },
+  end: (dx, dy) => { np.style.transition = ''; np.style.transform = ''; if (dy > 110) closeNP(); },
+  reset: () => { np.style.transition = ''; np.style.transform = ''; },
+});
+gesture($('.np-art', np), {
+  move: (dx, dy) => {
+    const tr = $('.np-cover-track');
+    if (Math.abs(dx) > Math.abs(dy)) { tr.style.transition = 'none'; tr.style.transform = `translateX(${dx}px) rotate(${dx / 40}deg)`; np.style.transform = ''; }
+    else if (dy > 0) { np.style.transition = 'none'; np.style.transform = `translateY(${dy}px)`; }
+  },
+  end: (dx, dy) => {
+    const tr = $('.np-cover-track');
+    tr.style.transition = ''; tr.style.transform = '';
+    np.style.transition = ''; np.style.transform = '';
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy)) {
+      S.swipeDir = dx < 0 ? 1 : -1;
+      dx < 0 ? player.next() : player.prev();
+    } else if (dy > 120) closeNP();
+  },
+  reset: () => { const tr = $('.np-cover-track'); tr.style.transition = ''; tr.style.transform = ''; np.style.transform = ''; np.style.transition = ''; },
+});
+
+function gesture(el, { tap, move, end, reset }) {
+  let sx, sy, dx, dy, active = false, moved = false;
+  el.addEventListener('pointerdown', e => {
+    if (e.target.closest('input')) return;
+    active = true; moved = false; sx = e.clientX; sy = e.clientY; dx = dy = 0;
+  });
+  window.addEventListener('pointermove', e => {
+    if (!active) return;
+    dx = e.clientX - sx; dy = e.clientY - sy;
+    if (!moved && Math.hypot(dx, dy) > 8) moved = true;
+    if (moved && move) move(dx, dy);
+  }, { passive: true });
+  const up = e => {
+    if (!active) return;
+    active = false;
+    if (!moved) { reset?.(); tap?.(e); return; }
+    end?.(dx, dy);
+  };
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', () => { if (active) { active = false; reset?.(); } });
+}
+
+np.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.act === 'np-close') return closeNP();
+  if (b.dataset.act === 'np-more') return trackSheet(player.current, { fromNP: true });
+  if (b.classList.contains('np-play')) return player.toggle();
+  if (b.classList.contains('np-next')) { S.swipeDir = 1; return player.next(); }
+  if (b.classList.contains('np-prev')) { S.swipeDir = -1; return player.prev(); }
+  if (b.classList.contains('np-shuffle')) { player.toggleShuffle(); return toast(player.shuffle ? 'Lecture aléatoire activée' : 'Lecture aléatoire désactivée'); }
+  if (b.classList.contains('np-repeat')) { player.cycleRepeat(); return toast({ off: 'Répétition désactivée', all: 'Répéter la file', one: 'Répéter ce titre' }[player.repeat]); }
+  if (b.classList.contains('np-like')) return toggleLike(player.current);
+  if (b.classList.contains('np-queue')) return queueSheet();
+  if (b.classList.contains('np-sleep')) return sleepSheet();
+  if (b.classList.contains('np-voice')) return startVoice();
+  if (b.classList.contains('np-artist')) { const n = artistOf(player.current); S.pendingFwd = true; return closeAllOverlays().then(() => goto('#/artist/' + encodeURIComponent(n))); }
+});
+seek.addEventListener('input', () => {
+  seeking = true;
+  seek.style.setProperty('--p', `${seek.value / 10}%`);
+  $('.t-cur').textContent = fmt(seek.value / 1000 * player.duration);
+});
+seek.addEventListener('change', () => { player.seek(seek.value / 1000 * player.duration); seeking = false; });
+
+// --- Visualiseur ---
+let vizRaf = 0;
+function startViz() {
+  if (vizRaf || !S.settings.visualizer || !player.analyser) return;
+  const cv = $('.np-viz');
+  const g = cv.getContext('2d');
+  const data = new Uint8Array(player.analyser.frequencyBinCount);
+  const coverEl = $('.np-cover');
+  let smooth = 0;
+  const draw = () => {
+    vizRaf = requestAnimationFrame(draw);
+    const dpr = devicePixelRatio || 1;
+    const W = cv.clientWidth, H = cv.clientHeight;
+    if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    player.analyser.getByteFrequencyData(data);
+    const bass = (data[1] + data[2] + data[3] + data[4]) / 1020;
+    smooth = smooth * 0.75 + bass * 0.25;
+    coverEl.style.setProperty('--beat', (1 + smooth * 0.045).toFixed(4));
+    // anneau de barres autour de la pochette
+    const n = 64, cx = W / 2, cy = H / 2;
+    const r = Math.min(W, H) * 0.36;
+    g.lineCap = 'round';
+    g.lineWidth = Math.max(2, r * 0.025);
+    for (let i = 0; i < n; i++) {
+      const v = data[Math.floor(i * 0.9) + 2] / 255;
+      const len = 6 + v * v * r * 0.3;
+      const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+      g.strokeStyle = `rgba(236,210,157,${0.15 + v * 0.6})`;
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a) * (r + 6), cy + Math.sin(a) * (r + 6));
+      g.lineTo(cx + Math.cos(a) * (r + 6 + len), cy + Math.sin(a) * (r + 6 + len));
+      g.stroke();
+    }
+    if (!player.playing) stopViz();
+  };
+  draw();
+}
+function stopViz() {
+  cancelAnimationFrame(vizRaf); vizRaf = 0;
+  const cv = $('.np-viz');
+  cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+  $('.np-cover').style.setProperty('--beat', 1);
+}
+
+// ======================================================================
+// Feuilles d'actions (bottom sheets) & toasts
+// ======================================================================
+const sheet = $('#sheet');
+let sheetHandlers = {};
+function openSheet(html, handlers = {}, { onOpen } = {}) {
+  const body = $('.sheet-body', sheet);
+  const wasOpen = !sheet.hidden;
+  body.innerHTML = html;
+  sheetHandlers = handlers;
+  if (!wasOpen) {
+    sheet.hidden = false;
+    requestAnimationFrame(() => sheet.classList.add('open'));
+    pushOverlay('sheet', () => {
+      sheet.classList.remove('open');
+      S.queueOpen = false;
+      setTimeout(() => { if (!sheet.classList.contains('open')) sheet.hidden = true; }, 320);
+    });
+  }
+  onOpen?.(body);
+}
+const closeSheet = () => (!sheet.hidden && overlays.at(-1)?.name === 'sheet') ? popOverlay() : Promise.resolve();
+$('.sheet-scrim').addEventListener('click', closeSheet);
+gesture($('.sheet-grip'), {
+  move: (dx, dy) => { if (dy > 0) $('.sheet-panel').style.transform = `translateY(${dy}px)`; },
+  end: (dx, dy) => { $('.sheet-panel').style.transform = ''; if (dy > 80) closeSheet(); },
+  reset: () => { $('.sheet-panel').style.transform = ''; },
+});
+sheet.addEventListener('click', e => {
+  const b = e.target.closest('[data-sa]');
+  if (!b) return;
+  const fn = sheetHandlers[b.dataset.sa];
+  if (fn) fn(b, e);
+});
+
+function sheetItems(items) {
+  return items.filter(Boolean).map(it =>
+    `<button class="sheet-item ${it.danger ? 'danger' : ''}" data-sa="${it.id}">${icon(it.icon)}<span>${esc(it.label)}</span></button>`).join('');
+}
+
+let toastT;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ======================================================================
+// Actions sur les morceaux / playlists
+// ======================================================================
+async function toggleLike(t) {
+  if (!t) return;
+  t.liked = !t.liked;
+  t.likedAt = t.liked ? Date.now() : 0;
+  bump();
+  await db.put('tracks', t);
+  if (t.id === player.currentId) {
+    updateLike();
+    const b = $('.np-like');
+    b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
+  }
+  $$(`[data-tid="${t.id}"] .like-mark`).forEach(el => el.classList.toggle('on', t.liked));
+  toast(t.liked ? 'Ajouté à Titres likés' : 'Retiré de Titres likés');
+  if (S.route?.name === 'liked') render(true);
+}
+
+function trackSheet(t, { listKey, fromNP } = {}) {
+  if (!t) return;
+  const ctx = listKey && S.lists[listKey];
+  const inPlaylist = ctx?.playlistId;
+  const head = `<div class="sheet-head">${trackCover(t, 'sm')}<div><b>${esc(t.title)}</b><small>${esc(artistOf(t))}${t.album ? ' · ' + esc(t.album) : ''}</small></div></div>`;
+  openSheet(head + sheetItems([
+    { id: 'like', icon: t.liked ? 'heart-f' : 'heart', label: t.liked ? 'Retirer des Titres likés' : 'Ajouter aux Titres likés' },
+    !fromNP && { id: 'next', icon: 'next-up', label: 'Lire ensuite' },
+    !fromNP && { id: 'queue', icon: 'queue', label: 'Ajouter à la file d\'attente' },
+    { id: 'pl', icon: 'list-add', label: 'Ajouter à une playlist' },
+    inPlaylist && { id: 'unpl', icon: 'close', label: 'Retirer de cette playlist' },
+    t.album && { id: 'album', icon: 'album', label: 'Voir l\'album' },
+    { id: 'artist', icon: 'user', label: 'Voir l\'artiste' },
+    { id: 'lyrics', icon: 'mic', label: t.lyrics ? 'Voir / modifier les paroles' : 'Ajouter les paroles' },
+    { id: 'edit', icon: 'edit', label: 'Modifier les infos' },
+    { id: 'del', icon: 'trash', label: 'Supprimer du téléphone', danger: true },
+  ]), {
+    like: () => { toggleLike(t); closeSheet(); },
+    next: () => { player.addNext(t.id); toast('Sera lu ensuite'); closeSheet(); },
+    queue: () => { player.addToQueue(t.id); toast('Ajouté à la file d\'attente'); closeSheet(); },
+    pl: () => playlistPicker([t.id]),
+    unpl: async () => {
+      const p = S.playlists.get(inPlaylist);
+      const i = p.trackIds.indexOf(t.id);
+      if (i >= 0) p.trackIds.splice(i, 1);
+      await db.put('playlists', p); bump();
+      await closeSheet(); render(true); toast('Retiré de la playlist');
+    },
+    album: async () => { await closeAllOverlays(); goto('#/album/' + encodeURIComponent(albumKey(t))); },
+    artist: async () => { await closeAllOverlays(); goto('#/artist/' + encodeURIComponent(artistOf(t))); },
+    edit: () => editSheet(t),
+    lyrics: () => lyricsSheet(t),
+    del: () => confirmSheet(`Supprimer « ${t.title} » ?`, 'Le fichier sera effacé de l\'application.', 'Supprimer', async () => {
+      await deleteTracks([t.id]);
+      toast('Titre supprimé');
+    }),
+  });
+}
+
+function editSheet(t) {
+  openSheet(`<h3 class="sheet-title">Modifier les infos</h3>
+    <form class="form" data-form="edit">
+      <label>Titre<input name="title" value="${esc(t.title)}" required></label>
+      <label>Artiste<input name="artist" value="${esc(t.artist || '')}"></label>
+      <label>Album<input name="album" value="${esc(t.album || '')}"></label>
+      <button class="btn primary" type="submit">Enregistrer</button>
+    </form>`, {}, {
+    onOpen: body => $('form', body).addEventListener('submit', async e => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      t.title = f.get('title').trim() || t.title;
+      t.artist = f.get('artist').trim();
+      t.album = f.get('album').trim();
+      await db.put('tracks', t); bump();
+      await closeSheet();
+      if (t.id === player.currentId) updateNowPlaying();
+      render(true);
+      toast('Infos mises à jour');
+    }),
+  });
+}
+
+function confirmSheet(title, text, label, fn) {
+  openSheet(`<h3 class="sheet-title">${esc(title)}</h3><p class="sheet-text">${esc(text)}</p>
+    <div class="sheet-row"><button class="btn ghost" data-sa="no">Annuler</button><button class="btn danger" data-sa="yes">${esc(label)}</button></div>`, {
+    no: closeSheet,
+    yes: async () => { await closeSheet(); await fn(); },
+  });
+}
+
+function playlistPicker(ids) {
+  const pls = [...S.playlists.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  openSheet(`<h3 class="sheet-title">Ajouter à une playlist</h3>
+    <button class="sheet-item" data-sa="new">${icon('plus')}<span>Nouvelle playlist</span></button>
+    ${pls.map(p => `<button class="sheet-item pl" data-sa="add" data-id="${p.id}">${playlistCover(p, 'xs')}<span>${esc(p.name)}<small>${plural(p.trackIds.length, 'titre')}</small></span></button>`).join('')}`, {
+    new: () => newPlaylistSheet(ids),
+    add: async b => {
+      const p = S.playlists.get(b.dataset.id);
+      const add = ids.filter(id => !p.trackIds.includes(id));
+      p.trackIds.push(...add);
+      p.updatedAt = Date.now();
+      await db.put('playlists', p); bump();
+      await closeSheet();
+      toast(add.length ? `Ajouté à ${p.name}` : 'Déjà dans la playlist');
+      if (S.route?.name === 'playlist' || S.route?.name === 'library' || S.route?.name === 'home') render(true);
+    },
+  });
+}
+
+function newPlaylistSheet(ids = [], rename) {
+  openSheet(`<h3 class="sheet-title">${rename ? 'Renommer la playlist' : 'Donne un nom à ta playlist'}</h3>
+    <form class="form" data-form="pl">
+      <input name="name" class="big-input" value="${esc(rename?.name || '')}" placeholder="Ma playlist n° ${S.playlists.size + 1}" maxlength="80">
+      <button class="btn primary" type="submit">${rename ? 'Renommer' : 'Créer'}</button>
+    </form>`, {}, {
+    onOpen: body => {
+      const inp = $('input', body);
+      setTimeout(() => inp.focus(), 250);
+      $('form', body).addEventListener('submit', async e => {
+        e.preventDefault();
+        const name = inp.value.trim() || inp.placeholder;
+        if (rename) {
+          rename.name = name; rename.updatedAt = Date.now();
+          await db.put('playlists', rename); bump();
+          await closeSheet(); render(true);
+          return;
+        }
+        const p = { id: uid(), name, trackIds: [...ids], createdAt: Date.now(), updatedAt: Date.now() };
+        S.playlists.set(p.id, p);
+        await db.put('playlists', p); bump();
+        await closeSheet();
+        toast(`Playlist « ${name} » créée`);
+        goto('#/playlist/' + p.id);
+      });
+    },
+  });
+}
+
+function addTracksSheet(p) {
+  const draw = q => {
+    const nq = norm(q);
+    const list = allTracks().filter(t => !nq || norm(`${t.title} ${t.artist} ${t.album}`).includes(nq))
+      .sort((a, b) => collator.compare(a.title, b.title)).slice(0, 300);
+    return list.map(t => {
+      const inPl = p.trackIds.includes(t.id);
+      return `<div class="row compact">${trackCover(t)}<div class="row-meta"><b>${esc(t.title)}</b><small>${esc(artistOf(t))}</small></div>
+        <button class="ib add-btn ${inPl ? 'on' : ''}" data-sa="toggle" data-id="${t.id}">${icon(inPl ? 'heart-f' : 'plus')}</button></div>`;
+    }).join('') || '<p class="sheet-text">Aucun résultat</p>';
+  };
+  openSheet(`<h3 class="sheet-title">Ajouter à « ${esc(p.name)} »</h3>
+    <div class="search-box sm">${icon('search')}<input type="search" placeholder="Chercher un titre"></div>
+    <div class="add-list">${draw('')}</div>`, {
+    toggle: async b => {
+      const id = b.dataset.id;
+      const i = p.trackIds.indexOf(id);
+      if (i >= 0) p.trackIds.splice(i, 1); else p.trackIds.push(id);
+      p.updatedAt = Date.now();
+      await db.put('playlists', p); bump();
+      const on = i < 0;
+      b.classList.toggle('on', on);
+      b.innerHTML = icon(on ? 'heart-f' : 'plus');
+      S.needRender = true;
+    },
+  }, {
+    onOpen: body => $('input', body).addEventListener('input', e => { $('.add-list', body).innerHTML = draw(e.target.value); }),
+  });
+}
+
+function queueSheet() {
+  S.queueOpen = true;
+  openSheet('<div class="queue"></div>', {
+    jump: b => player.jump(+b.dataset.i),
+    rm: (b, e) => { e.stopPropagation(); player.removeAt(+b.dataset.i); },
+    clear: () => { player.queue.splice(player.index + 1); player.emit('queue'); },
+  });
+  renderQueue();
+}
+function renderQueue() {
+  const box = $('.sheet .queue');
+  if (!box) return;
+  const cur = player.current;
+  const up = player.queue.slice(player.index + 1);
+  const row = (t, i) => `<div class="row compact" data-sa="jump" data-i="${i}" data-tid="${t.id}">${trackCover(t)}<div class="row-meta"><b>${esc(t.title)}</b><small>${esc(artistOf(t))}</small></div>
+    <button class="ib sm" data-sa="rm" data-i="${i}" aria-label="Retirer">${icon('close')}</button></div>`;
+  box.innerHTML = `<h3 class="sheet-title">File d'attente</h3>
+    ${cur ? `<h4 class="sub">En cours de lecture</h4><div class="row compact playing">${trackCover(cur)}<div class="row-meta"><b>${esc(cur.title)}</b><small>${esc(artistOf(cur))}</small></div><span class="eq"><i></i><i></i><i></i></span></div>` : ''}
+    <div class="sub-row"><h4 class="sub">À suivre ${player.context?.label ? '· ' + esc(player.context.label) : ''}</h4>${up.length ? '<button class="link" data-sa="clear">Vider</button>' : ''}</div>
+    ${up.length ? up.slice(0, 200).map((id, k) => { const t = S.tracks.get(id); return t ? row(t, player.index + 1 + k) : ''; }).join('') : '<p class="sheet-text">Rien à suivre.' + (player.repeat === 'all' ? ' La file recommencera au début.' : '') + '</p>'}`;
+}
+
+function sleepSheet() {
+  const on = player.sleepAt || player.sleepEndOfTrack;
+  openSheet(`<h3 class="sheet-title">Minuteur de sommeil</h3>
+    ${[5, 15, 30, 45, 60, 90].map(m => `<button class="sheet-item" data-sa="set" data-m="${m}">${icon('timer')}<span>${m} minutes</span></button>`).join('')}
+    <button class="sheet-item" data-sa="set" data-m="end">${icon('timer')}<span>Fin du titre</span></button>
+    ${on ? `<button class="sheet-item danger" data-sa="set" data-m="0">${icon('close')}<span>Désactiver le minuteur</span></button>` : ''}`, {
+    set: b => {
+      const m = b.dataset.m === 'end' ? 'end' : +b.dataset.m;
+      player.setSleep(m);
+      closeSheet();
+      toast(m === 0 ? 'Minuteur désactivé' : m === 'end' ? 'Arrêt à la fin du titre' : `Arrêt dans ${m} minutes`);
+    },
+  });
+}
+
+function playlistSheet(p) {
+  openSheet(`<div class="sheet-head">${playlistCover(p, 'sm')}<div><b>${esc(p.name)}</b><small>${plural(p.trackIds.length, 'titre')}</small></div></div>` + sheetItems([
+    { id: 'add', icon: 'plus', label: 'Ajouter des titres' },
+    { id: 'queue', icon: 'queue', label: 'Ajouter à la file d\'attente' },
+    { id: 'ren', icon: 'edit', label: 'Renommer' },
+    { id: 'del', icon: 'trash', label: 'Supprimer la playlist', danger: true },
+  ]), {
+    add: () => addTracksSheet(p),
+    queue: () => { p.trackIds.forEach(id => player.addToQueue(id)); closeSheet(); toast('Ajouté à la file d\'attente'); },
+    ren: () => newPlaylistSheet([], p),
+    del: () => confirmSheet(`Supprimer « ${p.name} » ?`, 'Les titres resteront dans ta bibliothèque.', 'Supprimer', async () => {
+      S.playlists.delete(p.id);
+      await db.del('playlists', p.id); bump();
+      toast('Playlist supprimée');
+      goto('#/library', true);
+    }),
+  });
+}
+
+async function deleteTracks(ids) {
+  const set = new Set(ids);
+  const coverIds = new Set();
+  for (const id of ids) {
+    const t = S.tracks.get(id);
+    if (t?.coverId) coverIds.add(t.coverId);
+    S.tracks.delete(id);
+    await db.del('tracks', id);
+    await db.del('audio', id);
+  }
+  for (const p of S.playlists.values()) {
+    const before = p.trackIds.length;
+    p.trackIds = p.trackIds.filter(id => !set.has(id));
+    if (p.trackIds.length !== before) await db.put('playlists', p);
+  }
+  const used = new Set(allTracksRaw().map(t => t.coverId));
+  for (const c of coverIds) if (!used.has(c)) {
+    await db.del('covers', c);
+    URL.revokeObjectURL(S.covers.get(c));
+    S.covers.delete(c);
+  }
+  bump();
+  player.purge(ids);
+  if (!player.current) updateNowPlaying();
+  render(true);
+}
+const allTracksRaw = () => [...S.tracks.values()];
+
+// ======================================================================
+// Import des fichiers
+// ======================================================================
+const AUDIO_EXT = /\.(mp3|m4a|aac|mp4|flac|ogg|oga|opus|wav|weba|webm|alac|aiff?)$/i;
+
+function audioDuration(file) {
+  return new Promise(res => {
+    const a = new Audio();
+    const url = URL.createObjectURL(file);
+    const done = d => { clearTimeout(to); URL.revokeObjectURL(url); a.removeAttribute('src'); res(isFinite(d) ? d : 0); };
+    const to = setTimeout(() => done(0), 8000);
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => done(a.duration);
+    a.onerror = () => done(-1);
+    a.src = url;
+  });
+}
+
+async function importFiles(fileList) {
+  const lrcs = [...fileList].filter(f => /\.(lrc|txt)$/i.test(f.name));
+  const files = [...fileList].filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
+  if (!files.length && lrcs.length) { const n = await attachLyricsFiles(lrcs); toast(n ? `Paroles ajoutées à ${plural(n, 'titre')}` : 'Aucun titre correspondant à ces paroles'); return; }
+  if (!files.length) { toast('Aucun fichier audio trouvé'); return; }
+  if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+  const known = new Set(allTracksRaw().map(t => t.name + '|' + t.size));
+  const prog = showProgress(files.length);
+  let added = 0, skipped = 0, failed = 0;
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    prog.update(i, f.name);
+    if (known.has(f.name + '|' + f.size)) { skipped++; continue; }
+    try {
+      const tags = await readTags(f);
+      const duration = await audioDuration(f);
+      if (duration < 0) { failed++; continue; }
+      const id = uid();
+      let coverId = null, coverBlob = null;
+      if (tags.picture && tags.picture.size > 100) {
+        coverId = 'c' + hash(tags.album ? norm((tags.albumArtist || tags.artist || '') + '|' + tags.album) : id).toString(36);
+        if (!S.covers.has(coverId)) {
+          coverBlob = tags.picture;
+          S.covers.set(coverId, URL.createObjectURL(coverBlob));
+        }
+      }
+      const t = {
+        lyrics: tags.lyrics || '',
+        id, name: f.name, size: f.size, type: f.type || '',
+        title: tags.title, artist: tags.artist || '', albumArtist: tags.albumArtist || '',
+        album: tags.album || '', track: tags.track || 0, year: tags.year || '', genre: tags.genre || '',
+        duration, coverId, addedAt: Date.now() + i, plays: 0, lastPlayed: 0, liked: false,
+      };
+      const blob = new Blob([f], { type: f.type || 'audio/mpeg' });
+      await db.addTrack(t, blob, coverBlob);
+      S.tracks.set(id, t);
+      known.add(f.name + '|' + f.size);
+      added++;
+      if (added % 10 === 0) { bump(); render(true); }
+    } catch (e) {
+      console.error(e);
+      failed++;
+      if (e?.name === 'QuotaExceededError') { toast('Plus d\'espace disponible'); break; }
+    }
+  }
+  prog.done();
+  if (lrcs.length) await attachLyricsFiles(lrcs);
+  queueAnalysis();
+  S.mixes = {};
+  bump();
+  render(true);
+  const parts = [`${plural(added, 'titre')} ajouté${added > 1 ? 's' : ''}`];
+  if (skipped) parts.push(`${skipped} déjà présent${skipped > 1 ? 's' : ''}`);
+  if (failed) parts.push(`${failed} illisible${failed > 1 ? 's' : ''}`);
+  toast(parts.join(' · '));
+}
+
+function showProgress(total) {
+  const el = document.createElement('div');
+  el.className = 'import-prog';
+  el.innerHTML = `<div class="ip-card"><div class="ip-spin"><span class="eq big"><i></i><i></i><i></i><i></i></span></div><b>Import de ta musique…</b><small></small><div class="ip-bar"><i></i></div></div>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  return {
+    update(i, name) {
+      $('small', el).textContent = `${i + 1} / ${total} · ${name}`;
+      $('.ip-bar i', el).style.transform = `scaleX(${(i + 1) / total})`;
+    },
+    done() { el.classList.remove('show'); setTimeout(() => el.remove(), 400); },
+  };
+}
+
+$('#pick-files').addEventListener('change', e => { importFiles(e.target.files); e.target.value = ''; });
+$('#pick-folder').addEventListener('change', e => { importFiles(e.target.files); e.target.value = ''; });
+function importSheet() {
+  openSheet(`<h3 class="sheet-title">Importer de la musique</h3>
+    <p class="sheet-text">Choisis des fichiers audio sur ton téléphone (MP3, M4A, FLAC, OGG, WAV…). Ils sont copiés dans l'application et restent disponibles hors connexion.</p>
+    ${sheetItems([
+      { id: 'files', icon: 'note', label: 'Choisir des fichiers' },
+      'webkitdirectory' in document.createElement('input') && !isIOS && { id: 'folder', icon: 'folder', label: 'Choisir un dossier entier' },
+    ])}`, {
+    files: () => { closeSheet(); $('#pick-files').click(); },
+    folder: () => { closeSheet(); $('#pick-folder').click(); },
+  });
+}
+
+// Glisser-déposer (sur ordinateur)
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer?.files?.length) importFiles(e.dataTransfer.files); });
+
+// ======================================================================
+// Paroles synchronisées
+// ======================================================================
+async function loadLyrics(t) {
+  S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 };
+  const stale = !t.lyricsChecked || Date.now() - t.lyricsChecked > 7 * 864e5;
+  if (!S.lyr.parsed && S.settings.onlineLyrics && stale && navigator.onLine !== false) {
+    S.lyr.loading = true;
+    renderLyrics();
+    const txt = await fetchOnline(t);
+    t.lyricsChecked = Date.now();
+    if (txt) { t.lyrics = txt; t.lyricsSource = 'LRCLIB'; }
+    await db.put('tracks', t);
+    if (player.currentId !== t.id) return;
+    S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 };
+  }
+  renderLyrics();
+}
+
+function renderLyrics() {
+  const L = S.lyr;
+  const box = $('.lyr-lines', np);
+  const btn = $('.np-lyr-btn', np);
+  const has = !!L?.parsed;
+  btn.classList.toggle('has', has);
+  np.classList.toggle('has-lyrics', has);
+  $('.np-line', np).textContent = '';
+  if (!L) return;
+  if (L.loading) { box.innerHTML = '<div class="lyr-msg"><span class="dots"><i></i><i></i><i></i></span>Recherche des paroles…</div>'; return; }
+  if (!has) {
+    box.innerHTML = `<div class="lyr-msg">Pas de paroles pour ce titre.<br><button class="btn ghost sm" data-lyr="edit">Ajouter les paroles</button></div>`;
+    return;
+  }
+  box.classList.toggle('plain', !L.parsed.synced);
+  box.innerHTML = L.parsed.lines.map((l, i) => l.text
+    ? `<p data-i="${i}" ${l.t != null ? `data-t="${l.t}"` : ''}>${esc(l.text)}</p>`
+    : `<p class="gap" data-i="${i}" ${l.t != null ? `data-t="${l.t}"` : ''}><span class="dots"><i></i><i></i><i></i></span></p>`).join('')
+    + `<div class="lyr-src">${L.parsed.synced ? 'Paroles synchronisées' : 'Paroles'}${player.current?.lyricsSource ? ' · ' + esc(player.current.lyricsSource) : ''}</div>`;
+  L.idx = -2;
+  syncLyrics(true);
+}
+
+function syncLyrics(force) {
+  const L = S.lyr;
+  if (!L?.parsed?.synced || L.id !== player.currentId) return;
+  const i = activeIndex(L.parsed, player.time);
+  if (i === L.idx && !force) return;
+  L.idx = i;
+  const line = L.parsed.lines[i]?.text || '';
+  const nl = $('.np-line', np);
+  if (nl.textContent !== line) { nl.classList.remove('in'); void nl.offsetWidth; nl.textContent = line; nl.classList.add('in'); }
+  if (!S.lyrOpen) return;
+  const ps = $$('.lyr-lines p', np);
+  ps.forEach((p, k) => { p.classList.toggle('on', k === i); p.classList.toggle('past', k < i); });
+  const cur = ps[i];
+  const sc = $('.lyr-scroll', np);
+  if (cur && !S.lyrTouch) sc.scrollTo({ top: cur.offsetTop - sc.clientHeight * 0.36, behavior: force ? 'auto' : 'smooth' });
+}
+
+function openLyrics() {
+  if (S.lyrOpen) return;
+  S.lyrOpen = true;
+  np.classList.add('lyr-open');
+  pushOverlay('lyr', () => { S.lyrOpen = false; np.classList.remove('lyr-open'); });
+  if (S.lyr) { S.lyr.idx = -2; syncLyrics(true); }
+}
+np.addEventListener('click', e => {
+  const p = e.target.closest('.lyr-lines p[data-t]');
+  if (p) { player.seek(+p.dataset.t); if (!player.playing) player.play(); return; }
+  if (e.target.closest('[data-lyr="edit"]')) return lyricsSheet(player.current);
+  if (e.target.closest('[data-lyr="close"]')) return popOverlay();
+  if (e.target.closest('.np-lyr-btn, .np-line')) return openLyrics();
+}, true);
+{
+  const sc = $('.lyr-scroll', np);
+  let tt;
+  sc.addEventListener('touchstart', () => { S.lyrTouch = true; clearTimeout(tt); }, { passive: true });
+  sc.addEventListener('touchend', () => { tt = setTimeout(() => { S.lyrTouch = false; }, 2500); }, { passive: true });
+}
+
+function lyricsSheet(t) {
+  if (!t) return;
+  openSheet(`<h3 class="sheet-title">Paroles · ${esc(t.title)}</h3>
+    <p class="sheet-text">Colle les paroles (texte simple ou format LRC synchronisé <code>[01:23.45] ligne</code>).</p>
+    <form class="form" data-form="lyr">
+      <textarea name="lyr" rows="10" placeholder="Paroles…">${esc(t.lyrics || '')}</textarea>
+      <div class="sheet-row">
+        <button type="button" class="btn ghost" data-sa="web">${icon('search')} En ligne</button>
+        <button type="submit" class="btn primary">Enregistrer</button>
+      </div>
+    </form>`, {
+    web: async b => {
+      b.disabled = true; b.textContent = 'Recherche…';
+      const txt = await fetchOnline(t);
+      b.disabled = false; b.innerHTML = `${icon('search')} En ligne`;
+      if (txt) { $('.sheet textarea').value = txt; toast('Paroles trouvées'); } else toast('Aucune parole trouvée');
+    },
+  }, {
+    onOpen: body => $('form', body).addEventListener('submit', async e => {
+      e.preventDefault();
+      t.lyrics = e.target.lyr.value.trim();
+      t.lyricsSource = t.lyrics ? 'ajoutées par toi' : '';
+      t.lyricsChecked = Date.now();
+      await db.put('tracks', t);
+      await closeSheet();
+      if (t.id === player.currentId) loadLyrics(t);
+      toast(t.lyrics ? 'Paroles enregistrées' : 'Paroles supprimées');
+    }),
+  });
+}
+
+async function attachLyricsFiles(files) {
+  const byBase = new Map();
+  for (const t of allTracksRaw()) byBase.set(norm((t.name || '').replace(/\.[^.]+$/, '')), t);
+  let n = 0;
+  for (const f of files) {
+    const t = byBase.get(norm(f.name.replace(/\.[^.]+$/, '')));
+    if (!t) continue;
+    t.lyrics = (await f.text()).trim();
+    t.lyricsSource = 'fichier .lrc';
+    await db.put('tracks', t);
+    n++;
+    if (t.id === player.currentId) loadLyrics(t);
+  }
+  return n;
+}
+
+// ======================================================================
+// Analyse audio en arrière-plan (pour le Concierge)
+// ======================================================================
+const anaQ = [];
+let analyzing = false;
+function queueAnalysis() {
+  for (const t of allTracksRaw()) if (!t.features && !t.featuresFailed && !anaQ.includes(t)) anaQ.push(t);
+  runAnalysis();
+}
+async function runAnalysis() {
+  if (analyzing) return;
+  analyzing = true;
+  let changed = 0;
+  while (anaQ.length) {
+    const t = anaQ.shift();
+    if (!S.tracks.has(t.id)) continue;
+    try {
+      const blob = await db.get('audio', t.id);
+      const f = blob && await AI.analyzeBlob(blob, t.type);
+      if (f) t.features = f; else t.featuresFailed = 1;
+    } catch { t.featuresFailed = 1; }
+    if (S.tracks.has(t.id)) await db.put('tracks', t);
+    changed++;
+    await new Promise(r => setTimeout(r, player.playing ? 400 : 60));
+  }
+  analyzing = false;
+  if (changed) { S.mixes = {}; bump(); if (S.route?.name === 'home' || S.route?.name === 'settings') render(true); }
+}
+
+// ======================================================================
+// Mixes personnalisés
+// ======================================================================
+const HOME_MIXES = ['moment', 'ecole', 'sport', 'chill', 'soiree', 'favoris', 'decouverte', 'nuit'];
+function getMix(key) {
+  if (!S.mixes[key]) S.mixes[key] = AI.buildMix(allTracks(), key);
+  return S.mixes[key];
+}
+function mixCover(m, cls = '') {
+  const ids = [];
+  for (const t of m.tracks) { if (t.coverId && !ids.includes(t.coverId)) ids.push(t.coverId); if (ids.length === 4) break; }
+  const art = ids.length >= 4 ? `<div class="mix-mosaic">${ids.map(c => `<img src="${coverURL(c)}" alt="" loading="lazy">`).join('')}</div>`
+    : ids.length ? `<img class="mix-one" src="${coverURL(ids[0])}" alt="" loading="lazy">` : '';
+  return `<div class="cv mix-cv ${cls}" style="--h:${placeholderHue(m.key)}">${art}<div class="mix-shade"></div><span class="mix-emoji">${m.emoji}</span><span class="mix-label">${esc(m.name)}</span></div>`;
+}
+function mixCard(m) {
+  const key = registerList('mix:' + m.key, m.tracks.map(t => t.id), m.name, { route: '#/mix/' + m.key });
+  return card('#/mix/' + encodeURIComponent(m.key), mixCover(m), m.name, m.desc, { play: key });
+}
+function viewMix(key) {
+  if (!S.mixes[key] && key.startsWith('chat-')) renderChat();
+  const m = S.mixes[key] || (AI.MOODS[key] ? getMix(key) : null);
+  if (!m) return notFound();
+  const c = m.tracks.find(t => t.coverId)?.coverId;
+  return collectionView({
+    kind: 'mix', title: m.name, sub: `<span class="gold">✦ Composé par le Concierge</span> · ${esc(m.desc)}`,
+    coverHtml: mixCover(m), ids: m.tracks.map(t => t.id), listKey: 'mix:' + m.key, label: m.name,
+    color: colorFor(c, m.name),
+    actions: `${AI.MOODS[key] ? `<button class="ib" data-act="mix-regen" data-key="${esc(key)}" aria-label="Régénérer">${icon('refresh')}</button>` : ''}<button class="ib" data-act="mix-save" data-key="${esc(key)}" aria-label="Enregistrer en playlist">${icon('list-add')}</button>`,
+    emptyMsg: 'Pas encore assez de titres pour ce mix.',
+  });
+}
+async function saveMixAsPlaylist(m) {
+  if (!m?.tracks.length) return;
+  const p = { id: uid(), name: m.name, trackIds: m.tracks.map(t => t.id), createdAt: Date.now(), updatedAt: Date.now() };
+  S.playlists.set(p.id, p);
+  await db.put('playlists', p); bump();
+  toast(`Playlist « ${m.name} » enregistrée`);
+}
+
+// ======================================================================
+// Le Concierge (chat IA)
+// ======================================================================
+const AI_SUGGEST = ['Une playlist pour l\'école', 'Motivation sport 45 min', 'Un truc chill pour ce soir', 'Mon mix du moment', 'Fais-moi redécouvrir des sons', 'Lance mes incontournables'];
+
+function viewAI() {
+  const has = allTracks().length;
+  return `<div class="ai">
+    <header class="ai-head">
+      <div class="ai-orb"><i></i><i></i><i></i></div>
+      <div><h1>Le Concierge</h1><small>${S.settings.apiKey ? 'Propulsé par Claude' : 'IA personnelle · hors ligne'} · apprend de tes écoutes</small></div>
+      <button class="ib sm" data-act="ai-clear" aria-label="Nouvelle conversation">${icon('refresh')}</button>
+    </header>
+    <div class="ai-log" id="ai-log">${renderChat()}</div>
+    <div class="ai-foot">
+    ${has ? `<div class="ai-suggest">${AI_SUGGEST.map(x => `<button class="chip" data-act="ai-send" data-text="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : ''}
+    <form class="ai-input" id="ai-form"><input id="ai-q" placeholder="${has ? 'Écris ou parle au Concierge…' : 'Importe ta musique pour commencer'}" autocomplete="off" enterkeyhint="send" ${has ? '' : 'disabled'}>${has ? `<button type="button" class="ai-mic" data-act="voice" aria-label="Parler au Concierge">${icon('mic')}</button>` : ''}<button class="ai-send" aria-label="Envoyer">${icon('send')}</button></form>
+    </div>
+  </div>`;
+}
+
+function renderChat() {
+  const name = S.settings.name;
+  const intro = `<div class="msg bot"><p>Bienvenue dans ta Maison${name ? ', ' + esc(name) : ''}. Je connais toute ta musique et j'apprends ce que tu écoutes, et quand. Dis-moi ce que tu fais (l'école, le sport, une soirée, dormir…) et je te compose la playlist parfaite.</p></div>`;
+  return intro + S.chat.map((m, i) => {
+    if (m.role === 'user') return `<div class="msg me"><p>${esc(m.text)}</p></div>`;
+    let mixHtml = '';
+    if (m.mix) {
+      const key = 'chat-' + i;
+      if (!S.mixes[key]) S.mixes[key] = { key, name: m.mix.name, desc: m.mix.desc, emoji: '✦', tracks: m.mix.ids.map(id => S.tracks.get(id)).filter(Boolean) };
+      const mx = S.mixes[key];
+      const dur = mx.tracks.reduce((s, t) => s + t.duration, 0);
+      mixHtml = `<a class="msg-mix" href="#/mix/${key}">${mixCover(mx)}<div><b>${esc(mx.name)}</b><small>${plural(mx.tracks.length, 'titre')} · ${fmtTotal(dur)}</small>
+        <span class="msg-actions"><button class="btn primary sm" data-act="ai-play" data-key="${key}">${icon('play')} Lire</button><button class="btn ghost sm" data-act="mix-save" data-key="${key}">${icon('list-add')} Garder</button></span></div></a>`;
+    }
+    return `<div class="msg bot"><p>${esc(m.text)}</p>${mixHtml}</div>`;
+  }).join('');
+}
+
+function afterAI(view) {
+  const form = $('#ai-form', view);
+  form.addEventListener('submit', e => { e.preventDefault(); const q = $('#ai-q', view); const v = q.value.trim(); if (v) { q.value = ''; aiSend(v); } });
+  const log = $('#ai-log', view);
+  requestAnimationFrame(() => { main.scrollTop = main.scrollHeight; });
+  return log;
+}
+
+async function aiSend(text, { navigate = true } = {}) {
+  if (S.aiBusy || !text) return null;
+  const tracks = allTracks();
+  if (!tracks.length) { toast('Importe d\'abord ta musique'); return { reply: 'Importe d\'abord ta musique pour que je puisse t\'aider.' }; }
+  if (navigate && S.route?.name !== 'ai') { S.pendingFwd = true; goto('#/ai'); await new Promise(r => setTimeout(r, 60)); }
+  S.chat.push({ role: 'user', text });
+  // Commandes directes (pause, suivant, « joue … »)
+  const quick = quickCommand(text);
+  if (quick) {
+    S.chat.push({ role: 'assistant', text: quick });
+    saveJSON('onde.chat', S.chat);
+    if (S.route?.name === 'ai') { $('#ai-log').innerHTML = renderChat(); main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' }); }
+    return { reply: quick };
+  }
+  S.aiBusy = true;
+  document.body.classList.add('ai-busy');
+  const log = $('#ai-log');
+  log?.insertAdjacentHTML('beforeend', `<div class="msg me"><p>${esc(text)}</p></div><div class="msg bot typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
+  main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+  let res;
+  const t0 = Date.now();
+  try {
+    if (S.settings.apiKey) {
+      const hist = S.chat.slice(0, -1).map(m => ({ role: m.role, content: m.role === 'assistant' && m.mix ? `${m.text} [playlist « ${m.mix.name} », ${m.mix.ids.length} titres]` : m.text }));
+      res = await AI.askClaude(S.settings.apiKey, text, tracks, hist);
+    }
+  } catch (e) {
+    console.warn(e);
+    toast('Claude indisponible, je passe en mode hors ligne');
+  }
+  if (!res) {
+    const u = AI.understand(text, tracks);
+    const m = u.mix;
+    const dur = m.tracks.reduce((s, t) => s + t.duration, 0);
+    const lines = {
+      ecole: 'Concentration maximale : des sons réguliers et pas trop intenses pour bosser.',
+      sport: 'On envoie de l\'énergie, avec une montée en puissance.',
+      chill: 'Tout en douceur, pour souffler.',
+      soiree: 'Ambiance garantie, ça monte petit à petit.',
+      matin: 'De quoi te réveiller en douceur.',
+      nuit: 'Doux et apaisant, ça descend tranquillement.',
+      trajet: 'Tes sons préférés pour la route.',
+      decouverte: 'Des titres que tu as un peu oubliés.',
+      favoris: 'Tes incontournables, ceux que tu écoutes le plus.',
+      moment: 'Basé sur ce que tu écoutes d\'habitude à cette heure-ci.',
+    };
+    res = { reply: m.tracks.length ? `« ${m.name} » : ${plural(m.tracks.length, 'titre')}, ${fmtTotal(dur)}. ${lines[u.mood] || ''}` : 'Je n\'ai pas trouvé de titres qui collent, essaie autre chose.', mix: m.tracks.length ? m : null, play: u.play };
+  }
+  await new Promise(r => setTimeout(r, Math.max(0, 700 - (Date.now() - t0))));
+  S.chat.push({ role: 'assistant', text: res.reply, mix: res.mix ? { name: res.mix.name, desc: res.mix.desc, ids: res.mix.tracks.map(t => t.id) } : null });
+  S.chat = S.chat.slice(-40);
+  saveJSON('onde.chat', S.chat);
+  S.aiBusy = false;
+  document.body.classList.remove('ai-busy');
+  if (S.route?.name === 'ai') {
+    $('#ai-log').innerHTML = renderChat();
+    main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+  }
+  if ((res.play || !navigate) && res.mix) {
+    const key = 'chat-' + (S.chat.length - 1);
+    const mx = S.mixes[key] || res.mix;
+    playIds(mx.tracks.map(t => t.id), 0, { context: { label: mx.name, route: '#/mix/' + key } });
+  }
+  return res;
+}
+
+// ======================================================================
+// Commandes directes (texte ou voix)
+// ======================================================================
+function quickCommand(text) {
+  const n = norm(text).replace(/[.!?,]/g, ' ').replace(/'/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = n.split(' ').length;
+  const cur = player.current;
+  if (words <= 4) {
+    if (/^(pause|stop|arrete|coupe|silence|tais)/.test(n)) { player.pause(); return 'Pause.'; }
+    if (/^(reprends|reprend|play|relance|continue|remets|lecture)$/.test(n)) { player.play(); return 'C\'est reparti.'; }
+    if (/(suivant|suivante|next|passe|skip|zappe|change)/.test(n)) { player.next(); return 'Titre suivant.'; }
+    if (/(precedent|precedente|reviens|d avant)/.test(n)) { player.prev(); return 'Titre précédent.'; }
+    if (/(aleatoire|shuffle|melange)/.test(n)) { player.toggleShuffle(); return player.shuffle ? 'Lecture aléatoire activée.' : 'Lecture aléatoire désactivée.'; }
+    if (/(en boucle|repete|boucle)/.test(n)) { player.repeat = 'one'; player.emit('modes'); return 'Je répète ce titre.'; }
+  }
+  if (cur && words <= 7 && /(j aime|like|coeur|favori|kiffe)/.test(n) && !/playlist|mix/.test(n)) {
+    if (!cur.liked) toggleLike(cur);
+    return `« ${cur.title} » est dans tes titres likés.`;
+  }
+  if (cur && /(c est quoi|quel est|qu est ce que|qui chante|c quoi).*(titre|son|musique|chanson|ca)|qui chante/.test(n)) return `C'est « ${cur.title} » de ${artistOf(cur)}.`;
+  if (cur && /paroles/.test(n) && words <= 6) { openNP(); setTimeout(openLyrics, 450); return 'Voici les paroles.'; }
+  const sl = n.match(/(?:minuteur|arrete|stop|coupe).*?(\d+)\s*(?:min|minute)/);
+  if (sl) { player.setSleep(+sl[1]); return `D'accord, j'arrête la musique dans ${sl[1]} minutes.`; }
+  const m = n.match(/^(?:joue|jouer|mets|met|mais|lance|ecoute|ecouter|play)\s+(?:moi\s+)?(.+)$/);
+  if (!m) return null;
+  const q0 = m[1].trim();
+  let q = m[1].replace(/^(la |le |les |l |du |des |un |une )/, '').replace(/^(chanson|titre|son|musique|morceau|album|playlist|artiste)\s+/, '').replace(/^(de |d )/, '').trim();
+  if (!q || /(pour|ambiance|truc|quelque chose|style|mix|playlist|genre)/.test(q)) return null;
+  const ctx = label => ({ context: { label } });
+  if (/titres? likes?|favoris|coups? de coeur/.test(q) && liked().length) { playIds(liked().map(t => t.id), 0, ctx('Titres likés')); return 'Je lance tes titres likés.'; }
+  const pl = [...S.playlists.values()].find(p => norm(p.name) === q || norm(p.name) === q0) || [...S.playlists.values()].find(p => norm(p.name).length > 2 && q.includes(norm(p.name)));
+  if (pl && pl.trackIds.length) { playIds(pl.trackIds.filter(id => S.tracks.has(id)), 0, ctx(pl.name)); return `Je lance ta playlist « ${pl.name} ».`; }
+  const tracks = allTracks();
+  const eq = x => x === q || x === q0;
+  const exact = tracks.find(t => eq(norm(t.title))) || tracks.find(t => norm(`${t.title} ${t.artist}`) === q.replace(/ de /, ' '));
+  if (exact) { playIds([exact.id, ...tracks.filter(t => t.artist === exact.artist && t.id !== exact.id).map(t => t.id)], 0, ctx(exact.title)); return `Voici « ${exact.title} » de ${artistOf(exact)}.`; }
+  const al = [...albums().values()].find(a => eq(norm(a.title)) || (norm(a.title).length > 3 && q0.includes(norm(a.title))));
+  if (al) { playIds(al.tracks.map(t => t.id), 0, ctx(al.title)); return `Je lance l'album « ${al.title} » de ${al.artist}.`; }
+  const ar = [...artists().values()].sort((a, b) => b.name.length - a.name.length).find(a => eq(norm(a.name)) || (norm(a.name).length > 2 && q0.includes(norm(a.name))));
+  if (ar) { playIds(ar.tracks.map(t => t.id), 0, { context: { label: ar.name }, shuffle: true }); return `Je lance ${ar.name}.`; }
+  const part = tracks.find(t => norm(t.title).length > 3 && (q.includes(norm(t.title)) || norm(t.title).includes(q)));
+  if (part) { playIds([part.id], 0, ctx(part.title)); return `Voici « ${part.title} » de ${artistOf(part)}.`; }
+  return null;
+}
+
+// ======================================================================
+// Mode vocal
+// ======================================================================
+const vbox = $('#voice');
+async function startVoice({ navigate = false } = {}) {
+  if (!Voice.canListen) {
+    toast('La commande vocale n\'est pas disponible sur ce navigateur (essaie Chrome ou Safari à jour)');
+    return;
+  }
+  if (S.voiceOn) { Voice.stopListening(); return; }
+  if (!allTracks().length) return toast('Importe d\'abord ta musique');
+  S.voiceOn = true;
+  Voice.stopSpeaking();
+  const said = $('.v-said', vbox), ans = $('.v-answer', vbox);
+  said.textContent = ''; ans.textContent = '';
+  vbox.className = 'voice listening';
+  vbox.hidden = false;
+  requestAnimationFrame(() => vbox.classList.add('open'));
+  player.duck(true);
+  let text = '';
+  try {
+    text = await Voice.listen({ onPartial: t => { said.textContent = t; } });
+  } catch (e) {
+    ans.textContent = e.message === 'not-allowed' || e.message === 'service-not-allowed'
+      ? 'Autorise le micro pour cette app dans les réglages du navigateur.'
+      : e.message === 'network' ? 'La reconnaissance vocale a besoin d\'internet.' : 'Je n\'ai pas pu t\'écouter.';
+  }
+  if (!S.voiceOn) return;
+  if (text) {
+    said.textContent = text;
+    vbox.classList.replace('listening', 'thinking');
+    const res = await aiSend(text, { navigate });
+    const reply = res?.reply || 'Je n\'ai pas compris, tu peux répéter ?';
+    ans.textContent = reply;
+    vbox.classList.replace('thinking', 'speaking');
+    if (S.settings.voiceReply) await Voice.speak(reply); else await new Promise(r => setTimeout(r, 1600));
+  } else {
+    if (!ans.textContent) ans.textContent = 'Je n\'ai rien entendu.';
+    await new Promise(r => setTimeout(r, 1300));
+  }
+  closeVoice();
+}
+function closeVoice() {
+  if (!S.voiceOn) return;
+  S.voiceOn = false;
+  Voice.stopListening();
+  Voice.stopSpeaking();
+  player.duck(false);
+  vbox.classList.remove('open');
+  setTimeout(() => { if (!S.voiceOn) vbox.hidden = true; }, 350);
+}
+$('.v-close', vbox).addEventListener('click', closeVoice);
+$('.v-orb', vbox).addEventListener('click', () => Voice.stopListening());
+
+// ======================================================================
+// Vues
+// ======================================================================
+function registerList(key, ids, label, extra = {}) {
+  S.lists[key] = { ids, label, ...extra };
+  return key;
+}
+
+function trackRow(t, i, listKey, { num = false, showCover = true } = {}) {
+  const playing = t.id === player.currentId;
+  return `<div class="row ${playing ? 'playing' : ''}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
+    ${num ? `<span class="num">${t.track || i + 1}</span>` : ''}
+    ${showCover ? trackCover(t) : ''}
+    <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${t.liked ? `<span class="like-mark on">${icon('heart-f')}</span>` : '<span class="like-mark">' + icon('heart-f') + '</span>'}${esc(artistOf(t))}${num ? '' : t.album ? ' · ' + esc(t.album) : ''}</small></div>
+    <button class="ib sm more" aria-label="Options">${icon('more')}</button>
+  </div>`;
+}
+
+function card(href, coverHtml, title, sub, { round = false, play } = {}) {
+  return `<a class="card ${round ? 'round' : ''}" href="${href}">
+    <div class="card-art">${coverHtml}${play ? `<button class="card-play" data-act="play-list" data-list="${play}" aria-label="Lire">${icon('play')}</button>` : ''}</div>
+    <b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</a>`;
+}
+const albumCard = a => card('#/album/' + encodeURIComponent(a.key), cover({ coverId: a.coverId, seed: a.title, kind: 'album' }), a.title, a.artist,
+  { play: registerList('al:' + a.key, a.tracks.map(t => t.id), a.title, { route: '#/album/' + encodeURIComponent(a.key) }) });
+const artistCard = a => card('#/artist/' + encodeURIComponent(a.name), cover({ coverId: a.coverId, seed: a.name, kind: 'artist' }), a.name, 'Artiste', { round: true });
+const playlistCard = p => card('#/playlist/' + p.id, playlistCover(p), p.name, plural(p.trackIds.length, 'titre'),
+  { play: registerList('pl:' + p.id, p.trackIds.filter(id => S.tracks.has(id)), p.name) });
+
+function shelf(title, items, more) {
+  if (!items.length) return '';
+  return `<section class="shelf"><div class="shelf-head"><h2>${esc(title)}</h2>${more ? `<a href="${more}">Tout afficher</a>` : ''}</div><div class="shelf-row">${items.join('')}</div></section>`;
+}
+
+function emptyState() {
+  return `<div class="empty">
+    <div class="empty-art"><div class="disc"></div><span class="eq big"><i></i><i></i><i></i><i></i></span></div>
+    <h2>Ta musique, chez toi.</h2>
+    <p>Importe les fichiers audio de ton téléphone. Pas de pub, pas de compte, pas d'internet : tout reste sur ton appareil.</p>
+    <button class="btn primary" data-act="import">${icon('import')} Importer ma musique</button>
+  </div>`;
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  const g = h < 5 ? 'Bonne nuit' : h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
+  return S.settings.name ? `${g}, ${esc(S.settings.name)}` : g;
+}
+
+function viewHome() {
+  const tracks = allTracks();
+  const head = `<header class="page-head home-head"><div><div class="brand-line"><svg><use href="#i-logo"/></svg><span>MAISON <b>CHAHYN</b></span></div><h1>${greeting()}</h1></div>
+    <div class="head-btns"><button class="ib gold-ib" data-act="voice" aria-label="Commande vocale">${icon('mic')}</button><button class="ib" data-act="import" aria-label="Importer">${icon('plus')}</button><a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a></div></header>`;
+  if (!tracks.length) return head + emptyState();
+
+  const al = [...albums().values()];
+  const pls = [...S.playlists.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  const lk = liked();
+
+  // tuiles rapides
+  const quick = [];
+  if (lk.length) quick.push(`<a class="quick" href="#/liked">${likedCover()}<b>Titres likés</b></a>`);
+  pls.slice(0, 3).forEach(p => quick.push(`<a class="quick" href="#/playlist/${p.id}">${playlistCover(p)}<b>${esc(p.name)}</b></a>`));
+  al.filter(a => a.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).forEach(a => {
+    if (quick.length < 6) quick.push(`<a class="quick" href="#/album/${encodeURIComponent(a.key)}">${cover({ coverId: a.coverId, seed: a.title, kind: 'album' })}<b>${esc(a.title)}</b></a>`);
+  });
+  if (quick.length < 6) quick.push(`<a class="quick" href="#/all">${cover({ seed: 'tous', kind: 'playlist' })}<b>Tous les titres</b></a>`);
+
+  const allKey = registerList('all-shuffle', tracks.map(t => t.id), 'Toute ta musique');
+
+  const recent = tracks.filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 12);
+  const recentKey = registerList('recent', recent.map(t => t.id), 'Écoutés récemment');
+  const recentCards = recent.map((t, i) => `<div class="card track-card" data-tid="${t.id}" data-i="${i}" data-list="${recentKey}"><div class="card-art">${trackCover(t)}</div><b>${esc(t.title)}</b><small>${esc(artistOf(t))}</small></div>`);
+
+  const newAlbums = al.sort((a, b) => b.addedAt - a.addedAt).slice(0, 12).map(albumCard);
+  const newSingles = tracks.filter(t => !t.album).sort((a, b) => b.addedAt - a.addedAt).slice(0, 12);
+  const singlesKey = registerList('new-singles', newSingles.map(t => t.id), 'Ajoutés récemment');
+  const singleCards = newSingles.map((t, i) => `<div class="card track-card" data-tid="${t.id}" data-i="${i}" data-list="${singlesKey}"><div class="card-art">${trackCover(t)}</div><b>${esc(t.title)}</b><small>${esc(artistOf(t))}</small></div>`);
+  const arts = [...artists().values()].sort((a, b) => b.plays - a.plays || b.tracks.length - a.tracks.length).slice(0, 12).map(artistCard);
+  const top = tracks.filter(t => t.plays).sort((a, b) => b.plays - a.plays).slice(0, 5);
+  const topKey = registerList('top', top.map(t => t.id), 'Tes titres les plus écoutés');
+
+  return head + `
+    <div class="quick-grid">${quick.join('')}</div>
+    <button class="mix-btn" data-act="shuffle-list" data-list="${allKey}">${icon('shuffle')}<span><b>Lecture aléatoire</b><small>${plural(tracks.length, 'titre')} · ${fmtTotal(tracks.reduce((s, t) => s + t.duration, 0))}</small></span>${icon('play', 'mix-play')}</button>
+    ${tracks.length >= 4 ? shelf(`Composé pour toi${S.settings.name ? ', ' + S.settings.name : ''}`, HOME_MIXES.map(k => mixCard(getMix(k)))) : ''}
+    ${shelf('Écoutés récemment', recentCards)}
+    ${shelf('Albums ajoutés récemment', newAlbums, '#/library?f=albums')}
+    ${shelf('Titres ajoutés récemment', singleCards, '#/all')}
+    ${shelf('Tes artistes', arts, '#/library?f=artists')}
+    ${pls.length ? shelf('Tes playlists', pls.slice(0, 12).map(playlistCard), '#/library?f=playlists') : ''}
+    ${top.length ? `<section class="shelf"><div class="shelf-head"><h2>Tes titres les plus écoutés</h2></div><div class="list">${top.map((t, i) => trackRow(t, i, topKey)).join('')}</div></section>` : ''}
+  `;
+}
+
+function viewSearch() {
+  return `<header class="page-head"><h1>Rechercher</h1></header>
+    <div class="search-sticky"><div class="search-box">${icon('search')}<input type="search" id="q" placeholder="Titres, artistes, albums…" value="${esc(S.searchQ)}" autocomplete="off" enterkeyhint="search"><button class="ib sm clear-q" aria-label="Effacer" ${S.searchQ ? '' : 'hidden'}>${icon('close')}</button></div></div>
+    <div id="results">${searchResults(S.searchQ)}</div>`;
+}
+
+function searchResults(q) {
+  const nq = norm(q.trim());
+  if (!allTracks().length) return emptyState();
+  if (!nq) {
+    const genres = new Map();
+    for (const t of allTracks()) if (t.genre) genres.set(t.genre, (genres.get(t.genre) || 0) + 1);
+    const tiles = genres.size >= 3
+      ? [...genres.entries()].sort((a, b) => b[1] - a[1]).slice(0, 16).map(([g]) => ({ label: g, href: '#/genre/' + encodeURIComponent(g), seed: g }))
+      : [...artists().values()].sort((a, b) => b.tracks.length - a.tracks.length).slice(0, 16).map(a => ({ label: a.name, href: '#/artist/' + encodeURIComponent(a.name), seed: a.name, coverId: a.coverId }));
+    return `<h2 class="sec-title">${genres.size >= 3 ? 'Parcourir par genre' : 'Parcourir tes artistes'}</h2>
+      <div class="browse">${tiles.map((x, i) => `<a class="browse-tile" href="${x.href}" style="--h:${placeholderHue(x.seed)};--d:${i * 30}ms"><b>${esc(x.label)}</b>${x.coverId ? `<img src="${coverURL(x.coverId)}" alt="">` : ''}</a>`).join('')}</div>`;
+  }
+  const words = nq.split(/\s+/);
+  const match = s => { const n = norm(s); return words.every(w => n.includes(w)); };
+  const tr = allTracks().filter(t => match(`${t.title} ${t.artist} ${t.album} ${t.genre}`)).slice(0, 50);
+  const ar = [...artists().values()].filter(a => match(a.name)).slice(0, 12);
+  const al = [...albums().values()].filter(a => match(`${a.title} ${a.artist}`)).slice(0, 12);
+  const pl = [...S.playlists.values()].filter(p => match(p.name)).slice(0, 12);
+  if (!tr.length && !ar.length && !al.length && !pl.length) return `<div class="no-res"><b>Aucun résultat pour « ${esc(q)} »</b><p>Vérifie l'orthographe ou essaie d'autres mots.</p></div>`;
+  const key = registerList('search', tr.map(t => t.id), `Recherche « ${q} »`);
+  return `${tr.length ? `<h2 class="sec-title">Titres</h2><div class="list">${tr.map((t, i) => trackRow(t, i, key)).join('')}</div>` : ''}
+    ${shelf('Artistes', ar.map(artistCard))}
+    ${shelf('Albums', al.map(albumCard))}
+    ${shelf('Playlists', pl.map(playlistCard))}`;
+}
+
+function viewLibrary(params) {
+  const f = params.get('f') || S.settings.libFilter;
+  S.settings.libFilter = f; saveSettings();
+  const sort = S.settings.libSort;
+  const chips = [['all', 'Tout'], ['playlists', 'Playlists'], ['albums', 'Albums'], ['artists', 'Artistes'], ['tracks', 'Titres']];
+  const items = [];
+  const byName = (a, b) => collator.compare(a.sortName, b.sortName);
+  const byRecent = (a, b) => b.at - a.at;
+  if (f === 'all' || f === 'playlists') {
+    if (liked().length || f === 'playlists') items.push({ pin: true, html: libItem('#/liked', likedCover(), 'Titres likés', `Playlist · ${plural(liked().length, 'titre')}`) });
+    for (const p of S.playlists.values()) items.push({ sortName: p.name, at: p.updatedAt, html: libItem('#/playlist/' + p.id, playlistCover(p), p.name, `Playlist · ${plural(p.trackIds.length, 'titre')}`) });
+  }
+  if (f === 'all' || f === 'albums') for (const a of albums().values()) items.push({ sortName: a.title, at: Math.max(a.addedAt, a.lastPlayed), html: libItem('#/album/' + encodeURIComponent(a.key), cover({ coverId: a.coverId, seed: a.title, kind: 'album' }), a.title, `Album · ${a.artist}`) });
+  if (f === 'all' || f === 'artists') for (const a of artists().values()) items.push({ sortName: a.name, at: a.addedAt, html: libItem('#/artist/' + encodeURIComponent(a.name), cover({ coverId: a.coverId, seed: a.name, kind: 'artist' }), a.name, 'Artiste', true) });
+  let body;
+  if (f === 'tracks') {
+    const tr = allTracks().slice().sort(sort === 'az' ? (a, b) => collator.compare(a.title, b.title) : (a, b) => b.addedAt - a.addedAt);
+    const key = registerList('lib-tracks', tr.map(t => t.id), 'Tous les titres', { route: '#/all' });
+    body = tr.length ? `<div class="list">${tr.map((t, i) => trackRow(t, i, key)).join('')}</div>` : '';
+  } else {
+    const pinned = items.filter(i => i.pin);
+    const rest = items.filter(i => !i.pin).sort(sort === 'az' ? byName : byRecent);
+    body = `<div class="lib-list">${[...pinned, ...rest].map((x, i) => x.html.replace('style="', `style="--d:${Math.min(i, 14) * 22}ms;`)).join('')}</div>`;
+  }
+  return `<header class="page-head"><h1>Bibliothèque</h1>
+      <div class="head-btns"><button class="ib" data-act="new-playlist" aria-label="Nouvelle playlist">${icon('list-add')}</button><button class="ib" data-act="import" aria-label="Importer">${icon('import')}</button><a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a></div></header>
+    <div class="chips">${chips.map(([k, l]) => `<a class="chip ${k === f ? 'on' : ''}" href="#/library?f=${k}">${l}</a>`).join('')}</div>
+    <div class="sort-row"><button class="link" data-act="sort">${icon('sort')} ${sort === 'az' ? 'Ordre alphabétique' : 'Récents'}</button></div>
+    ${allTracks().length ? body : emptyState()}`;
+}
+function libItem(href, cov, title, sub, round = false) {
+  return `<a class="lib-item ${round ? 'round' : ''}" href="${href}" style="">${cov}<div><b>${esc(title)}</b><small>${esc(sub)}</small></div></a>`;
+}
+
+function collectionView({ kind, title, sub, coverHtml, ids, listKey, label, color, actions = '', extra = '', num = false, emptyMsg }) {
+  const tracks = ids.map(id => S.tracks.get(id)).filter(Boolean);
+  registerList(listKey, tracks.map(t => t.id), label, { route: location.hash, ...(kind === 'playlist' ? { playlistId: listKey.slice(3) } : {}) });
+  const total = tracks.reduce((s, t) => s + t.duration, 0);
+  return `<div class="coll ${kind}" style="--tint:${color}">
+    <div class="topbar"><button class="ib" data-act="back" aria-label="Retour">${icon('back')}</button><b class="topbar-title">${esc(title)}</b></div>
+    <div class="coll-hero">
+      <div class="coll-cover">${coverHtml}</div>
+      <h1 class="coll-title">${esc(title)}</h1>
+      <div class="coll-sub">${sub}</div>
+      <div class="coll-meta">${tracks.length ? `${plural(tracks.length, 'titre')} · ${fmtTotal(total)}` : ''}</div>
+    </div>
+    <div class="coll-actions">
+      ${actions}
+      <span class="spacer"></span>
+      ${tracks.length ? `<button class="ib shuffle-btn" data-act="shuffle-list" data-list="${listKey}" aria-label="Aléatoire">${icon('shuffle')}</button>
+      <button class="hero-play" data-act="play-list" data-list="${listKey}" aria-label="Lire">${icon('play')}</button>` : ''}
+    </div>
+    ${tracks.length ? `<div class="list">${tracks.map((t, i) => trackRow(t, i, listKey, { num, showCover: !num })).join('')}</div>` : `<p class="coll-empty">${emptyMsg || 'Aucun titre.'}</p>`}
+    ${extra}
+  </div>`;
+}
+
+function viewAlbum(key) {
+  const a = albums().get(key);
+  if (!a) return notFound();
+  return collectionView({
+    kind: 'album', title: a.title,
+    sub: `<a href="#/artist/${encodeURIComponent(a.artist)}">${cover({ coverId: a.coverId, seed: a.artist, kind: 'artist' }, 'xs round')}${esc(a.artist)}</a>`,
+    coverHtml: cover({ coverId: a.coverId, seed: a.title, kind: 'album' }),
+    ids: a.tracks.map(t => t.id), listKey: 'al:' + a.key, label: a.title,
+    color: colorFor(a.coverId, a.title), coverId: a.coverId, num: true,
+    extra: a.year ? `<p class="coll-foot">${esc(a.year)}</p>` : '',
+  });
+}
+
+function viewArtist(name) {
+  const a = artists().get(name);
+  if (!a) return notFound();
+  const pop = a.tracks.slice().sort((x, y) => (y.plays || 0) - (x.plays || 0) || y.addedAt - x.addedAt);
+  const theirAlbums = [...albums().values()].filter(al => al.artist === name || al.tracks.some(t => artistOf(t) === name));
+  return collectionView({
+    kind: 'artist', title: a.name, sub: `${plural(theirAlbums.length, 'album')}`,
+    coverHtml: cover({ coverId: a.coverId, seed: a.name, kind: 'artist' }),
+    ids: pop.map(t => t.id), listKey: 'ar:' + name, label: a.name,
+    color: colorFor(a.coverId, a.name),
+    extra: shelf('Albums', theirAlbums.map(albumCard)),
+  });
+}
+
+function viewPlaylist(id) {
+  const p = S.playlists.get(id);
+  if (!p) return notFound();
+  const firstCover = p.trackIds.map(i => S.tracks.get(i)?.coverId).find(Boolean);
+  return collectionView({
+    kind: 'playlist', title: p.name, sub: 'Playlist',
+    coverHtml: playlistCover(p), ids: p.trackIds, listKey: 'pl:' + p.id, label: p.name,
+    color: colorFor(firstCover, p.name),
+    actions: `<button class="ib" data-act="pl-add" data-id="${p.id}" aria-label="Ajouter des titres">${icon('plus')}</button><button class="ib" data-act="pl-more" data-id="${p.id}" aria-label="Options">${icon('more')}</button>`,
+    emptyMsg: `Ta playlist est vide.<br><button class="btn primary" data-act="pl-add" data-id="${p.id}">${icon('plus')} Ajouter des titres</button>`,
+  });
+}
+
+function viewLiked() {
+  const lk = liked();
+  return collectionView({
+    kind: 'liked', title: 'Titres likés', sub: 'Playlist', coverHtml: likedCover(),
+    ids: lk.map(t => t.id), listKey: 'liked', label: 'Titres likés', color: 'hsl(258 60% 38%)',
+    emptyMsg: 'Appuie sur le cœur d\'un titre pour le retrouver ici.',
+  });
+}
+
+function viewAll() {
+  const tr = allTracks().slice().sort((a, b) => collator.compare(a.title, b.title));
+  return collectionView({
+    kind: 'all', title: 'Tous les titres', sub: 'Ta bibliothèque', coverHtml: cover({ seed: 'tous', kind: 'playlist' }),
+    ids: tr.map(t => t.id), listKey: 'all', label: 'Tous les titres', color: colorFor(null, 'tous'),
+  });
+}
+
+function viewGenre(g) {
+  const tr = allTracks().filter(t => t.genre === g).sort((a, b) => collator.compare(a.artist, b.artist));
+  return collectionView({
+    kind: 'genre', title: g, sub: 'Genre', coverHtml: cover({ seed: g, kind: 'playlist' }),
+    ids: tr.map(t => t.id), listKey: 'g:' + g, label: g, color: colorFor(null, g),
+  });
+}
+
+function viewSettings() {
+  return `<div class="coll settings" style="--tint:#2a2540">
+    <div class="topbar show"><button class="ib" data-act="back" aria-label="Retour">${icon('back')}</button><b class="topbar-title">Réglages</b></div>
+    <div class="set-wrap">
+    <h1 class="set-h">Réglages</h1>
+    <section class="set-group"><h3>Lecture</h3>
+      <div class="set-item"><div><b>Fondu enchaîné</b><small>${isIOS ? 'Non disponible sur iPhone (le volume est verrouillé par iOS).' : 'Les titres se mélangent en douceur à la transition.'}</small></div><output id="cf-val">${S.settings.crossfade ? S.settings.crossfade + ' s' : 'Désactivé'}</output></div>
+      ${isIOS ? '' : `<input type="range" class="range" id="cf" min="0" max="12" step="1" value="${S.settings.crossfade}">`}
+      ${isIOS ? '' : `<label class="set-item toggle"><div><b>Visualiseur animé</b><small>Ondes autour de la pochette qui suivent la musique.</small></div><input type="checkbox" id="viz" ${S.settings.visualizer ? 'checked' : ''}><span class="sw"></span></label>`}
+    </section>
+    <section class="set-group"><h3>Toi</h3>
+      <label class="set-item"><div><b>Ton prénom</b><small>Pour que l'app te parle à toi</small></div><input class="set-input" id="set-name" value="${esc(S.settings.name)}" maxlength="30" autocomplete="given-name"></label>
+    </section>
+    <section class="set-group"><h3>Paroles</h3>
+      <label class="set-item toggle"><div><b>Chercher les paroles en ligne</b><small>Paroles synchronisées gratuites (LRCLIB) quand ton fichier n'en contient pas. Seuls le titre et l'artiste sont envoyés.</small></div><input type="checkbox" id="set-lyr" ${S.settings.onlineLyrics ? 'checked' : ''}><span class="sw"></span></label>
+      <p class="set-note">Tu peux aussi importer des fichiers <b>.lrc</b> avec le même nom que tes musiques, ou coller les paroles depuis le menu ⋯ d'un titre.</p>
+    </section>
+    <section class="set-group"><h3>Le Concierge (IA)</h3>
+      <label class="set-item toggle"><div><b>Réponses à voix haute</b><small>${Voice.canListen ? 'Quand tu parles au Concierge (bouton micro), il te répond aussi à l\'oral.' : 'La commande vocale n\'est pas disponible sur ce navigateur.'}</small></div><input type="checkbox" id="set-voice" ${S.settings.voiceReply ? 'checked' : ''}><span class="sw"></span></label>
+      <div class="set-item"><div><b>Analyse de ta musique</b><small id="ana-stat">…</small></div></div>
+      <div class="set-item"><div><b>Historique d'écoute</b><small>${plural(AI.historySize(), 'écoute')} mémorisée${AI.historySize() > 1 ? 's' : ''} pour apprendre tes goûts</small></div><button class="link" data-act="clear-hist">Effacer</button></div>
+      <label class="set-item col"><div><b>Clé API Claude (optionnel)</b><small>Sans clé, le Concierge fonctionne déjà hors ligne. Avec une clé Anthropic, il comprend n'importe quelle demande. La clé reste sur ton téléphone ; ta liste de titres est envoyée à Anthropic seulement quand tu parles au Concierge.</small></div><input class="set-input wide" id="set-key" type="password" value="${esc(S.settings.apiKey)}" placeholder="sk-ant-…" autocomplete="off"></label>
+    </section>
+    <section class="set-group"><h3>Bibliothèque</h3>
+      <button class="set-item btnlike" data-act="import"><div><b>Importer de la musique</b><small>Fichiers ou dossier depuis ton téléphone</small></div>${icon('import')}</button>
+      <div class="set-item"><div><b>Stockage utilisé</b><small id="storage">Calcul…</small></div></div>
+      <button class="set-item btnlike danger" data-act="wipe"><div><b>Tout effacer</b><small>Supprime toute la musique et les playlists de l'application</small></div>${icon('trash')}</button>
+    </section>
+    <section class="set-group"><h3>Installer l'application</h3>
+      <div class="set-text">
+        <p><b>Android (Chrome)</b> : menu ⋮ → « Installer l'application » ou « Ajouter à l'écran d'accueil ».</p>
+        <p><b>iPhone (Safari)</b> : bouton Partager → « Sur l'écran d'accueil ».</p>
+        <p>Une fois installée, Maison Chahyn s'ouvre en plein écran et fonctionne sans connexion.</p>
+        ${S.installPrompt ? `<button class="btn primary" data-act="install">${icon('import')} Installer maintenant</button>` : ''}
+      </div>
+    </section>
+    <p class="about">Maison Chahyn · ta maison de la musique · aucune pub, aucun pistage. Ta musique ne quitte jamais ton téléphone.</p>
+    </div></div>`;
+}
+
+function notFound() {
+  return `<div class="coll"><div class="topbar show"><button class="ib" data-act="back">${icon('back')}</button></div><div class="no-res" style="padding-top:120px"><b>Introuvable</b><p>Cet élément n'existe plus.</p></div></div>`;
+}
+
+// ======================================================================
+// Routeur avec transitions
+// ======================================================================
+const main = $('#main');
+const TAB_ROUTES = ['home', 'search', 'ai', 'library'];
+
+function parseRoute() {
+  const h = location.hash.slice(1) || '/';
+  const [path, qs] = h.split('?');
+  const parts = path.split('/').filter(Boolean);
+  const name = parts[0] || 'home';
+  return { name, arg: parts[1] ? decodeURIComponent(parts.slice(1).join('/')) : null, params: new URLSearchParams(qs || ''), key: h };
+}
+
+function goto(hash, replace = false) {
+  if (replace) location.replace(hash);
+  else location.hash = hash;
+}
+
+function render(keepScroll = false) {
+  const r = parseRoute();
+  const prev = S.route;
+  if (prev && !keepScroll) S.scroll[prev.key] = main.scrollTop;
+  const sameView = keepScroll && prev && prev.key === r.key;
+  const scrollTop = main.scrollTop;
+  S.route = r;
+  S.lists = {};
+  let html;
+  switch (r.name) {
+    case 'search': html = viewSearch(); break;
+    case 'ai': html = viewAI(); break;
+    case 'mix': html = viewMix(r.arg); break;
+    case 'library': html = viewLibrary(r.params); break;
+    case 'album': html = viewAlbum(r.arg); break;
+    case 'artist': html = viewArtist(r.arg); break;
+    case 'playlist': html = viewPlaylist(r.arg); break;
+    case 'liked': html = viewLiked(); break;
+    case 'all': html = viewAll(); break;
+    case 'genre': html = viewGenre(r.arg); break;
+    case 'settings': html = viewSettings(); break;
+    default: html = viewHome();
+  }
+  const view = document.createElement('div');
+  view.className = 'view';
+  view.innerHTML = html;
+  const old = $('#view');
+  view.id = 'view';
+  if (!sameView && prev) {
+    const toTab = TAB_ROUTES.includes(r.name);
+    view.classList.add(toTab && (S.navDir === 'fwd' || TAB_ROUTES.includes(prev.name)) ? 'enter-fade' : S.navDir === 'fwd' ? 'enter-fwd' : 'enter-back');
+  }
+  old.replaceWith(view);
+  main.scrollTop = sameView ? scrollTop : (S.navDir === 'back' ? S.scroll[r.key] || 0 : 0);
+  // onglet actif
+  const tab = TAB_ROUTES.includes(r.name) ? r.name : (prev && TAB_ROUTES.includes(prev.name) ? prev.name : S.lastTab || 'home');
+  S.lastTab = tab;
+  $$('#tabs a').forEach(a => {
+    const on = a.dataset.tab === tab;
+    a.classList.toggle('on', on);
+    if (a.dataset.tab === 'home') a.querySelector('use').setAttribute('href', on ? '#i-home' : '#i-home-o');
+  });
+  afterRender(view, r);
+  onScroll();
+}
+
+function afterRender(view, r) {
+  // teintes des en-têtes de collection selon la pochette
+  const coll = $('.coll', view);
+  if (coll && r.name === 'album') { const a = albums().get(r.arg); if (a) tint(coll, a.coverId, a.title); }
+  if (coll && r.name === 'artist') { const a = artists().get(r.arg); if (a) tint(coll, a.coverId, a.name); }
+  if (coll && r.name === 'playlist') { const p = S.playlists.get(r.arg); const c = p?.trackIds.map(i => S.tracks.get(i)?.coverId).find(Boolean); if (c) tint(coll, c, p.name); }
+  if (r.name === 'search') {
+    const q = $('#q', view);
+    const clr = $('.clear-q', view);
+    q.addEventListener('input', () => {
+      S.searchQ = q.value;
+      clr.hidden = !q.value;
+      S.lists = {};
+      $('#results').innerHTML = searchResults(q.value);
+    });
+    clr.addEventListener('click', () => { q.value = ''; q.dispatchEvent(new Event('input')); q.focus(); });
+  }
+  if (r.name === 'ai') afterAI(view);
+  if (r.name === 'settings') {
+    $('#set-name', view).addEventListener('change', e => { S.settings.name = e.target.value.trim(); saveSettings(); toast('Enchanté, ' + (S.settings.name || 'toi') + ' ✦'); });
+    $('#set-voice', view).addEventListener('change', e => { S.settings.voiceReply = e.target.checked; saveSettings(); });
+    $('#set-lyr', view).addEventListener('change', e => { S.settings.onlineLyrics = e.target.checked; saveSettings(); });
+    $('#set-key', view).addEventListener('change', e => { S.settings.apiKey = e.target.value.trim(); saveSettings(); toast(S.settings.apiKey ? 'Clé enregistrée sur ce téléphone' : 'Clé supprimée'); });
+    const all = allTracksRaw(), done = all.filter(t => t.features).length;
+    $('#ana-stat', view).textContent = all.length ? `${done} / ${all.length} titres analysés (tempo, énergie)${done < all.length ? ' · en cours…' : ' ✓'}` : 'Aucun titre';
+    const cf = $('#cf', view);
+    cf?.addEventListener('input', () => {
+      S.settings.crossfade = +cf.value; player.crossfade = +cf.value; saveSettings();
+      $('#cf-val').textContent = cf.value > 0 ? cf.value + ' s' : 'Désactivé';
+      cf.style.setProperty('--p', `${cf.value / 12 * 100}%`);
+    });
+    cf?.style.setProperty('--p', `${S.settings.crossfade / 12 * 100}%`);
+    $('#viz', view)?.addEventListener('change', e => {
+      S.settings.visualizer = e.target.checked; player.visualizer = e.target.checked; saveSettings();
+      if (e.target.checked && player.playing) player.ensureAudioGraph();
+    });
+    (async () => {
+      const total = allTracksRaw().reduce((s, t) => s + (t.size || 0), 0);
+      let txt = `${plural(S.tracks.size, 'titre')} · ${fmtSize(total)}`;
+      try {
+        const est = await navigator.storage?.estimate?.();
+        if (est?.quota) txt += ` · ${fmtSize(est.quota)} disponibles au total`;
+        const persisted = await navigator.storage?.persisted?.();
+        if (persisted) txt += ' · stockage protégé ✓';
+      } catch { /* ignore */ }
+      const el = $('#storage'); if (el) el.textContent = txt;
+    })();
+  }
+}
+
+window.addEventListener('hashchange', () => {
+  S.navDir = S.pendingFwd ? 'fwd' : 'back';
+  S.navCount++;
+  S.pendingFwd = false;
+  render();
+});
+
+// Barre du haut qui apparaît en défilant dans une collection
+function onScroll() {
+  const coll = $('#view .coll');
+  if (!coll) return;
+  const y = main.scrollTop;
+  const hero = $('.coll-hero', coll);
+  const tb = $('.topbar', coll);
+  const h = hero ? hero.offsetHeight : 200;
+  tb.classList.toggle('show', y > h - 60 || coll.classList.contains('settings'));
+  const cv = $('.coll-cover', coll);
+  if (cv) {
+    const p = Math.min(1, Math.max(0, y / (h * 0.8)));
+    cv.style.transform = `scale(${1 - p * 0.25}) translateY(${y * 0.35}px)`;
+    cv.style.opacity = 1 - p * 0.9;
+  }
+}
+main.addEventListener('scroll', onScroll, { passive: true });
+
+// ======================================================================
+// Clics globaux (délégation)
+// ======================================================================
+document.addEventListener('click', e => {
+  if (S.lpFired) { S.lpFired = false; e.preventDefault(); e.stopPropagation(); return; }
+  const a = e.target.closest('a[href^="#"]');
+  if (a && !e.target.closest('[data-act]')) {
+    // navigation vers une vue plus profonde
+    S.pendingFwd = true;
+    if (a.getAttribute('href') === location.hash) { e.preventDefault(); main.scrollTo({ top: 0, behavior: 'smooth' }); }
+    return;
+  }
+  const act = e.target.closest('[data-act]');
+  if (act && !act.closest('#np')) {
+    e.preventDefault();
+    e.stopPropagation();
+    const L = S.lists[act.dataset.list];
+    switch (act.dataset.act) {
+      case 'import': return importSheet();
+      case 'new-playlist': return newPlaylistSheet();
+      case 'back': return S.navCount > 0 ? history.back() : goto('#/library', true);
+      case 'play-list': {
+        if (!L?.ids.length) return;
+        if (player.context?.label === L.label && L.ids.includes(player.currentId)) return player.toggle();
+        return playIds(L.ids, 0, { context: { label: L.label, route: L.route }, shuffle: false });
+      }
+      case 'shuffle-list': {
+        if (!L?.ids.length) return;
+        const start = Math.floor(Math.random() * L.ids.length);
+        setTimeout(() => player.emit('modes'));
+        return playIds(L.ids, start, { context: { label: L.label, route: L.route }, shuffle: true });
+      }
+      case 'pl-add': return addTracksSheet(S.playlists.get(act.dataset.id));
+      case 'pl-more': return playlistSheet(S.playlists.get(act.dataset.id));
+      case 'sort': S.settings.libSort = S.settings.libSort === 'az' ? 'recent' : 'az'; saveSettings(); return render(true);
+      case 'wipe': return confirmSheet('Tout effacer ?', 'Toute la musique importée et tes playlists seront supprimées de l\'application. Tes fichiers d\'origine ne sont pas touchés.', 'Tout effacer', async () => {
+        await deleteTracks([...S.tracks.keys()]);
+        await db.clear();
+        S.playlists.clear(); S.covers.clear(); bump();
+        localStorage.removeItem('onde.session');
+        render(true); toast('Bibliothèque effacée');
+      });
+      case 'install': S.installPrompt?.prompt(); return;
+      case 'clear-hist': AI.clearHistory(); S.mixes = {}; toast('Historique effacé'); return render(true);
+      case 'mix-regen': S.mixes[act.dataset.key] = null; getMix(act.dataset.key); return render(true);
+      case 'mix-save': return saveMixAsPlaylist(S.mixes[act.dataset.key]);
+      case 'ai-send': return aiSend(act.dataset.text);
+      case 'voice': return startVoice({ navigate: S.route?.name === 'ai' });
+      case 'ai-clear': S.chat = []; saveJSON('onde.chat', S.chat); return render(true);
+      case 'ai-play': { const m = S.mixes[act.dataset.key]; if (m?.tracks.length) playIds(m.tracks.map(t => t.id), 0, { context: { label: m.name, route: '#/mix/' + m.key } }); return; }
+    }
+    return;
+  }
+  const more = e.target.closest('.row .more');
+  if (more) {
+    const row = more.closest('[data-tid]');
+    return trackSheet(S.tracks.get(row.dataset.tid), { listKey: row.dataset.list });
+  }
+  const row = e.target.closest('#view [data-tid][data-list]');
+  if (row) {
+    const L = S.lists[row.dataset.list];
+    if (!L) return;
+    const i = +row.dataset.i;
+    if (row.dataset.tid === player.currentId && player.context?.label === L.label) return player.toggle();
+    row.classList.add('tapped');
+    setTimeout(() => row.classList.remove('tapped'), 400);
+    playIds(L.ids, i, { context: { label: L.label, route: L.route } });
+  }
+}, true);
+
+// appui long sur un titre = menu
+let lpT;
+document.addEventListener('pointerdown', e => {
+  const row = e.target.closest('#view .row[data-tid]');
+  if (!row) return;
+  lpT = setTimeout(() => {
+    navigator.vibrate?.(12);
+    S.lpFired = true;
+    setTimeout(() => { S.lpFired = false; }, 800);
+    trackSheet(S.tracks.get(row.dataset.tid), { listKey: row.dataset.list });
+  }, 550);
+});
+['pointerup', 'pointercancel', 'pointermove'].forEach(ev => document.addEventListener(ev, e => {
+  if (ev === 'pointermove' && Math.abs(e.movementX) + Math.abs(e.movementY) < 3) return;
+  clearTimeout(lpT);
+}, { passive: true }));
+document.addEventListener('contextmenu', e => { if (e.target.closest('.row')) e.preventDefault(); });
+
+// Fermeture de feuille => re-rendu si nécessaire
+new MutationObserver(() => { if (sheet.hidden && S.needRender) { S.needRender = false; render(true); } }).observe(sheet, { attributes: true, attributeFilter: ['hidden'] });
+
+// Installation PWA
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.installPrompt = e; });
+
+// Raccourcis clavier (ordinateur)
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input, textarea')) return;
+  if (e.code === 'Space') { e.preventDefault(); player.toggle(); }
+  if (e.code === 'ArrowRight' && e.shiftKey) player.next();
+  if (e.code === 'ArrowLeft' && e.shiftKey) player.prev();
+  if (e.code === 'Escape') { if (S.voiceOn) closeVoice(); else if (overlays.length) popOverlay(); }
+});
+
+// ======================================================================
+// Démarrage
+// ======================================================================
+async function loadCovers() {
+  const d = await new Promise((res, rej) => { const r = indexedDB.open('onde'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  await new Promise(res => {
+    const req = d.transaction('covers').objectStore('covers').openCursor();
+    req.onsuccess = () => {
+      const c = req.result;
+      if (!c) return res();
+      S.covers.set(c.key, URL.createObjectURL(c.value));
+      c.continue();
+    };
+    req.onerror = () => res();
+  });
+}
+
+async function boot() {
+  try {
+    const [tracks, pls] = await Promise.all([db.all('tracks'), db.all('playlists')]);
+    tracks.forEach(t => S.tracks.set(t.id, t));
+    pls.forEach(p => S.playlists.set(p.id, p));
+    await loadCovers();
+  } catch (e) {
+    console.error(e);
+    toast('Erreur de chargement de la bibliothèque');
+  }
+  bump();
+  render();
+  player.restore(new Set(S.tracks.keys()));
+  updateNowPlaying();
+  updateModes();
+  document.body.classList.add('ready');
+  const sp = $('#splash');
+  setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 900); }, 1100);
+  setTimeout(queueAnalysis, 4000);
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+}
+boot();
