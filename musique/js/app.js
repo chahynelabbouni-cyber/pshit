@@ -1,6 +1,10 @@
 import { db } from './db.js';
 import { readTags } from './tags.js';
 import { Player, isIOS } from './player.js';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js';
+import * as AI from './ai.js';
+
+const BRAND = 'Maison Chahyn';
 
 // ======================================================================
 // État
@@ -10,7 +14,9 @@ const S = {
   playlists: new Map(),
   covers: new Map(),       // coverId -> objectURL
   colors: loadJSON('onde.colors', {}),
-  settings: Object.assign({ crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent' }, loadJSON('onde.settings', {})),
+  settings: Object.assign({ name: 'Chahyn', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '' }, loadJSON('onde.settings', {})),
+  mixes: {},
+  chat: loadJSON('onde.chat', []),
   version: 0,
   cache: {},
   lists: {},
@@ -209,7 +215,21 @@ player.addEventListener('played', async e => {
   bump();
   await db.put('tracks', t);
 });
-player.addEventListener('track', () => { updateNowPlaying(); markPlaying(); });
+let listen = { id: null, max: 0 };
+player.addEventListener('track', () => {
+  if (listen.id && listen.id !== player.currentId && listen.max > 0.02) {
+    AI.logListen(listen.id, { skipped: listen.max < 0.35, ratio: Math.min(1, listen.max) });
+    S.mixes.moment = null;
+  }
+  listen = { id: player.currentId, max: 0 };
+  updateNowPlaying(); markPlaying();
+  const t = player.current;
+  if (t && S.lyr?.id !== t.id) loadLyrics(t);
+});
+player.addEventListener('time', () => {
+  if (player.currentId === listen.id && player.duration) listen.max = Math.max(listen.max, player.time / player.duration);
+  syncLyrics();
+});
 player.addEventListener('state', () => { updatePlayState(); player.updatePosition(); });
 player.addEventListener('time', updateTime);
 player.addEventListener('modes', updateModes);
@@ -270,6 +290,11 @@ function updateNowPlaying() {
   $('.np-artist', np).textContent = artistOf(t);
   $('.np-ctx b', np).textContent = player.context?.label || t.album || 'Ta bibliothèque';
   tint(np, t.coverId, seed);
+  const bgi = $('.np-bg-img', np);
+  const cu = coverURL(t.coverId);
+  bgi.style.backgroundImage = cu ? `url("${cu}")` : 'none';
+  bgi.classList.remove('fade'); void bgi.offsetWidth; bgi.classList.add('fade');
+  $('.lyr-head', np).innerHTML = `${trackCover(t, 'xs2')}<div><b>${esc(t.title)}</b><small>${esc(artistOf(t))}</small></div>`;
   updateLike();
   updateTime();
   updatePlayState();
@@ -287,7 +312,7 @@ function updateLike() {
 function updatePlayState() {
   const p = player.playing;
   document.body.classList.toggle('is-playing', p);
-  for (const b of [$('.mini-play'), $('.np-play')]) b.querySelector('use').setAttribute('href', p ? '#i-pause' : '#i-play');
+  for (const b of [$('.mini-play'), ...$$('.np-play')]) b.querySelector('use').setAttribute('href', p ? '#i-pause' : '#i-play');
   np.classList.toggle('paused', !p);
   $$('.hero-play').forEach(b => {
     const mine = b.dataset.list && S.lists[b.dataset.list]?.ids.includes(player.currentId) && S.lists[b.dataset.list]?.label === player.context?.label;
@@ -484,7 +509,7 @@ function startViz() {
       const v = data[Math.floor(i * 0.9) + 2] / 255;
       const len = 6 + v * v * r * 0.3;
       const a = (i / n) * Math.PI * 2 - Math.PI / 2;
-      g.strokeStyle = `rgba(255,255,255,${0.12 + v * 0.55})`;
+      g.strokeStyle = `rgba(236,210,157,${0.15 + v * 0.6})`;
       g.beginPath();
       g.moveTo(cx + Math.cos(a) * (r + 6), cy + Math.sin(a) * (r + 6));
       g.lineTo(cx + Math.cos(a) * (r + 6 + len), cy + Math.sin(a) * (r + 6 + len));
@@ -582,6 +607,7 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     inPlaylist && { id: 'unpl', icon: 'close', label: 'Retirer de cette playlist' },
     t.album && { id: 'album', icon: 'album', label: 'Voir l\'album' },
     { id: 'artist', icon: 'user', label: 'Voir l\'artiste' },
+    { id: 'lyrics', icon: 'mic', label: t.lyrics ? 'Voir / modifier les paroles' : 'Ajouter les paroles' },
     { id: 'edit', icon: 'edit', label: 'Modifier les infos' },
     { id: 'del', icon: 'trash', label: 'Supprimer du téléphone', danger: true },
   ]), {
@@ -599,6 +625,7 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     album: async () => { await closeAllOverlays(); goto('#/album/' + encodeURIComponent(albumKey(t))); },
     artist: async () => { await closeAllOverlays(); goto('#/artist/' + encodeURIComponent(artistOf(t))); },
     edit: () => editSheet(t),
+    lyrics: () => lyricsSheet(t),
     del: () => confirmSheet(`Supprimer « ${t.title} » ?`, 'Le fichier sera effacé de l\'application.', 'Supprimer', async () => {
       await deleteTracks([t.id]);
       toast('Titre supprimé');
@@ -818,7 +845,9 @@ function audioDuration(file) {
 }
 
 async function importFiles(fileList) {
+  const lrcs = [...fileList].filter(f => /\.(lrc|txt)$/i.test(f.name));
   const files = [...fileList].filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
+  if (!files.length && lrcs.length) { const n = await attachLyricsFiles(lrcs); toast(n ? `Paroles ajoutées à ${plural(n, 'titre')}` : 'Aucun titre correspondant à ces paroles'); return; }
   if (!files.length) { toast('Aucun fichier audio trouvé'); return; }
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   const known = new Set(allTracksRaw().map(t => t.name + '|' + t.size));
@@ -842,6 +871,7 @@ async function importFiles(fileList) {
         }
       }
       const t = {
+        lyrics: tags.lyrics || '',
         id, name: f.name, size: f.size, type: f.type || '',
         title: tags.title, artist: tags.artist || '', albumArtist: tags.albumArtist || '',
         album: tags.album || '', track: tags.track || 0, year: tags.year || '', genre: tags.genre || '',
@@ -860,6 +890,9 @@ async function importFiles(fileList) {
     }
   }
   prog.done();
+  if (lrcs.length) await attachLyricsFiles(lrcs);
+  queueAnalysis();
+  S.mixes = {};
   bump();
   render(true);
   const parts = [`${plural(added, 'titre')} ajouté${added > 1 ? 's' : ''}`];
@@ -900,6 +933,306 @@ function importSheet() {
 // Glisser-déposer (sur ordinateur)
 document.addEventListener('dragover', e => e.preventDefault());
 document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer?.files?.length) importFiles(e.dataTransfer.files); });
+
+// ======================================================================
+// Paroles synchronisées
+// ======================================================================
+async function loadLyrics(t) {
+  S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 };
+  const stale = !t.lyricsChecked || Date.now() - t.lyricsChecked > 7 * 864e5;
+  if (!S.lyr.parsed && S.settings.onlineLyrics && stale && navigator.onLine !== false) {
+    S.lyr.loading = true;
+    renderLyrics();
+    const txt = await fetchOnline(t);
+    t.lyricsChecked = Date.now();
+    if (txt) { t.lyrics = txt; t.lyricsSource = 'LRCLIB'; }
+    await db.put('tracks', t);
+    if (player.currentId !== t.id) return;
+    S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 };
+  }
+  renderLyrics();
+}
+
+function renderLyrics() {
+  const L = S.lyr;
+  const box = $('.lyr-lines', np);
+  const btn = $('.np-lyr-btn', np);
+  const has = !!L?.parsed;
+  btn.classList.toggle('has', has);
+  np.classList.toggle('has-lyrics', has);
+  $('.np-line', np).textContent = '';
+  if (!L) return;
+  if (L.loading) { box.innerHTML = '<div class="lyr-msg"><span class="dots"><i></i><i></i><i></i></span>Recherche des paroles…</div>'; return; }
+  if (!has) {
+    box.innerHTML = `<div class="lyr-msg">Pas de paroles pour ce titre.<br><button class="btn ghost sm" data-lyr="edit">Ajouter les paroles</button></div>`;
+    return;
+  }
+  box.classList.toggle('plain', !L.parsed.synced);
+  box.innerHTML = L.parsed.lines.map((l, i) => l.text
+    ? `<p data-i="${i}" ${l.t != null ? `data-t="${l.t}"` : ''}>${esc(l.text)}</p>`
+    : `<p class="gap" data-i="${i}" ${l.t != null ? `data-t="${l.t}"` : ''}><span class="dots"><i></i><i></i><i></i></span></p>`).join('')
+    + `<div class="lyr-src">${L.parsed.synced ? 'Paroles synchronisées' : 'Paroles'}${player.current?.lyricsSource ? ' · ' + esc(player.current.lyricsSource) : ''}</div>`;
+  L.idx = -2;
+  syncLyrics(true);
+}
+
+function syncLyrics(force) {
+  const L = S.lyr;
+  if (!L?.parsed?.synced || L.id !== player.currentId) return;
+  const i = activeIndex(L.parsed, player.time);
+  if (i === L.idx && !force) return;
+  L.idx = i;
+  const line = L.parsed.lines[i]?.text || '';
+  const nl = $('.np-line', np);
+  if (nl.textContent !== line) { nl.classList.remove('in'); void nl.offsetWidth; nl.textContent = line; nl.classList.add('in'); }
+  if (!S.lyrOpen) return;
+  const ps = $$('.lyr-lines p', np);
+  ps.forEach((p, k) => { p.classList.toggle('on', k === i); p.classList.toggle('past', k < i); });
+  const cur = ps[i];
+  const sc = $('.lyr-scroll', np);
+  if (cur && !S.lyrTouch) sc.scrollTo({ top: cur.offsetTop - sc.clientHeight * 0.36, behavior: force ? 'auto' : 'smooth' });
+}
+
+function openLyrics() {
+  if (S.lyrOpen) return;
+  S.lyrOpen = true;
+  np.classList.add('lyr-open');
+  pushOverlay('lyr', () => { S.lyrOpen = false; np.classList.remove('lyr-open'); });
+  if (S.lyr) { S.lyr.idx = -2; syncLyrics(true); }
+}
+np.addEventListener('click', e => {
+  const p = e.target.closest('.lyr-lines p[data-t]');
+  if (p) { player.seek(+p.dataset.t); if (!player.playing) player.play(); return; }
+  if (e.target.closest('[data-lyr="edit"]')) return lyricsSheet(player.current);
+  if (e.target.closest('[data-lyr="close"]')) return popOverlay();
+  if (e.target.closest('.np-lyr-btn, .np-line')) return openLyrics();
+}, true);
+{
+  const sc = $('.lyr-scroll', np);
+  let tt;
+  sc.addEventListener('touchstart', () => { S.lyrTouch = true; clearTimeout(tt); }, { passive: true });
+  sc.addEventListener('touchend', () => { tt = setTimeout(() => { S.lyrTouch = false; }, 2500); }, { passive: true });
+}
+
+function lyricsSheet(t) {
+  if (!t) return;
+  openSheet(`<h3 class="sheet-title">Paroles · ${esc(t.title)}</h3>
+    <p class="sheet-text">Colle les paroles (texte simple ou format LRC synchronisé <code>[01:23.45] ligne</code>).</p>
+    <form class="form" data-form="lyr">
+      <textarea name="lyr" rows="10" placeholder="Paroles…">${esc(t.lyrics || '')}</textarea>
+      <div class="sheet-row">
+        <button type="button" class="btn ghost" data-sa="web">${icon('search')} En ligne</button>
+        <button type="submit" class="btn primary">Enregistrer</button>
+      </div>
+    </form>`, {
+    web: async b => {
+      b.disabled = true; b.textContent = 'Recherche…';
+      const txt = await fetchOnline(t);
+      b.disabled = false; b.innerHTML = `${icon('search')} En ligne`;
+      if (txt) { $('.sheet textarea').value = txt; toast('Paroles trouvées'); } else toast('Aucune parole trouvée');
+    },
+  }, {
+    onOpen: body => $('form', body).addEventListener('submit', async e => {
+      e.preventDefault();
+      t.lyrics = e.target.lyr.value.trim();
+      t.lyricsSource = t.lyrics ? 'ajoutées par toi' : '';
+      t.lyricsChecked = Date.now();
+      await db.put('tracks', t);
+      await closeSheet();
+      if (t.id === player.currentId) loadLyrics(t);
+      toast(t.lyrics ? 'Paroles enregistrées' : 'Paroles supprimées');
+    }),
+  });
+}
+
+async function attachLyricsFiles(files) {
+  const byBase = new Map();
+  for (const t of allTracksRaw()) byBase.set(norm((t.name || '').replace(/\.[^.]+$/, '')), t);
+  let n = 0;
+  for (const f of files) {
+    const t = byBase.get(norm(f.name.replace(/\.[^.]+$/, '')));
+    if (!t) continue;
+    t.lyrics = (await f.text()).trim();
+    t.lyricsSource = 'fichier .lrc';
+    await db.put('tracks', t);
+    n++;
+    if (t.id === player.currentId) loadLyrics(t);
+  }
+  return n;
+}
+
+// ======================================================================
+// Analyse audio en arrière-plan (pour le Concierge)
+// ======================================================================
+const anaQ = [];
+let analyzing = false;
+function queueAnalysis() {
+  for (const t of allTracksRaw()) if (!t.features && !t.featuresFailed && !anaQ.includes(t)) anaQ.push(t);
+  runAnalysis();
+}
+async function runAnalysis() {
+  if (analyzing) return;
+  analyzing = true;
+  let changed = 0;
+  while (anaQ.length) {
+    const t = anaQ.shift();
+    if (!S.tracks.has(t.id)) continue;
+    try {
+      const blob = await db.get('audio', t.id);
+      const f = blob && await AI.analyzeBlob(blob, t.type);
+      if (f) t.features = f; else t.featuresFailed = 1;
+    } catch { t.featuresFailed = 1; }
+    if (S.tracks.has(t.id)) await db.put('tracks', t);
+    changed++;
+    await new Promise(r => setTimeout(r, player.playing ? 400 : 60));
+  }
+  analyzing = false;
+  if (changed) { S.mixes = {}; bump(); if (S.route?.name === 'home' || S.route?.name === 'settings') render(true); }
+}
+
+// ======================================================================
+// Mixes personnalisés
+// ======================================================================
+const HOME_MIXES = ['moment', 'ecole', 'sport', 'chill', 'soiree', 'favoris', 'decouverte', 'nuit'];
+function getMix(key) {
+  if (!S.mixes[key]) S.mixes[key] = AI.buildMix(allTracks(), key);
+  return S.mixes[key];
+}
+function mixCover(m, cls = '') {
+  const ids = [];
+  for (const t of m.tracks) { if (t.coverId && !ids.includes(t.coverId)) ids.push(t.coverId); if (ids.length === 4) break; }
+  const art = ids.length >= 4 ? `<div class="mix-mosaic">${ids.map(c => `<img src="${coverURL(c)}" alt="" loading="lazy">`).join('')}</div>`
+    : ids.length ? `<img class="mix-one" src="${coverURL(ids[0])}" alt="" loading="lazy">` : '';
+  return `<div class="cv mix-cv ${cls}" style="--h:${placeholderHue(m.key)}">${art}<div class="mix-shade"></div><span class="mix-emoji">${m.emoji}</span><span class="mix-label">${esc(m.name)}</span></div>`;
+}
+function mixCard(m) {
+  const key = registerList('mix:' + m.key, m.tracks.map(t => t.id), m.name, { route: '#/mix/' + m.key });
+  return card('#/mix/' + encodeURIComponent(m.key), mixCover(m), m.name, m.desc, { play: key });
+}
+function viewMix(key) {
+  if (!S.mixes[key] && key.startsWith('chat-')) renderChat();
+  const m = S.mixes[key] || (AI.MOODS[key] ? getMix(key) : null);
+  if (!m) return notFound();
+  const c = m.tracks.find(t => t.coverId)?.coverId;
+  return collectionView({
+    kind: 'mix', title: m.name, sub: `<span class="gold">✦ Composé par le Concierge</span> · ${esc(m.desc)}`,
+    coverHtml: mixCover(m), ids: m.tracks.map(t => t.id), listKey: 'mix:' + m.key, label: m.name,
+    color: colorFor(c, m.name),
+    actions: `${AI.MOODS[key] ? `<button class="ib" data-act="mix-regen" data-key="${esc(key)}" aria-label="Régénérer">${icon('refresh')}</button>` : ''}<button class="ib" data-act="mix-save" data-key="${esc(key)}" aria-label="Enregistrer en playlist">${icon('list-add')}</button>`,
+    emptyMsg: 'Pas encore assez de titres pour ce mix.',
+  });
+}
+async function saveMixAsPlaylist(m) {
+  if (!m?.tracks.length) return;
+  const p = { id: uid(), name: m.name, trackIds: m.tracks.map(t => t.id), createdAt: Date.now(), updatedAt: Date.now() };
+  S.playlists.set(p.id, p);
+  await db.put('playlists', p); bump();
+  toast(`Playlist « ${m.name} » enregistrée`);
+}
+
+// ======================================================================
+// Le Concierge (chat IA)
+// ======================================================================
+const AI_SUGGEST = ['Une playlist pour l\'école', 'Motivation sport 45 min', 'Un truc chill pour ce soir', 'Mon mix du moment', 'Fais-moi redécouvrir des sons', 'Lance mes incontournables'];
+
+function viewAI() {
+  const has = allTracks().length;
+  return `<div class="ai">
+    <header class="ai-head">
+      <div class="ai-orb"><i></i><i></i><i></i></div>
+      <div><h1>Le Concierge</h1><small>${S.settings.apiKey ? 'Propulsé par Claude' : 'IA personnelle · hors ligne'} · apprend de tes écoutes</small></div>
+      <button class="ib sm" data-act="ai-clear" aria-label="Nouvelle conversation">${icon('refresh')}</button>
+    </header>
+    <div class="ai-log" id="ai-log">${renderChat()}</div>
+    <div class="ai-foot">
+    ${has ? `<div class="ai-suggest">${AI_SUGGEST.map(x => `<button class="chip" data-act="ai-send" data-text="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : ''}
+    <form class="ai-input" id="ai-form"><input id="ai-q" placeholder="${has ? 'Demande une playlist, une ambiance…' : 'Importe ta musique pour commencer'}" autocomplete="off" enterkeyhint="send" ${has ? '' : 'disabled'}><button class="ai-send" aria-label="Envoyer">${icon('send')}</button></form>
+    </div>
+  </div>`;
+}
+
+function renderChat() {
+  const name = S.settings.name;
+  const intro = `<div class="msg bot"><p>Bienvenue dans ta Maison${name ? ', ' + esc(name) : ''}. Je connais toute ta musique et j'apprends ce que tu écoutes, et quand. Dis-moi ce que tu fais (l'école, le sport, une soirée, dormir…) et je te compose la playlist parfaite.</p></div>`;
+  return intro + S.chat.map((m, i) => {
+    if (m.role === 'user') return `<div class="msg me"><p>${esc(m.text)}</p></div>`;
+    let mixHtml = '';
+    if (m.mix) {
+      const key = 'chat-' + i;
+      if (!S.mixes[key]) S.mixes[key] = { key, name: m.mix.name, desc: m.mix.desc, emoji: '✦', tracks: m.mix.ids.map(id => S.tracks.get(id)).filter(Boolean) };
+      const mx = S.mixes[key];
+      const dur = mx.tracks.reduce((s, t) => s + t.duration, 0);
+      mixHtml = `<a class="msg-mix" href="#/mix/${key}">${mixCover(mx)}<div><b>${esc(mx.name)}</b><small>${plural(mx.tracks.length, 'titre')} · ${fmtTotal(dur)}</small>
+        <span class="msg-actions"><button class="btn primary sm" data-act="ai-play" data-key="${key}">${icon('play')} Lire</button><button class="btn ghost sm" data-act="mix-save" data-key="${key}">${icon('list-add')} Garder</button></span></div></a>`;
+    }
+    return `<div class="msg bot"><p>${esc(m.text)}</p>${mixHtml}</div>`;
+  }).join('');
+}
+
+function afterAI(view) {
+  const form = $('#ai-form', view);
+  form.addEventListener('submit', e => { e.preventDefault(); const q = $('#ai-q', view); const v = q.value.trim(); if (v) { q.value = ''; aiSend(v); } });
+  const log = $('#ai-log', view);
+  requestAnimationFrame(() => { main.scrollTop = main.scrollHeight; });
+  return log;
+}
+
+async function aiSend(text) {
+  if (S.aiBusy || !text) return;
+  const tracks = allTracks();
+  if (!tracks.length) return toast('Importe d\'abord ta musique');
+  if (S.route?.name !== 'ai') { S.pendingFwd = true; goto('#/ai'); await new Promise(r => setTimeout(r, 60)); }
+  S.chat.push({ role: 'user', text });
+  S.aiBusy = true;
+  document.body.classList.add('ai-busy');
+  const log = $('#ai-log');
+  log.insertAdjacentHTML('beforeend', `<div class="msg me"><p>${esc(text)}</p></div><div class="msg bot typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
+  main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+  let res;
+  const t0 = Date.now();
+  try {
+    if (S.settings.apiKey) {
+      const hist = S.chat.slice(0, -1).map(m => ({ role: m.role, content: m.role === 'assistant' && m.mix ? `${m.text} [playlist « ${m.mix.name} », ${m.mix.ids.length} titres]` : m.text }));
+      res = await AI.askClaude(S.settings.apiKey, text, tracks, hist);
+    }
+  } catch (e) {
+    console.warn(e);
+    toast('Claude indisponible, je passe en mode hors ligne');
+  }
+  if (!res) {
+    const u = AI.understand(text, tracks);
+    const m = u.mix;
+    const dur = m.tracks.reduce((s, t) => s + t.duration, 0);
+    const lines = {
+      ecole: 'Concentration maximale : des sons réguliers et pas trop intenses pour bosser.',
+      sport: 'On envoie de l\'énergie, avec une montée en puissance.',
+      chill: 'Tout en douceur, pour souffler.',
+      soiree: 'Ambiance garantie, ça monte petit à petit.',
+      matin: 'De quoi te réveiller en douceur.',
+      nuit: 'Doux et apaisant, ça descend tranquillement.',
+      trajet: 'Tes sons préférés pour la route.',
+      decouverte: 'Des titres que tu as un peu oubliés.',
+      favoris: 'Tes incontournables, ceux que tu écoutes le plus.',
+      moment: 'Basé sur ce que tu écoutes d\'habitude à cette heure-ci.',
+    };
+    res = { reply: m.tracks.length ? `« ${m.name} » : ${plural(m.tracks.length, 'titre')}, ${fmtTotal(dur)}. ${lines[u.mood] || ''}` : 'Je n\'ai pas trouvé de titres qui collent, essaie autre chose.', mix: m.tracks.length ? m : null, play: u.play };
+  }
+  await new Promise(r => setTimeout(r, Math.max(0, 700 - (Date.now() - t0))));
+  S.chat.push({ role: 'assistant', text: res.reply, mix: res.mix ? { name: res.mix.name, desc: res.mix.desc, ids: res.mix.tracks.map(t => t.id) } : null });
+  S.chat = S.chat.slice(-40);
+  saveJSON('onde.chat', S.chat);
+  S.aiBusy = false;
+  document.body.classList.remove('ai-busy');
+  if (S.route?.name === 'ai') {
+    $('#ai-log').innerHTML = renderChat();
+    main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+  }
+  if (res.play && res.mix) {
+    const key = 'chat-' + (S.chat.length - 1);
+    const mx = S.mixes[key] || res.mix;
+    playIds(mx.tracks.map(t => t.id), 0, { context: { label: mx.name, route: '#/mix/' + key } });
+  }
+}
 
 // ======================================================================
 // Vues
@@ -946,12 +1279,13 @@ function emptyState() {
 
 function greeting() {
   const h = new Date().getHours();
-  return h < 5 ? 'Bonne nuit' : h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
+  const g = h < 5 ? 'Bonne nuit' : h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
+  return S.settings.name ? `${g}, ${esc(S.settings.name)}` : g;
 }
 
 function viewHome() {
   const tracks = allTracks();
-  const head = `<header class="page-head"><h1>${greeting()}</h1>
+  const head = `<header class="page-head home-head"><div><div class="brand-line"><svg><use href="#i-logo"/></svg><span>MAISON <b>CHAHYN</b></span></div><h1>${greeting()}</h1></div>
     <div class="head-btns"><button class="ib" data-act="import" aria-label="Importer">${icon('plus')}</button><a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a></div></header>`;
   if (!tracks.length) return head + emptyState();
 
@@ -985,6 +1319,7 @@ function viewHome() {
   return head + `
     <div class="quick-grid">${quick.join('')}</div>
     <button class="mix-btn" data-act="shuffle-list" data-list="${allKey}">${icon('shuffle')}<span><b>Lecture aléatoire</b><small>${plural(tracks.length, 'titre')} · ${fmtTotal(tracks.reduce((s, t) => s + t.duration, 0))}</small></span>${icon('play', 'mix-play')}</button>
+    ${tracks.length >= 4 ? shelf(`Composé pour toi${S.settings.name ? ', ' + S.settings.name : ''}`, HOME_MIXES.map(k => mixCard(getMix(k)))) : ''}
     ${shelf('Écoutés récemment', recentCards)}
     ${shelf('Albums ajoutés récemment', newAlbums, '#/library?f=albums')}
     ${shelf('Titres ajoutés récemment', singleCards, '#/all')}
@@ -1158,6 +1493,18 @@ function viewSettings() {
       ${isIOS ? '' : `<input type="range" class="range" id="cf" min="0" max="12" step="1" value="${S.settings.crossfade}">`}
       ${isIOS ? '' : `<label class="set-item toggle"><div><b>Visualiseur animé</b><small>Ondes autour de la pochette qui suivent la musique.</small></div><input type="checkbox" id="viz" ${S.settings.visualizer ? 'checked' : ''}><span class="sw"></span></label>`}
     </section>
+    <section class="set-group"><h3>Toi</h3>
+      <label class="set-item"><div><b>Ton prénom</b><small>Pour que l'app te parle à toi</small></div><input class="set-input" id="set-name" value="${esc(S.settings.name)}" maxlength="30" autocomplete="given-name"></label>
+    </section>
+    <section class="set-group"><h3>Paroles</h3>
+      <label class="set-item toggle"><div><b>Chercher les paroles en ligne</b><small>Paroles synchronisées gratuites (LRCLIB) quand ton fichier n'en contient pas. Seuls le titre et l'artiste sont envoyés.</small></div><input type="checkbox" id="set-lyr" ${S.settings.onlineLyrics ? 'checked' : ''}><span class="sw"></span></label>
+      <p class="set-note">Tu peux aussi importer des fichiers <b>.lrc</b> avec le même nom que tes musiques, ou coller les paroles depuis le menu ⋯ d'un titre.</p>
+    </section>
+    <section class="set-group"><h3>Le Concierge (IA)</h3>
+      <div class="set-item"><div><b>Analyse de ta musique</b><small id="ana-stat">…</small></div></div>
+      <div class="set-item"><div><b>Historique d'écoute</b><small>${plural(AI.historySize(), 'écoute')} mémorisée${AI.historySize() > 1 ? 's' : ''} pour apprendre tes goûts</small></div><button class="link" data-act="clear-hist">Effacer</button></div>
+      <label class="set-item col"><div><b>Clé API Claude (optionnel)</b><small>Sans clé, le Concierge fonctionne déjà hors ligne. Avec une clé Anthropic, il comprend n'importe quelle demande. La clé reste sur ton téléphone ; ta liste de titres est envoyée à Anthropic seulement quand tu parles au Concierge.</small></div><input class="set-input wide" id="set-key" type="password" value="${esc(S.settings.apiKey)}" placeholder="sk-ant-…" autocomplete="off"></label>
+    </section>
     <section class="set-group"><h3>Bibliothèque</h3>
       <button class="set-item btnlike" data-act="import"><div><b>Importer de la musique</b><small>Fichiers ou dossier depuis ton téléphone</small></div>${icon('import')}</button>
       <div class="set-item"><div><b>Stockage utilisé</b><small id="storage">Calcul…</small></div></div>
@@ -1167,11 +1514,11 @@ function viewSettings() {
       <div class="set-text">
         <p><b>Android (Chrome)</b> : menu ⋮ → « Installer l'application » ou « Ajouter à l'écran d'accueil ».</p>
         <p><b>iPhone (Safari)</b> : bouton Partager → « Sur l'écran d'accueil ».</p>
-        <p>Une fois installée, Onde s'ouvre en plein écran et fonctionne sans connexion.</p>
+        <p>Une fois installée, Maison Chahyn s'ouvre en plein écran et fonctionne sans connexion.</p>
         ${S.installPrompt ? `<button class="btn primary" data-act="install">${icon('import')} Installer maintenant</button>` : ''}
       </div>
     </section>
-    <p class="about">Onde · lecteur de musique local · aucune pub, aucun pistage. Ta musique ne quitte jamais ton téléphone.</p>
+    <p class="about">Maison Chahyn · ta maison de la musique · aucune pub, aucun pistage. Ta musique ne quitte jamais ton téléphone.</p>
     </div></div>`;
 }
 
@@ -1183,7 +1530,7 @@ function notFound() {
 // Routeur avec transitions
 // ======================================================================
 const main = $('#main');
-const TAB_ROUTES = ['home', 'search', 'library'];
+const TAB_ROUTES = ['home', 'search', 'ai', 'library'];
 
 function parseRoute() {
   const h = location.hash.slice(1) || '/';
@@ -1209,6 +1556,8 @@ function render(keepScroll = false) {
   let html;
   switch (r.name) {
     case 'search': html = viewSearch(); break;
+    case 'ai': html = viewAI(); break;
+    case 'mix': html = viewMix(r.arg); break;
     case 'library': html = viewLibrary(r.params); break;
     case 'album': html = viewAlbum(r.arg); break;
     case 'artist': html = viewArtist(r.arg); break;
@@ -1259,7 +1608,13 @@ function afterRender(view, r) {
     });
     clr.addEventListener('click', () => { q.value = ''; q.dispatchEvent(new Event('input')); q.focus(); });
   }
+  if (r.name === 'ai') afterAI(view);
   if (r.name === 'settings') {
+    $('#set-name', view).addEventListener('change', e => { S.settings.name = e.target.value.trim(); saveSettings(); toast('Enchanté, ' + (S.settings.name || 'toi') + ' ✦'); });
+    $('#set-lyr', view).addEventListener('change', e => { S.settings.onlineLyrics = e.target.checked; saveSettings(); });
+    $('#set-key', view).addEventListener('change', e => { S.settings.apiKey = e.target.value.trim(); saveSettings(); toast(S.settings.apiKey ? 'Clé enregistrée sur ce téléphone' : 'Clé supprimée'); });
+    const all = allTracksRaw(), done = all.filter(t => t.features).length;
+    $('#ana-stat', view).textContent = all.length ? `${done} / ${all.length} titres analysés (tempo, énergie)${done < all.length ? ' · en cours…' : ' ✓'}` : 'Aucun titre';
     const cf = $('#cf', view);
     cf?.addEventListener('input', () => {
       S.settings.crossfade = +cf.value; player.crossfade = +cf.value; saveSettings();
@@ -1353,6 +1708,12 @@ document.addEventListener('click', e => {
         render(true); toast('Bibliothèque effacée');
       });
       case 'install': S.installPrompt?.prompt(); return;
+      case 'clear-hist': AI.clearHistory(); S.mixes = {}; toast('Historique effacé'); return render(true);
+      case 'mix-regen': S.mixes[act.dataset.key] = null; getMix(act.dataset.key); return render(true);
+      case 'mix-save': return saveMixAsPlaylist(S.mixes[act.dataset.key]);
+      case 'ai-send': return aiSend(act.dataset.text);
+      case 'ai-clear': S.chat = []; saveJSON('onde.chat', S.chat); return render(true);
+      case 'ai-play': { const m = S.mixes[act.dataset.key]; if (m?.tracks.length) playIds(m.tracks.map(t => t.id), 0, { context: { label: m.name, route: '#/mix/' + m.key } }); return; }
     }
     return;
   }
@@ -1439,6 +1800,9 @@ async function boot() {
   updateNowPlaying();
   updateModes();
   document.body.classList.add('ready');
+  const sp = $('#splash');
+  setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 900); }, 1100);
+  setTimeout(queueAnalysis, 4000);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }

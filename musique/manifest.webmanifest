@@ -1,14 +1,14 @@
 {
-  "name": "Onde · Ma musique",
-  "short_name": "Onde",
-  "description": "Ta musique sur ton téléphone. Sans pub, sans compte, hors connexion.",
+  "name": "Maison Chahyn",
+  "short_name": "Maison Chahyn",
+  "description": "Ta maison de la musique. Sans pub, hors connexion, avec paroles et IA.",
   "lang": "fr",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0b0b12",
-  "theme_color": "#0b0b12",
+  "background_color": "#070707",
+  "theme_color": "#070707",
   "categories": [
     "music",
     "entertainment"

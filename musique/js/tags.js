@@ -66,8 +66,8 @@ async function parseID3v2(file, head) {
   }
   const t = {};
   const ids = ver === 2
-    ? { TT2: 'title', TP1: 'artist', TP2: 'albumArtist', TAL: 'album', TRK: 'track', TYE: 'year', TCO: 'genre', PIC: 'pic' }
-    : { TIT2: 'title', TPE1: 'artist', TPE2: 'albumArtist', TALB: 'album', TRCK: 'track', TYER: 'year', TDRC: 'year', TCON: 'genre', APIC: 'pic' };
+    ? { TT2: 'title', TP1: 'artist', TP2: 'albumArtist', TAL: 'album', TRK: 'track', TYE: 'year', TCO: 'genre', PIC: 'pic', ULT: 'lyrics' }
+    : { TIT2: 'title', TPE1: 'artist', TPE2: 'albumArtist', TALB: 'album', TRCK: 'track', TYER: 'year', TDRC: 'year', TCON: 'genre', APIC: 'pic', USLT: 'lyrics', TXXX: 'txxx' };
   const idLen = ver === 2 ? 3 : 4;
   const hdLen = ver === 2 ? 6 : 10;
   while (p + hdLen < b.length) {
@@ -83,6 +83,21 @@ async function parseID3v2(file, head) {
     if (ver === 4 && (fflags & 0x02)) data = unsync(data);
     if (ver === 4 && (fflags & 0x01)) data = data.subarray(4); // longueur de données
     const enc = data[0];
+    if (key === 'txxx') {
+      const de = termEnd(data, 1, enc);
+      const desc = decodeText(enc, data.subarray(1, de)).toUpperCase();
+      if (/LYRICS|^USLT$/.test(desc) && !t.lyrics) {
+        t.lyrics = decodeText(enc, data.subarray(de + (enc === 1 || enc === 2 ? 2 : 1))).replace(/\0+$/, '').trim();
+      }
+      continue;
+    }
+    if (key === 'lyrics') {
+      // encodage(1) langue(3) description(\0) texte
+      const de = termEnd(data, 4, enc);
+      const txt = decodeText(enc, data.subarray(de + (enc === 1 || enc === 2 ? 2 : 1))).replace(/\0+$/, '').trim();
+      if (txt && !t.lyrics) t.lyrics = txt;
+      continue;
+    }
     if (key === 'pic') {
       if (t.picture) continue;
       let q = 1, mime;
@@ -120,6 +135,7 @@ function applyVorbis(t, key, val) {
   key = key.toUpperCase();
   const map = { TITLE: 'title', ARTIST: 'artist', ALBUMARTIST: 'albumArtist', 'ALBUM ARTIST': 'albumArtist', ALBUM: 'album', TRACKNUMBER: 'track', DATE: 'year', GENRE: 'genre' };
   if (map[key] && !t[map[key]]) t[map[key]] = clean(val);
+  if ((key === 'LYRICS' || key === 'UNSYNCEDLYRICS' || key === 'SYNCEDLYRICS') && !t.lyrics) t.lyrics = val.trim();
   if (key === 'METADATA_BLOCK_PICTURE' && !t.picture) {
     try {
       const bin = Uint8Array.from(atob(val), c => c.charCodeAt(0));
@@ -213,7 +229,7 @@ async function parseMP4(file) {
         await walk(pos + hdr, pos + size, depth + 1);
       } else if (type === 'meta') {
         await walk(pos + hdr + 4, pos + size, depth + 1);
-      } else if (names[type] || type === 'covr' || type === 'trkn') {
+      } else if (names[type] || type === 'covr' || type === 'trkn' || type === '\xa9lyr') {
         const b = await readBytes(file, pos + hdr, Math.min(size - hdr, 8 * 1024 * 1024));
         // atome "data" : taille(4) "data"(4) type(4) locale(4) valeur
         if (latin1.decode(b.subarray(4, 8)) === 'data') {
@@ -221,6 +237,7 @@ async function parseMP4(file) {
           const val = b.subarray(16, u32(b, 0));
           if (type === 'covr') { if (!t.picture) t.picture = new Blob([val.slice()], { type: dt === 14 ? 'image/png' : 'image/jpeg' }); }
           else if (type === 'trkn') { t.track = String((val[2] << 8) + val[3]); }
+          else if (type === '\xa9lyr') { t.lyrics = utf8.decode(val).trim(); }
           else t[names[type]] = clean(utf8.decode(val));
         }
       }
