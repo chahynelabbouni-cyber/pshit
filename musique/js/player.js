@@ -1,7 +1,7 @@
 // Moteur de lecture : deux lecteurs audio pour les fondus enchaînés entre morceaux,
 // file d'attente, aléatoire, répétition, écran de verrouillage (Media Session).
-import { db } from './db.js?v=10';
-import { YouTubeElement } from './sources.js?v=10';
+import { db } from './db.js?v=12';
+import { YouTubeElement } from './sources.js?v=12';
 
 export const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -164,8 +164,17 @@ export class Player extends EventTarget {
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 256;
       this.analyser.smoothingTimeConstant = 0.8;
-      this.els.slice(0, 2).forEach(el => this.ctx.createMediaElementSource(el).connect(this.analyser));
+      // Égaliseur 3 bandes : basses, médiums (voix), aigus
+      this.eq = {
+        bass: Object.assign(this.ctx.createBiquadFilter(), { type: 'lowshelf' }),
+        mid: Object.assign(this.ctx.createBiquadFilter(), { type: 'peaking' }),
+        treble: Object.assign(this.ctx.createBiquadFilter(), { type: 'highshelf' }),
+      };
+      this.eq.bass.frequency.value = 120; this.eq.mid.frequency.value = 1500; this.eq.mid.Q.value = 0.9; this.eq.treble.frequency.value = 6000;
+      this.els.slice(0, 2).forEach(el => this.ctx.createMediaElementSource(el).connect(this.eq.bass));
+      this.eq.bass.connect(this.eq.mid); this.eq.mid.connect(this.eq.treble); this.eq.treble.connect(this.analyser);
       this.analyser.connect(this.ctx.destination);
+      if (this.eqGains) this.setEQ(this.eqGains);
       // Si le système suspend le moteur audio (écran éteint), on le relance pour ne pas couper la musique
       const wake = () => { if (this.ctx.state !== 'running' && this.playing) this.ctx.resume().catch(() => {}); };
       this.ctx.addEventListener('statechange', wake);
@@ -176,9 +185,15 @@ export class Player extends EventTarget {
     }
   }
 
+  setEQ(g) {
+    this.eqGains = g;
+    if (!this.eq) return;
+    this.eq.bass.gain.value = g[0]; this.eq.mid.gain.value = g[1]; this.eq.treble.gain.value = g[2];
+  }
+
   async play() {
     if (!this.currentId) return;
-    if (this.visualizer) this.ensureAudioGraph();
+    if (this.visualizer || (this.eqGains && this.eqGains.some(Boolean))) this.ensureAudioGraph();
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
     try { await this.el.play(); } catch (e) { if (e.name !== 'AbortError') console.warn(e); }
     this.markPlayed();

@@ -1,10 +1,10 @@
-import { db } from './db.js?v=10';
-import { readTags } from './tags.js?v=10';
-import { Player, isIOS } from './player.js?v=10';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=10';
-import * as AI from './ai.js?v=10';
-import * as Voice from './voice.js?v=10';
-import * as Src from './sources.js?v=10';
+import { db } from './db.js?v=12';
+import { readTags } from './tags.js?v=12';
+import { Player, isIOS } from './player.js?v=12';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=12';
+import * as AI from './ai.js?v=12';
+import * as Voice from './voice.js?v=12';
+import * as Src from './sources.js?v=12';
 
 const BRAND = 'Maison Chahyn';
 
@@ -16,7 +16,7 @@ const S = {
   playlists: new Map(),
   covers: new Map(),       // coverId -> objectURL
   colors: loadJSON('onde.colors', {}),
-  settings: Object.assign({ name: 'Chahyn', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true }, loadJSON('onde.settings', {})),
+  settings: Object.assign({ name: 'Chahyn', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
   mixes: {},
   chat: loadJSON('onde.chat', []),
   version: 0,
@@ -210,6 +210,11 @@ async function tint(el, coverId, seed, prop = '--tint') {
 // ======================================================================
 const player = new Player(id => S.tracks.get(id), async t => coverURL(t.coverId), $('#ytbox .yt-host'));
 player.crossfade = S.settings.crossfade;
+setTimeout(() => {
+  player.setEQ(EQ_PRESETS[S.settings.eq] || EQ_PRESETS.normal);
+  if (S.settings.volume < 1) player.setVolume(S.settings.volume);
+  Voice.setVoicePrefs({ name: S.settings.voiceName, rate: S.settings.voiceRate });
+});
 player.visualizer = S.settings.visualizer;
 
 player.addEventListener('played', async e => {
@@ -220,7 +225,7 @@ player.addEventListener('played', async e => {
   await db.put('tracks', t);
 });
 let listen = { id: null, max: 0 };
-player.addEventListener('track', () => { setTimeout(placeYT, 30); np.classList.toggle('live', player.current?.source === 'radio');
+player.addEventListener('track', () => { setTimeout(placeYT, 30); setTimeout(placeYT, 520); np.classList.toggle('live', player.current?.source === 'radio');
   if (listen.id && listen.id !== player.currentId && listen.max > 0.02) {
     AI.logListen(listen.id, { skipped: listen.max < 0.35, ratio: Math.min(1, listen.max) });
     S.mixes.moment = null;
@@ -245,7 +250,23 @@ player.addEventListener('error', () => {
 });
 
 function playIds(ids, i = 0, opts = {}) {
+  if (S.miniGone) { S.miniGone = false; mini.classList.remove('gone'); }
   player.playList(ids, i, opts);
+  setTimeout(() => { updateNowPlaying(); placeYT(); }, 60);
+}
+
+// Une sélection YouTube devient une vraie playlist : carte dans le chat, et enregistrée si on l'a demandé
+async function ytMix(name, tracks, n) {
+  const key = 'chat-yt' + Date.now();
+  S.mixes[key] = { key, name, desc: 'Composée par le Concierge', emoji: '✦', tracks };
+  S.lastMix = S.mixes[key];
+  playIds(tracks.map(t => t.id), 0, { context: { label: name, route: '#/mix/' + key } });
+  if (/\b(playlist|cree|creer|fais|faire|compose|prepare|garde|enregistre)\b/.test(n)) {
+    for (const t of tracks) { t.saved = true; await db.put('tracks', t); }
+    await saveMixAsPlaylist(S.mixes[key]);
+    return `Ta playlist « ${name} » est prête : ${plural(tracks.length, 'titre')}, enregistrée dans ta bibliothèque. Je la lance.`;
+  }
+  return `Je lance « ${name} » : ${plural(tracks.length, 'titre')}.`;
 }
 
 // ======================================================================
@@ -631,6 +652,7 @@ function trackSheet(t, { listKey, fromNP } = {}) {
   const inPlaylist = ctx?.playlistId;
   const head = `<div class="sheet-head">${trackCover(t, 'sm')}<div><b>${esc(t.title)}</b><small>${esc(artistOf(t))}${t.album ? ' · ' + esc(t.album) : ''}</small></div></div>`;
   openSheet(head + sheetItems([
+    fromNP && { id: 'sound', icon: 'gear', label: 'Son, volume et égaliseur' },
     { id: 'like', icon: t.liked ? 'heart-f' : 'heart', label: t.liked ? 'Retirer des Titres likés' : 'Ajouter aux Titres likés' },
     !fromNP && { id: 'next', icon: 'next-up', label: 'Lire ensuite' },
     !fromNP && { id: 'queue', icon: 'queue', label: 'Ajouter à la file d\'attente' },
@@ -646,6 +668,7 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     !t.source && { id: 'del', icon: 'trash', label: 'Supprimer du téléphone', danger: true },
   ]), {
     like: () => { toggleLike(t); closeSheet(); },
+    sound: () => soundSheet(),
     next: () => { player.addNext(t.id); toast('Sera lu ensuite'); closeSheet(); },
     queue: () => { player.addToQueue(t.id); toast('Ajouté à la file d\'attente'); closeSheet(); },
     pl: () => playlistPicker([t.id]),
@@ -1222,12 +1245,26 @@ async function aiSend(text, { navigate = true } = {}) {
   const tracks = allTracks();
   if (navigate && S.route?.name !== 'ai') { S.pendingFwd = true; goto('#/ai'); await new Promise(r => setTimeout(r, 60)); }
   S.chat.push({ role: 'user', text });
-  // Commandes directes et recherches dans toutes les sources (bibliothèque, YouTube, radios, podcasts)
+  // Avec une clé Claude : le Concierge-agent pilote toute l'app. Sinon : compréhension locale.
   let quick = null;
-  try { quick = await smartCommand(text); } catch (e) { console.warn(e); }
+  if (S.settings.apiKey) {
+    S.aiBusy = true; document.body.classList.add('ai-busy');
+    $('#ai-log')?.insertAdjacentHTML('beforeend', `<div class="msg me"><p>${esc(text)}</p></div><div class="msg bot typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
+    main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+    try {
+      const hist = S.chat.slice(0, -1).slice(-8).map(m => ({ role: m.role, content: m.text || '…' }));
+      quick = await AI.runAgent(S.settings.apiKey, text, { tracks, chat: hist, context: agentContext(), exec: agentExec });
+    } catch (e) {
+      console.warn(e);
+      toast('Claude indisponible, je passe en mode local');
+    }
+    S.aiBusy = false; document.body.classList.remove('ai-busy');
+  }
+  if (!quick) { try { quick = await smartCommand(text); } catch (e) { console.warn(e); } }
   if (!quick && !tracks.length) quick = 'Ta bibliothèque est vide pour l\'instant. Demande-moi une radio (« mets Skyrock »), ajoute ta clé YouTube dans les Réglages pour que je trouve n\'importe quel son, ou importe tes fichiers.';
   if (quick) {
-    S.chat.push({ role: 'assistant', text: quick });
+    const lm = S.lastMix; S.lastMix = null;
+    S.chat.push({ role: 'assistant', text: quick, mix: lm ? { name: lm.name, desc: lm.desc, ids: lm.tracks.map(t => t.id) } : null });
     saveJSON('onde.chat', S.chat);
     if (S.route?.name === 'ai') { $('#ai-log').innerHTML = renderChat(); main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' }); }
     return { reply: quick };
@@ -1312,7 +1349,7 @@ const GENRES = [
   ['annees 90', /\b(annees 90|90s)\b/, '90s', 'années 90'],
   ['chanson francaise', /\b(chanson francaise|variete)\b/, 'chanson francaise', 'chanson française'],
 ];
-const MOOD_RADIO = { ecole: ['lofi', 'lofi pour travailler'], sport: ['edm', 'musique sport motivation'], chill: ['chill', 'chill music'], soiree: ['dance', 'musique soirée'], nuit: ['ambient', 'musique douce pour dormir'], matin: ['pop', 'musique bonne humeur'], trajet: ['hits', 'hits du moment'] };
+const MOOD_RADIO = { ecole: ['lofi', 'lofi hip hop pour étudier'], sport: ['edm', 'rap motivation muscu son'], chill: ['chill', 'chill music'], soiree: ['dance', 'musique soirée'], nuit: ['ambient', 'musique douce pour dormir'], matin: ['pop', 'musique bonne humeur'], trajet: ['hits', 'hits du moment'] };
 
 function cleanAsk(text) {
   let n = norm(text).replace(/[.!?,;:"«»]/g, ' ').replace(/['’`-]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1329,6 +1366,7 @@ async function smartCommand(text) {
   const words = n.split(' ').filter(Boolean).length;
   const cur = player.current;
   S.cmdPaused = false;
+  S.lastMix = null;
   if (!n) return null;
 
   // --- minuteur
@@ -1402,7 +1440,7 @@ async function smartCommand(text) {
     if (S.settings.ytKey && !/radio/.test(ask)) {
       try {
         const res = await Src.ytSearch(S.settings.ytKey, ytq, 20);
-        if (res.length) { const ts = res.map(x => remoteTrack(x, 'yt')); playIds(ts.map(t => t.id), 0, { context: { label: label } }); return `Je lance du ${label} sur YouTube.`; }
+        if (res.length) return await ytMix(label.charAt(0).toUpperCase() + label.slice(1), res.map(x => remoteTrack(x, 'yt')), n);
       } catch { /* on tente la radio */ }
     }
     try {
@@ -1418,7 +1456,7 @@ async function smartCommand(text) {
     if (mood) {
       const [tag, ytq] = MOOD_RADIO[mood[0]];
       if (S.settings.ytKey) {
-        try { const res = await Src.ytSearch(S.settings.ytKey, ytq, 20); if (res.length) { const ts = res.map(x => remoteTrack(x, 'yt')); playIds(ts.map(t => t.id), 0, { context: { label: AI.MOODS[mood[0]]?.label || ytq } }); return `Je lance « ${AI.MOODS[mood[0]]?.label || ytq} » sur YouTube.`; } } catch { /* radio */ }
+        try { const res = await Src.ytSearch(S.settings.ytKey, ytq, 25); if (res.length) return await ytMix(AI.MOODS[mood[0]]?.label || ytq, res.map(x => remoteTrack(x, 'yt')), n); } catch { /* radio */ }
       }
       try { const list = await Src.radioByTag(tag, 5); if (list.length) { const t = remoteTrack(list[0], 'radio'); playIds([t.id], 0, { context: { label: 'Radio' } }); return `Pour ça, je te mets la radio ${t.title}.`; } } catch { /* rien */ }
     }
@@ -1442,6 +1480,92 @@ async function smartCommand(text) {
     return `Je n'ai rien trouvé pour « ${ask} ».`;
   }
   return null;
+}
+
+// ======================================================================
+// Outils du Concierge-agent (Claude)
+// ======================================================================
+function agentContext() {
+  const t = player.current;
+  const pls = [...S.playlists.values()].map(p => `« ${p.name} » (${p.trackIds.length})`).join(', ') || 'aucune';
+  return [
+    t ? `En cours : « ${t.title} »${t.artist ? ' de ' + t.artist : ''} (${t.source || 'fichier'}), ${player.playing ? 'en lecture' : 'en pause'}.` : 'Rien en cours.',
+    `Volume ${Math.round((player.base ?? 1) * 100)} %. Égaliseur ${S.settings.eq}.`,
+    `Playlists : ${pls}. Titres likés : ${liked().length}.`,
+    `YouTube ${S.settings.ytKey ? 'disponible' : 'non configuré'}. Prénom : ${S.settings.name || 'inconnu'}.`,
+  ].join(' ');
+}
+
+async function agentExec(name, a) {
+  const cur = player.current;
+  switch (name) {
+    case 'play': {
+      const q = a.query || '';
+      if (a.source === 'radio') return await playRadioByName(q) || (await (async () => { const r = await Src.radioSearch(q, 3); if (!r.length) return 'Aucune radio trouvée'; const t = remoteTrack(r[0], 'radio'); playIds([t.id], 0, { context: { label: 'Radio' } }); return `Radio ${t.title} lancée`; })());
+      if (a.source === 'podcast') return await smartCommand(`mets le podcast ${q}`) || 'Podcast introuvable';
+      if (a.source === 'youtube') {
+        if (!S.settings.ytKey) return 'YouTube non configuré';
+        const res = await Src.ytSearch(S.settings.ytKey, q, 15);
+        if (!res.length) return 'Rien trouvé sur YouTube';
+        const ts = res.map(x => remoteTrack(x, 'yt'));
+        playIds(ts.map(t => t.id), 0, { context: { label: q } });
+        return `Lancé : « ${ts[0].title} » de ${ts[0].artist} (+${ts.length - 1} à suivre)`;
+      }
+      if (a.source === 'library') return quickCommand('joue ' + norm(q)) || 'Pas dans la bibliothèque';
+      return await smartCommand(`mets ${q}`) || 'Rien trouvé';
+    }
+    case 'control': {
+      const m = { pause: 'pause', resume: 'reprends', next: 'suivant', previous: 'precedent', restart: 'recommence', like: 'j aime ce son' }[a.action];
+      if (m) return await smartCommand(m) || 'OK';
+      if (a.action === 'shuffle_on' || a.action === 'shuffle_off') { if (player.shuffle !== (a.action === 'shuffle_on')) player.toggleShuffle(); return 'OK'; }
+      if (a.action === 'repeat_one' || a.action === 'repeat_off') { player.repeat = a.action === 'repeat_one' ? 'one' : 'off'; player.emit('modes'); return 'OK'; }
+      if (a.action === 'open_player') { openNP(); return 'Lecteur ouvert'; }
+      if (a.action === 'show_lyrics') { if (!cur) return 'Rien en cours'; openNP(); setTimeout(openLyrics, 450); return S.lyr?.parsed ? 'Paroles affichées' : 'Pas de paroles trouvées pour ce titre'; }
+      if (a.action === 'show_queue') { openNP(); setTimeout(queueSheet, 450); return 'File affichée'; }
+      return 'Action inconnue';
+    }
+    case 'set_volume': return isIOS ? 'Volume non réglable sur iPhone' : `Volume ${Math.round(player.setVolume(a.percent / 100) * 100)} %`;
+    case 'set_equalizer': S.settings.eq = a.preset; saveSettings(); player.setEQ(EQ_PRESETS[a.preset]); if (player.kind === 'local') player.ensureAudioGraph(); return `Égaliseur ${EQ_NAMES[a.preset]}`;
+    case 'seek': if (!cur) return 'Rien en cours'; player.seek(player.time + a.seconds); return 'OK';
+    case 'sleep_timer': player.setSleep(a.minutes > 0 ? a.minutes : 0); return a.minutes > 0 ? `Arrêt dans ${a.minutes} min` : 'Minuteur annulé';
+    case 'play_news': {
+      const i = a.station === 'inter' ? 1 : a.station === 'rfi' ? 2 : 0;
+      if (a.live) return await playRadioByName(['franceinfo', 'France Inter', 'RFI'][i]) || 'Radio indisponible';
+      return await playNewsFlash(i) || 'Journal indisponible';
+    }
+    case 'make_playlist': {
+      const tracks = allTracks();
+      const ids = [...new Set((a.track_numbers || []).map(n => tracks[n - 1]?.id).filter(Boolean))];
+      if (!ids.length) return 'Aucun titre valide';
+      const key = 'chat-ag' + Date.now();
+      S.mixes[key] = { key, name: a.name || 'Sélection du Concierge', desc: 'Composée par le Concierge', emoji: '✦', tracks: ids.map(id => S.tracks.get(id)) };
+      if (a.save) await saveMixAsPlaylist(S.mixes[key]);
+      if (a.play) playIds(ids, 0, { context: { label: S.mixes[key].name, route: '#/mix/' + key } });
+      return `Playlist « ${S.mixes[key].name} » : ${ids.length} titres${a.save ? ', enregistrée' : ''}${a.play ? ', lancée' : ''}`;
+    }
+    case 'queue_add': {
+      let t = allTracks().find(x => norm(`${x.title} ${x.artist}`).includes(norm(a.query)));
+      if (!t && S.settings.ytKey) { const r = await Src.ytSearch(S.settings.ytKey, a.query, 1); if (r[0]) t = remoteTrack(r[0], 'yt'); }
+      if (!t) return 'Introuvable';
+      a.next ? player.addNext(t.id) : player.addToQueue(t.id);
+      return `« ${t.title} » ajouté ${a.next ? 'en prochain' : 'à la file'}`;
+    }
+    case 'add_current_to_playlist': {
+      if (!cur) return 'Rien en cours';
+      let p = [...S.playlists.values()].find(x => norm(x.name) === norm(a.playlist));
+      if (!p) { p = { id: uid(), name: a.playlist, trackIds: [], createdAt: Date.now(), updatedAt: Date.now() }; S.playlists.set(p.id, p); }
+      if (!p.trackIds.includes(cur.id)) p.trackIds.push(cur.id);
+      if (cur.source && !cur.saved) { cur.saved = true; await db.put('tracks', cur); }
+      p.updatedAt = Date.now(); await db.put('playlists', p); bump();
+      return `Ajouté à « ${p.name} »`;
+    }
+    case 'now_playing': {
+      const nx = player.queue.slice(player.index + 1, player.index + 6).map(id => S.tracks.get(id)).filter(Boolean).map(t => `${t.title} — ${t.artist || ''}`);
+      return { current: cur ? { title: cur.title, artist: cur.artist, source: cur.source || 'fichier', playing: player.playing, position: Math.round(player.time), duration: Math.round(player.duration || 0) } : null, next: nx, volume: Math.round((player.base ?? 1) * 100) };
+    }
+    case 'navigate': { await closeAllOverlays(); S.pendingFwd = true; goto({ home: '#/', search: '#/search', library: '#/library', concierge: '#/ai', settings: '#/settings', liked: '#/liked' }[a.screen] || '#/'); return 'OK'; }
+  }
+  return 'Outil inconnu';
 }
 // ======================================================================
 // Commandes directes (texte ou voix)
@@ -1636,24 +1760,57 @@ player.addEventListener('queue', () => {
   }
 });
 player.addEventListener('time', () => { if (player.current?.source === 'podcast') S._lastPodPos = player.time; });
+
+// ======================================================================
+// Son : volume et égaliseur
+// ======================================================================
+const EQ_PRESETS = { normal: [0, 0, 0], basses: [6, 0, 1], basses2: [10, -1, 2], voix: [-3, 4, 2], aigus: [-1, 0, 5], soiree: [6, -2, 4], douce: [2, -1, -4] };
+const EQ_NAMES = { normal: 'Normal', basses: 'Basses +', basses2: 'Basses ++', voix: 'Voix (podcasts)', aigus: 'Aigus +', soiree: 'Soirée', douce: 'Douce' };
+function soundSheet() {
+  const cur = S.settings.eq || 'normal';
+  openSheet(`<h3 class="sheet-title">Son</h3>
+    ${isIOS ? '<p class="sheet-text">Sur iPhone, le volume se règle avec les boutons du téléphone.</p>' : `<div class="vol-row">${icon('timer')}<input type="range" class="range" id="vol" min="5" max="100" step="1" value="${Math.round((player.base ?? 1) * 100)}"><b id="vol-v">${Math.round((player.base ?? 1) * 100)} %</b></div>`}
+    <h4 class="sub">Égaliseur</h4>
+    <div class="eq-presets">${Object.keys(EQ_PRESETS).map(k => `<button class="chip ${k === cur ? 'on' : ''}" data-sa="eq" data-k="${k}">${EQ_NAMES[k]}</button>`).join('')}</div>
+    <p class="sheet-text">${isIOS ? 'L\'égaliseur n\'est pas disponible sur iPhone.' : 'L\'égaliseur s\'applique à tes musiques importées. YouTube et les radios utilisent leur propre son.'}</p>`, {
+    eq: b => {
+      S.settings.eq = b.dataset.k; saveSettings();
+      player.setEQ(EQ_PRESETS[b.dataset.k]);
+      if (player.kind === 'local' && EQ_PRESETS[b.dataset.k].some(Boolean)) player.ensureAudioGraph();
+      $$('.eq-presets .chip').forEach(c => c.classList.toggle('on', c === b));
+      toast(`Égaliseur : ${EQ_NAMES[b.dataset.k]}`);
+    },
+  }, {
+    onOpen: body => {
+      const v = $('#vol', body);
+      if (!v) return;
+      v.style.setProperty('--p', `${v.value}%`);
+      v.addEventListener('input', () => { const x = player.setVolume(v.value / 100); S.settings.volume = x; saveSettings(); $('#vol-v', body).textContent = Math.round(x * 100) + ' %'; v.style.setProperty('--p', `${v.value}%`); });
+    },
+  });
+}
 // ======================================================================
 // Sources en ligne : YouTube (lecteur officiel) & radios
 // ======================================================================
 const ytbox = $('#ytbox');
+// La vidéo YouTube prend exactement la place de la pochette : dans le lecteur, dans les paroles ou dans le mini-lecteur
 function placeYT() {
   const on = player.kind === 'yt' && !!player.current && !S.miniGone;
   ytbox.classList.toggle('on', on);
   ytbox.classList.toggle('over', !!S.npOpen);
+  mini.classList.toggle('yt', on);
+  np.classList.toggle('yt-on', on && S.npOpen && !S.lyrOpen);
   if (!on) return;
-  if (S.npOpen && !S.lyrOpen) {
-    const r = $('.np-cover-track', np).getBoundingClientRect();
-    const h = r.width; // zone carrée de la pochette
-    Object.assign(ytbox.style, { left: r.left + 'px', top: (r.top + (r.height - h) / 2) + 'px', width: r.width + 'px', height: h + 'px' });
-    ytbox.classList.add('in-np');
-  } else {
-    ytbox.classList.remove('in-np');
-    Object.assign(ytbox.style, { left: '', top: '', width: '', height: '' });
-  }
+  let target, inNp = false;
+  if (S.npOpen && S.lyrOpen) target = $('.lyr-head .cv', np);
+  else if (S.npOpen) { target = $('.np-cover .cv', np) || $('.np-cover-track', np); inNp = true; }
+  else target = $('.mini-cover', mini);
+  if (!target) return;
+  const r = target.getBoundingClientRect();
+  ytbox.classList.add('moving');
+  Object.assign(ytbox.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px', borderRadius: inNp ? '8px' : '5px' });
+  ytbox.classList.toggle('in-np', inNp);
+  requestAnimationFrame(() => requestAnimationFrame(() => ytbox.classList.remove('moving')));
 }
 window.addEventListener('resize', () => placeYT());
 $('.yt-shield', ytbox).addEventListener('click', () => { if (!S.npOpen) openNP(); else player.toggle(); });
@@ -2184,6 +2341,13 @@ function viewSettings() {
         <li>Conseillé : restreins la clé à « YouTube Data API v3 ».</li>
       </ol><p>Gratuit, environ 100 recherches par jour. La clé reste sur ton téléphone.</p></details>
     </section>
+    <section class="set-group"><h3>Son</h3>
+      <button class="set-item btnlike" data-act="sound"><div><b>Volume et égaliseur</b><small>Basses, voix, aigus · ${esc(EQ_NAMES[S.settings.eq] || 'Normal')}</small></div>${icon('gear')}</button>
+      <label class="set-item col"><div><b>Voix du Concierge</b><small>${Voice.canSpeak ? 'Choisis la voix qui te répond' : 'Synthèse vocale indisponible sur ce navigateur'}</small></div>
+        <select class="set-select" id="set-vname"><option value="">Automatique (la plus naturelle)</option>${Voice.frenchVoices().map(v => `<option value="${esc(v.name)}" ${v.name === S.settings.voiceName ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
+        <div class="vol-row"><small>Lente</small><input type="range" class="range" id="set-vrate" min="0.8" max="1.4" step="0.05" value="${S.settings.voiceRate}"><small>Rapide</small></div>
+        <button class="btn ghost sm" data-act="voice-test" type="button">Écouter la voix</button></label>
+    </section>
     <section class="set-group"><h3>Anti-pub</h3>
       <label class="set-item toggle"><div><b>Sauter les pubs et passages hors sujet</b><small>YouTube : sponsors, autopromo, intros (base collaborative SponsorBlock). Podcasts : quand tu sautes la pub du début ou de la fin, l'app s'en souvient pour les épisodes suivants de la même émission.</small></div><input type="checkbox" id="set-ads" ${S.settings.skipAds ? 'checked' : ''}><span class="sw"></span></label>
     </section>
@@ -2308,6 +2472,10 @@ function afterRender(view, r) {
   if (r.name === 'settings') {
     $('#set-name', view).addEventListener('change', e => { S.settings.name = e.target.value.trim(); saveSettings(); toast('Enchanté, ' + (S.settings.name || 'toi') + ' ✦'); });
     $('#set-yt', view).addEventListener('change', e => { S.settings.ytKey = e.target.value.trim(); saveSettings(); toast(S.settings.ytKey ? 'Clé YouTube enregistrée ✦' : 'Clé supprimée'); });
+    $('#set-vname', view)?.addEventListener('change', e => { S.settings.voiceName = e.target.value; saveSettings(); Voice.setVoicePrefs({ name: S.settings.voiceName }); });
+    const vr = $('#set-vrate', view);
+    vr?.style.setProperty('--p', `${(S.settings.voiceRate - 0.8) / 0.6 * 100}%`);
+    vr?.addEventListener('input', () => { S.settings.voiceRate = +vr.value; saveSettings(); Voice.setVoicePrefs({ rate: +vr.value }); vr.style.setProperty('--p', `${(vr.value - 0.8) / 0.6 * 100}%`); });
     $('#set-ads', view).addEventListener('change', e => { S.settings.skipAds = e.target.checked; saveSettings(); });
     $('#set-voice', view).addEventListener('change', e => { S.settings.voiceReply = e.target.checked; saveSettings(); });
     $('#set-lyr', view).addEventListener('change', e => { S.settings.onlineLyrics = e.target.checked; saveSettings(); });
@@ -2416,6 +2584,8 @@ document.addEventListener('click', e => {
       case 'radio-tag': return showRadios(act.dataset.tag, act.dataset.label);
       case 'radio-name': return playRadioByName(act.dataset.name, act);
       case 'pc-show': return showPodcast(act.dataset.id);
+      case 'sound': return soundSheet();
+      case 'voice-test': return Voice.speak(`Bonjour ${S.settings.name || ''}, je suis le Concierge de ta Maison.`);
       case 'news-flash': return playNewsFlash(+act.dataset.i || 0, act);
       case 'pc-more': return morePodcasts(act.dataset.q, act.dataset.name);
       case 'feat-pc': {

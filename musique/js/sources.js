@@ -120,6 +120,7 @@ function loadYT() {
 export class YouTubeElement extends EventTarget {
   constructor(host) {
     super();
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { this._hiddenAt = Date.now(); this._retries = 0; } });
     this.host = host;           // conteneur visible (le lecteur YouTube doit rester visible)
     this.player = null;
     this.videoId = null;
@@ -163,6 +164,12 @@ export class YouTubeElement extends EventTarget {
 
   onState(s) {
     // -1 non démarré, 0 fini, 1 lecture, 2 pause, 3 chargement, 5 prêt
+    // Le navigateur met souvent la vidéo en pause quand on quitte l'app : on tente de la relancer.
+    if (s === 2 && !this._userPause && document.hidden && Date.now() - (this._hiddenAt || 0) < 4000 && (this._retries || 0) < 3) {
+      this._retries = (this._retries || 0) + 1;
+      setTimeout(() => { try { this.player.playVideo(); } catch { /* ignore */ } }, 250);
+    }
+    if (s === 1) { this._userPause = false; this._retries = 0; }
     if (s === 1) {
       if (this._paused) { this._paused = false; this.fire('play'); }
       this.fire('loadedmetadata');
@@ -178,9 +185,10 @@ export class YouTubeElement extends EventTarget {
   async play() {
     if (!this.player) return;
     this._wantPlay = true;
+    this._userPause = false;
     this.player.playVideo();
   }
-  pause() { try { this.player?.pauseVideo(); } catch { /* ignore */ } }
+  pause() { this._userPause = true; try { this.player?.pauseVideo(); } catch { /* ignore */ } }
   removeAttribute() { this.pause(); }
 }
 
