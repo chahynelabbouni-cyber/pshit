@@ -2105,7 +2105,11 @@ async function boot() {
   setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 900); }, 1100);
   setTimeout(queueAnalysis, 4000);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
+    // nouvelle version installée → on recharge une fois pour l'afficher
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded && S.hadController) { reloaded = true; location.reload(); } });
+    S.hadController = !!navigator.serviceWorker.controller;
   }
 }
 boot();

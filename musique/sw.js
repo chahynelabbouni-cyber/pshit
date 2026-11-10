@@ -1,5 +1,5 @@
 // Service worker : l'application fonctionne entièrement hors connexion.
-const CACHE = 'maison-chahyn-v4';
+const CACHE = 'maison-chahyn-v5';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/db.js', 'js/tags.js', 'js/player.js', 'js/lyrics.js', 'js/ai.js', 'js/voice.js', 'js/sources.js',
@@ -23,7 +23,8 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(req)
+    // « no-cache » : on revérifie toujours auprès du serveur, pour recevoir les mises à jour tout de suite
+    fetch(req, { cache: 'no-cache' })
       .then(res => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
         return res;
