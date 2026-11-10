@@ -1,7 +1,7 @@
 // Moteur de lecture : deux lecteurs audio pour les fondus enchaînés entre morceaux,
 // file d'attente, aléatoire, répétition, écran de verrouillage (Media Session).
-import { db } from './db.js?v=9';
-import { YouTubeElement } from './sources.js?v=9';
+import { db } from './db.js?v=10';
+import { YouTubeElement } from './sources.js?v=10';
 
 export const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -37,6 +37,7 @@ export class Player extends EventTarget {
     this.sleepAt = 0;
     this.sleepEndOfTrack = false;
     this.gain = 1;
+    this.base = 1;
 
     this.els.forEach((el, i) => {
       if (i !== 2) el.preload = i === 3 ? 'none' : 'auto';
@@ -112,8 +113,18 @@ export class Player extends EventTarget {
   }
 
   // Baisse le son pendant que l'assistant vocal écoute ou parle
+  // Volume général (0 à 1) réglable à la voix
+  setVolume(v) {
+    this.base = Math.max(0.05, Math.min(1, v));
+    this.gain = this._ducked ? 0.2 * this.base : this.base;
+    if (isIOS || this.fading) return this.base;
+    this.el.volume = this.gain;
+    return this.base;
+  }
+
   duck(on) {
-    this.gain = on ? 0.2 : 1;
+    this._ducked = on;
+    this.gain = (on ? 0.2 : 1) * (this.base ?? 1);
     if (isIOS || this.fading) return;
     const el = this.el, from = el.volume, to = this.gain;
     clearInterval(this._duckT);
