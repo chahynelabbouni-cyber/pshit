@@ -413,8 +413,8 @@ function weekChart() {
 // =====================================================================
 // CALENDRIER
 // =====================================================================
-const VIEWS = [['day', 'Jour'], ['week', 'Semaine'], ['month', 'Mois']];
-const calView = () => (['day', 'week', 'month'].includes(set().calView) ? set().calView : 'week');
+const VIEWS = [['week', 'Semaine'], ['month', 'Mois']];
+const calView = () => (set().calView === 'month' ? 'month' : 'week');
 
 function calTitle(v) {
   if (v === 'month') return cap(`${MOIS[calDate.getMonth()]} ${calDate.getFullYear()}`);
@@ -425,17 +425,40 @@ function calTitle(v) {
 
 function renderCal() {
   const v = calView();
-  header(cap(fmtDay(new Date())), 'Mon agenda');
-  const body = v === 'month' ? monthView() : v === 'week' ? weekRows() : gridView(1, calDate);
+  if (v === 'month' && calDate.getMonth() !== selDay.getMonth()) calDate = startOfMonth(selDay);
+  header(cap(fmtDay(new Date())), cap(`${MOIS[(v === 'month' ? calDate : selDay).getMonth()]} ${(v === 'month' ? calDate : selDay).getFullYear()}`));
+  const list = eventsOfDay(selDay);
+  const L = dayLoad(selDay);
+  const isToday = sameDay(selDay, new Date());
+  const rel = relDay(selDay);
   $('#v-cal').innerHTML = `
-    <div class="seg">${VIEWS.map(([k, l]) => `<button class="${k === v ? 'on' : ''}" data-a="view" data-v="${k}">${l}</button>`).join('')}</div>
-    <div class="cal-bar">
-      <button class="icon-btn" data-a="cal-prev" aria-label="Précédent">${icon('left')}</button>
-      <h2>${calTitle(v)}</h2>
-      <button class="icon-btn" data-a="cal-next" aria-label="Suivant">${icon('right')}</button>
+    <div class="cal-top">
+      <div class="seg small">${VIEWS.map(([k, l]) => `<button class="${k === v ? 'on' : ''}" data-a="view" data-v="${k}">${l}</button>`).join('')}</div>
+      ${isToday ? '' : `<button class="btn small" data-a="cal-today">Aujourd'hui</button>`}
     </div>
-    ${sameDay(calDate, new Date()) && v === 'day' || (v === 'week' && sameDay(startOfWeek(calDate), startOfWeek(new Date()))) || (v === 'month' && calDate.getMonth() === new Date().getMonth() && calDate.getFullYear() === new Date().getFullYear()) ? '' : `<button class="link-btn top" data-a="cal-today">↺ Revenir à aujourd'hui</button>`}
-    <div id="cal-body">${body}</div>`;
+    ${v === 'month' ? monthView() : weekStrip()}
+    <div class="day-head" id="swipe-day">
+      <div><b>${cap(['aujourd\'hui', 'demain', 'hier'].includes(rel) ? rel : fmtDay(selDay).split(' ')[0])}</b><span>${fmtDay(selDay)}</span></div>
+      <span class="day-load" style="--l:${L.c}">${list.filter(e => !e.allDay).length ? `${list.length} · ${fmtDuration(L.minutes * MIN)}` : list.length ? list.length : 'Libre'}</span>
+    </div>
+    <div class="tl day-list">${timeline(list, { gaps: true, empty: 'Rien de prévu ce jour-là 🌿<br><small>Touche + pour ajouter quelque chose</small>' })}</div>`;
+}
+
+function weekStrip() {
+  const a = startOfWeek(selDay);
+  const evs = eventsBetween(a.getTime(), addDays(a, 7).getTime());
+  const days = [...Array(7)].map((_, i) => addDays(a, i));
+  return `<div class="wstrip" id="swipe">
+    <button class="ws-nav" data-a="cal-prev" aria-label="Semaine précédente">${icon('left')}</button>
+    ${days.map(d => {
+      const de = evs.filter(e => e.start < d.getTime() + DAY && e.end > d.getTime() && !(e.allDay && e.cat === 'ferie'));
+      const exam = de.some(e => e.cat === 'exam' || e.cat === 'echeance');
+      return `<button class="ws-day ${sameDay(d, selDay) ? 'sel' : ''} ${sameDay(d, new Date()) ? 'today' : ''}" data-a="sel" data-d="${ymd(d)}">
+        <span>${JOURS_C[d.getDay()].slice(0, 3)}</span><b>${d.getDate()}</b>
+        <i class="ws-dots">${de.length ? `<em style="background:${exam ? 'var(--danger)' : 'var(--accent)'}"></em>` : ''}${de.length > 3 ? '<em></em>' : ''}</i></button>`;
+    }).join('')}
+    <button class="ws-nav" data-a="cal-next" aria-label="Semaine suivante">${icon('right')}</button>
+  </div>`;
 }
 
 function dayBanner(d) {
@@ -456,15 +479,11 @@ function monthView() {
     const vac = de.some(e => e.allDay && e.cat === 'ferie');
     const visible = de.filter(e => !(e.allDay && e.cat === 'ferie'));
     const exam = visible.some(e => e.cat === 'exam' || e.cat === 'echeance');
-    const dots = [...new Set(visible.map(e => colEv(e)))].slice(0, 4).map(c => `<i style="background:${c}"></i>`).join('');
-    cells += `<div class="mc ${d.getMonth() !== m0.getMonth() ? 'out' : ''} ${sameDay(d, new Date()) ? 'today' : ''} ${sameDay(d, selDay) ? 'sel' : ''} ${vac ? 'vac' : ''} ${exam ? 'exam' : ''}" data-a="sel" data-d="${ymd(d)}">
-      <div class="dn">${d.getDate()}</div><div class="dots">${dots}</div></div>`;
+    cells += `<button class="mc ${d.getMonth() !== m0.getMonth() ? 'out' : ''} ${sameDay(d, new Date()) ? 'today' : ''} ${sameDay(d, selDay) ? 'sel' : ''} ${vac ? 'vac' : ''}" data-a="sel" data-d="${ymd(d)}">
+      <span class="dn">${d.getDate()}</span><i class="ws-dots">${visible.length ? `<em style="background:${exam ? 'var(--danger)' : 'var(--accent)'}"></em>` : ''}${visible.length > 3 ? '<em></em>' : ''}</i></button>`;
   }
-  const list = eventsOfDay(selDay);
-  return `<div class="month" id="swipe">${cells}</div>
-    <div class="legend small"><span><i class="lg-exam"></i>examen ou remise</span><span><i class="lg-vac"></i>vacances</span></div>
-    <div class="daylist-h">${cap(['aujourd\'hui', 'demain', 'hier'].includes(relDay(selDay)) ? relDay(selDay) + ' · ' + fmtDayShort(selDay) : fmtDay(selDay))}</div>
-    <div class="tl">${timeline(list, { gaps: true })}</div>`;
+  return `<div class="mnav"><button class="ws-nav" data-a="cal-prev" aria-label="Mois précédent">${icon('left')}</button><b>${cap(MOIS[m0.getMonth()])} ${m0.getFullYear()}</b><button class="ws-nav" data-a="cal-next" aria-label="Mois suivant">${icon('right')}</button></div>
+    <div class="month" id="swipe">${cells}</div>`;
 }
 
 function weekRows() {
@@ -562,11 +581,11 @@ function scrollGridToNow() {
 }
 
 function calShift(dir) {
-  const v = calView();
-  if (v === 'month') { calDate = new Date(calDate.getFullYear(), calDate.getMonth() + dir, 1); selDay = sameDay(startOfMonth(new Date()), calDate) ? startOfDay(new Date()) : calDate; }
-  else calDate = addDays(calDate, dir * (v === 'week' ? 7 : 1));
+  if (calView() === 'month') {
+    calDate = new Date(calDate.getFullYear(), calDate.getMonth() + dir, 1);
+    selDay = calDate.getMonth() === new Date().getMonth() && calDate.getFullYear() === new Date().getFullYear() ? startOfDay(new Date()) : calDate;
+  } else selDay = addDays(selDay, 7 * dir);
   renderCal();
-  if (v === 'day') scrollGridToNow();
 }
 
 // =====================================================================
@@ -776,7 +795,7 @@ async function runAssistant(text, { stay = false } = {}) {
 // MODE VOCAL : on parle, l'assistant répond à voix haute et agit
 // =====================================================================
 const VHINTS = ["Qu'est-ce que j'ai demain ?", "Rappelle-moi d'appeler maman demain à 18h", 'Ajoute boxe vendredi 21h', 'Quand est mon prochain examen ?'];
-let vOn = false, vBusy = false, vListening = false;
+let vOn = false, vBusy = false, vListening = false, vAuto = false;
 const vState = (t, s = '') => { $('#v-state').textContent = t; $('#voice').dataset.s = s; };
 
 function openVoice() {
@@ -803,12 +822,14 @@ async function vListen() {
   try { text = await listen({ onPartial: t => { $('#v-heard').textContent = `« ${t} »`; } }); }
   catch (e) {
     vListening = false;
-    vState(/not-allowed|service-not-allowed/.test(e.message) ? 'Autorise le micro pour me parler (ou écris en bas)' : 'Touche le micro pour parler', 'idle');
+    vState(vAuto ? 'Touche le micro pour me répondre 🎙️' : /not-allowed|service-not-allowed/.test(e.message) ? 'Autorise le micro pour me parler (ou écris en bas)' : 'Touche le micro pour parler', 'idle');
+    vAuto = false;
     return;
   }
   vListening = false;
+  const wasAuto = vAuto; vAuto = false;
   if (!vOn) return;
-  if (!text) { vState('Touche le micro pour parler', 'idle'); return; }
+  if (!text) { vState(wasAuto ? 'Touche le micro pour me répondre 🎙️' : 'Touche le micro pour parler', 'idle'); return; }
   vHandle(text);
 }
 async function vHandle(text) {
@@ -830,7 +851,7 @@ async function vHandle(text) {
   if (!vOn) return;
   if (set().voiceSpeak !== false) { vState('Je te réponds…', 'speak'); await speak(spoken(reply)); }
   if (!vOn) return;
-  if (canListen && set().voiceLoop !== false) vListen();
+  if (canListen && set().voiceLoop !== false) { vAuto = true; vListen(); }
   else vState('Touche le micro pour continuer', 'idle');
 }
 
@@ -1566,11 +1587,12 @@ const ACTIONS = {
   'task-quick-date': el => { const f = $('#task-form'); const n = +el.dataset.n; f.date.value = n < 0 ? '' : ymd(addDays(new Date(), n)); if (n < 0) f.time.value = ''; },
   'cat-toggle': el => { const s = set(); const k = el.dataset.cat; s.hiddenCats = s.hiddenCats.includes(k) ? s.hiddenCats.filter(x => x !== k) : [...s.hiddenCats, k]; save(); render(); },
   view: el => { set().calView = el.dataset.v; save(); renderCal(); if (el.dataset.v === 'day') scrollGridToNow(); },
+  'cal-today': () => { selDay = startOfDay(new Date()); calDate = startOfMonth(selDay); renderCal(); },
   'cal-prev': () => calShift(-1),
   'cal-next': () => calShift(1),
-  'cal-today': () => { calDate = startOfDay(new Date()); selDay = calDate; renderCal(); scrollGridToNow(); },
-  sel: el => { selDay = fromYmd(el.dataset.d); renderCal(); setTimeout(() => document.querySelector('.daylist-h')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); },
-  day: el => { calDate = fromYmd(el.dataset.d); selDay = calDate; set().calView = 'day'; save(); go('cal'); },
+  'cal-today-old': () => { calDate = startOfDay(new Date()); selDay = calDate; renderCal(); scrollGridToNow(); },
+  sel: el => { selDay = fromYmd(el.dataset.d); renderCal(); },
+  day: el => { selDay = fromYmd(el.dataset.d); calDate = startOfMonth(selDay); go('cal'); },
   'new-at': el => { const d = new Date(+el.dataset.t); d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0); editEvent(null, { start: d.getTime(), end: d.getTime() + 3600000 }); },
   slot: (el, ev) => {
     if (ev.target !== el) return;
@@ -1740,9 +1762,11 @@ $('#main').addEventListener('scroll', () => $('#top').classList.toggle('scrolled
 let sx = 0, sy = 0;
 $('#main').addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
 $('#main').addEventListener('touchend', e => {
-  if (tab !== 'cal' || !e.target.closest('#swipe')) return;
+  if (tab !== 'cal') return;
   const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
-  if (Math.abs(dx) > 60 && Math.abs(dy) < 50) calShift(dx < 0 ? 1 : -1);
+  if (Math.abs(dx) < 60 || Math.abs(dy) > 50) return;
+  if (e.target.closest('#swipe')) calShift(dx < 0 ? 1 : -1);
+  else if (e.target.closest('.day-list, #swipe-day')) { selDay = addDays(selDay, dx < 0 ? 1 : -1); if (calView() === 'month') calDate = startOfMonth(selDay); renderCal(); }
 }, { passive: true });
 
 let shY = 0;
