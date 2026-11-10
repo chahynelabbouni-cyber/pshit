@@ -1,10 +1,10 @@
-import { db } from './db.js?v=11';
-import { readTags } from './tags.js?v=11';
-import { Player, isIOS } from './player.js?v=11';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=11';
-import * as AI from './ai.js?v=11';
-import * as Voice from './voice.js?v=11';
-import * as Src from './sources.js?v=11';
+import { db } from './db.js?v=12';
+import { readTags } from './tags.js?v=12';
+import { Player, isIOS } from './player.js?v=12';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=12';
+import * as AI from './ai.js?v=12';
+import * as Voice from './voice.js?v=12';
+import * as Src from './sources.js?v=12';
 
 const BRAND = 'Maison Chahyn';
 
@@ -250,7 +250,23 @@ player.addEventListener('error', () => {
 });
 
 function playIds(ids, i = 0, opts = {}) {
+  if (S.miniGone) { S.miniGone = false; mini.classList.remove('gone'); }
   player.playList(ids, i, opts);
+  setTimeout(() => { updateNowPlaying(); placeYT(); }, 60);
+}
+
+// Une sélection YouTube devient une vraie playlist : carte dans le chat, et enregistrée si on l'a demandé
+async function ytMix(name, tracks, n) {
+  const key = 'chat-yt' + Date.now();
+  S.mixes[key] = { key, name, desc: 'Composée par le Concierge', emoji: '✦', tracks };
+  S.lastMix = S.mixes[key];
+  playIds(tracks.map(t => t.id), 0, { context: { label: name, route: '#/mix/' + key } });
+  if (/\b(playlist|cree|creer|fais|faire|compose|prepare|garde|enregistre)\b/.test(n)) {
+    for (const t of tracks) { t.saved = true; await db.put('tracks', t); }
+    await saveMixAsPlaylist(S.mixes[key]);
+    return `Ta playlist « ${name} » est prête : ${plural(tracks.length, 'titre')}, enregistrée dans ta bibliothèque. Je la lance.`;
+  }
+  return `Je lance « ${name} » : ${plural(tracks.length, 'titre')}.`;
 }
 
 // ======================================================================
@@ -1247,7 +1263,8 @@ async function aiSend(text, { navigate = true } = {}) {
   if (!quick) { try { quick = await smartCommand(text); } catch (e) { console.warn(e); } }
   if (!quick && !tracks.length) quick = 'Ta bibliothèque est vide pour l\'instant. Demande-moi une radio (« mets Skyrock »), ajoute ta clé YouTube dans les Réglages pour que je trouve n\'importe quel son, ou importe tes fichiers.';
   if (quick) {
-    S.chat.push({ role: 'assistant', text: quick });
+    const lm = S.lastMix; S.lastMix = null;
+    S.chat.push({ role: 'assistant', text: quick, mix: lm ? { name: lm.name, desc: lm.desc, ids: lm.tracks.map(t => t.id) } : null });
     saveJSON('onde.chat', S.chat);
     if (S.route?.name === 'ai') { $('#ai-log').innerHTML = renderChat(); main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' }); }
     return { reply: quick };
@@ -1332,7 +1349,7 @@ const GENRES = [
   ['annees 90', /\b(annees 90|90s)\b/, '90s', 'années 90'],
   ['chanson francaise', /\b(chanson francaise|variete)\b/, 'chanson francaise', 'chanson française'],
 ];
-const MOOD_RADIO = { ecole: ['lofi', 'lofi pour travailler'], sport: ['edm', 'musique sport motivation'], chill: ['chill', 'chill music'], soiree: ['dance', 'musique soirée'], nuit: ['ambient', 'musique douce pour dormir'], matin: ['pop', 'musique bonne humeur'], trajet: ['hits', 'hits du moment'] };
+const MOOD_RADIO = { ecole: ['lofi', 'lofi hip hop pour étudier'], sport: ['edm', 'rap motivation muscu son'], chill: ['chill', 'chill music'], soiree: ['dance', 'musique soirée'], nuit: ['ambient', 'musique douce pour dormir'], matin: ['pop', 'musique bonne humeur'], trajet: ['hits', 'hits du moment'] };
 
 function cleanAsk(text) {
   let n = norm(text).replace(/[.!?,;:"«»]/g, ' ').replace(/['’`-]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1349,6 +1366,7 @@ async function smartCommand(text) {
   const words = n.split(' ').filter(Boolean).length;
   const cur = player.current;
   S.cmdPaused = false;
+  S.lastMix = null;
   if (!n) return null;
 
   // --- minuteur
@@ -1422,7 +1440,7 @@ async function smartCommand(text) {
     if (S.settings.ytKey && !/radio/.test(ask)) {
       try {
         const res = await Src.ytSearch(S.settings.ytKey, ytq, 20);
-        if (res.length) { const ts = res.map(x => remoteTrack(x, 'yt')); playIds(ts.map(t => t.id), 0, { context: { label: label } }); return `Je lance du ${label} sur YouTube.`; }
+        if (res.length) return await ytMix(label.charAt(0).toUpperCase() + label.slice(1), res.map(x => remoteTrack(x, 'yt')), n);
       } catch { /* on tente la radio */ }
     }
     try {
@@ -1438,7 +1456,7 @@ async function smartCommand(text) {
     if (mood) {
       const [tag, ytq] = MOOD_RADIO[mood[0]];
       if (S.settings.ytKey) {
-        try { const res = await Src.ytSearch(S.settings.ytKey, ytq, 20); if (res.length) { const ts = res.map(x => remoteTrack(x, 'yt')); playIds(ts.map(t => t.id), 0, { context: { label: AI.MOODS[mood[0]]?.label || ytq } }); return `Je lance « ${AI.MOODS[mood[0]]?.label || ytq} » sur YouTube.`; } } catch { /* radio */ }
+        try { const res = await Src.ytSearch(S.settings.ytKey, ytq, 25); if (res.length) return await ytMix(AI.MOODS[mood[0]]?.label || ytq, res.map(x => remoteTrack(x, 'yt')), n); } catch { /* radio */ }
       }
       try { const list = await Src.radioByTag(tag, 5); if (list.length) { const t = remoteTrack(list[0], 'radio'); playIds([t.id], 0, { context: { label: 'Radio' } }); return `Pour ça, je te mets la radio ${t.title}.`; } } catch { /* rien */ }
     }
