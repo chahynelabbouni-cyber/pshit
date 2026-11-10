@@ -48,7 +48,8 @@
 
 <div id="app">
   <header id="top">
-    <button id="btn-me" class="me-btn" aria-label="Mon profil"><span id="me-avatar">🥊</span></button>
+    <button id="btn-back" class="icon-btn back-btn" aria-label="Retour" hidden><svg><use href="#i-left"/></svg></button>
+    <button id="btn-me" class="me-btn" aria-label="Réglages"><span id="me-avatar">🥊</span></button>
     <div class="top-title">
       <div id="top-kicker" class="kicker"></div>
       <h1 id="top-h"></h1>
@@ -64,6 +65,7 @@
     <section id="v-todo" class="view" hidden></section>
     <section id="v-notes" class="view" hidden></section>
     <section id="v-me" class="view" hidden></section>
+    <section id="v-rem" class="view" hidden></section>
     <section id="v-ai" class="view" hidden></section>
   </main>
 
@@ -72,17 +74,25 @@
   <button id="fab" aria-label="Ajouter"><svg><use href="#i-plus"/></svg></button>
 
   <nav id="tabs">
-    <button data-tab="today" class="on"><svg><use href="#i-today"/></svg><span>Aujourd'hui</span></button>
-    <button data-tab="cal"><svg><use href="#i-cal"/></svg><span>Agenda</span></button>
-    <button data-tab="ai" class="tab-ai"><span class="ai-orb"><svg><use href="#i-spark"/></svg></span><span>Assistant</span></button>
-    <button data-tab="todo"><svg><use href="#i-memo"/></svg><span>À faire</span></button>
-    <button data-tab="notes"><svg><use href="#i-note"/></svg><span>Notes</span></button>
+    <button data-tab="today" class="on"><svg><use href="#i-today"/></svg><span>Accueil</span></button>
+    <button data-tab="voice" class="tab-ai"><span class="ai-orb"><svg><use href="#i-mic"/></svg></span><span>Parler</span></button>
+    <button data-tab="cal"><svg><use href="#i-cal"/></svg><span>Planning</span></button>
   </nav>
 </div>
 
 <div id="sheet-wrap" hidden>
   <div id="sheet-bg"></div>
   <div id="sheet" role="dialog" aria-modal="true"><div class="grab"></div><div id="sheet-body"></div></div>
+</div>
+<div id="voice" hidden>
+  <button id="voice-close" class="icon-btn" aria-label="Fermer"><svg><use href="#i-x"/></svg></button>
+  <div class="v-state" id="v-state">Je t'écoute…</div>
+  <button id="v-orb" class="v-orb" aria-label="Parler"><svg><use href="#i-mic"/></svg></button>
+  <div class="v-heard" id="v-heard"></div>
+  <div class="v-reply" id="v-reply"></div>
+  <div class="v-acts" id="v-acts"></div>
+  <div class="v-hints" id="v-hints"></div>
+  <form class="v-type" id="v-type"><input id="v-input" placeholder="…ou écris ici" autocomplete="off" enterkeyhint="send"><button aria-label="Envoyer"><svg><use href="#i-send"/></svg></button></form>
 </div>
 <div id="toast" hidden></div>
 <input type="file" id="file-in" accept=".json,.ics,application/json,text/calendar" hidden>
