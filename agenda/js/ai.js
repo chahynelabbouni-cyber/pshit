@@ -69,8 +69,14 @@ export const revisionTitle = exam => `Révision ${subject(exam.title.replace(/^.
 // ---------------------------------------------------------------------
 // Réponses locales
 // ---------------------------------------------------------------------
+// Titre court et lisible : sans ⚠️, sans (G2), sans le nom du prof
+export function cleanT(e) {
+  let t = e.title.replace(/⚠️?\s*/g, '').replace(/\s*\((?:G\d|TD\d[^)]*|CC\d?|Visio|en visio|facultatif|obligatoire)\)/gi, '').trim();
+  if (['cours', 'exam'].includes(e.cat)) t = t.replace(/\s[–—-]\s(?:M\.|Mme|Mr|Dr)?\s?[A-ZÉ][\w.\-' ]*$/u, '').trim();
+  return t;
+}
 function listLine(e) {
-  return e.allDay ? `• ${e.title} (journée)` : `• ${hm(e.start)}–${hm(e.end)} ${e.title}${e.location ? ' · ' + e.location : ''}`;
+  return e.allDay ? `• ${cleanT(e)} (toute la journée)` : `• ${hm(e.start)} : ${cleanT(e)}`;
 }
 
 function answerQuery(text, p) {
@@ -112,7 +118,8 @@ function answerQuery(text, p) {
     evs.forEach(e => { const k = startOfDay(e.start).getTime(); if (!byDay.has(k)) byDay.set(k, []); byDay.get(k).push(e); });
     return `${cap(label)} :\n` + [...byDay].map(([k, l]) => `${cap(fmtDay(k))}\n` + l.map(listLine).join('\n')).join('\n');
   }
-  return `${cap(label)}, ${evs.length} élément${evs.length > 1 ? 's' : ''} :\n` + evs.map(listLine).join('\n');
+  const timed = evs.filter(e => !e.allDay);
+  return `${cap(label)}, tu as ${evs.length} chose${evs.length > 1 ? 's' : ''} de prévue${evs.length > 1 ? 's' : ''}${timed.length ? `, de ${hm(timed[0].start)} à ${hm(Math.max(...timed.map(e => e.end)))}` : ''} :\n` + evs.map(listLine).join('\n');
 }
 
 export function localAssistant(text) {
@@ -141,7 +148,7 @@ export function localAssistant(text) {
     const now = Date.now();
     const isExam = /(examen|exam|controle|partiel|cc)/.test(kw);
     const e = eventsBetween(now, now + 200 * DAY).sort((a, b) => a.start - b.start).find(ev => isExam ? ev.cat === 'exam' : words.length && words.every(w => norm(ev.title + ' ' + ev.location).includes(w)));
-    if (e) return { reply: `${e.title} : ${relDay(e.start)}${e.allDay ? '' : ' à ' + hm(e.start)} (${countdown(e.start)})${e.location ? ', ' + e.location : ''}.`, actions: [] };
+    if (e) return { reply: `${cleanT(e)} : ${relDay(e.start)}${e.allDay ? '' : ' à ' + hm(e.start)}${e.location ? ', ' + e.location : ''}.`, actions: [] };
     if (words.length) return { reply: `Je ne trouve rien de prévu pour « ${nm[1].trim()} ».`, actions: [] };
   }
   // supprimer / annuler
@@ -181,6 +188,22 @@ export function localAssistant(text) {
       actions: plan.map(s => ({ type: 'create_event', title: revisionTitle(ex.ref), start: s.start, end: s.end, category: 'revision' })),
     };
   }
+  // rappel X min / h avant un événement : « mets-moi un rappel 30 min avant la boxe »
+  const before = /(\d+)\s?(min|minutes?|h|heures?)\s+avant\b/.exec(tn);
+  if (before && /(rappel|previen|alerte|rappelle)/.test(tn)) {
+    const e = findEvent(text.replace(before[0], ' '), p);
+    const min = +before[1] * (before[2].startsWith('h') ? 60 : 1);
+    if (!e) return { reply: 'Pour quel événement ? Ex : « rappel 30 min avant la boxe ».', actions: [] };
+    return { reply: `D'accord, je te préviens ${fmtDuration(min * MIN)} avant « ${cleanT(e)} » (${relDay(e.start)} ${hm(e.start)}).`, actions: [{ type: 'set_event_reminder', id: e.id, minutes: min }] };
+  }
+  // rappel à un moment précis : « rappelle-moi d'appeler maman demain à 18h »
+  if (/(rappelle|rappel|previens|previens[- ]moi|alerte|reveille|n'oublie pas de me)/.test(tn) && (p.hasTime || p.explicitDay)) {
+    let at = p.start;
+    if (!p.hasTime) at = new Date(p.start).setHours(9, 0, 0, 0);
+    const what = (p.title || 'Rappel').replace(/^(un |le )?rappel\s*(pour|de|d')?\s*/i, '') || 'Rappel';
+    const title = what[0].toUpperCase() + what.slice(1);
+    return { reply: `C'est noté, je te le rappelle ${relDay(at)} à ${hm(at)} : « ${title} ».`, actions: [{ type: 'add_reminder', title, start: at }] };
+  }
   if (p.intent === 'query') return { reply: answerQuery(text, p), actions: [] };
   if (p.intent === 'note') {
     if (!p.title) return { reply: 'Dis-moi ce que tu veux noter 🙂', actions: [] };
@@ -209,9 +232,9 @@ const MODEL = 'claude-opus-5-5';
 const ACTION = {
   type: 'object',
   additionalProperties: false,
-  required: ['type', 'ref', 'title', 'start', 'end', 'all_day', 'location', 'category', 'due', 'priority', 'text'],
+  required: ['type', 'ref', 'title', 'start', 'end', 'all_day', 'location', 'category', 'due', 'priority', 'text', 'minutes'],
   properties: {
-    type: { type: 'string', enum: ['create_event', 'update_event', 'delete_event', 'add_task', 'complete_task', 'delete_task', 'add_note'] },
+    type: { type: 'string', enum: ['create_event', 'update_event', 'delete_event', 'add_task', 'complete_task', 'delete_task', 'add_note', 'add_reminder', 'set_event_reminder'] },
     ref: { type: 'string', description: 'Référence (#E12, #T3) de l\'élément existant pour update/delete/complete, sinon vide.' },
     title: { type: 'string' },
     start: { type: 'string', description: 'YYYY-MM-DDTHH:MM (heure locale) ou YYYY-MM-DD si journée entière. Vide si non concerné.' },
@@ -222,6 +245,7 @@ const ACTION = {
     due: { type: 'string', description: 'Pour une tâche : YYYY-MM-DD ou YYYY-MM-DDTHH:MM, vide si aucune date.' },
     priority: { type: 'string', enum: ['', 'haute', 'normale', 'basse'] },
     text: { type: 'string', description: 'Contenu de la note (add_note).' },
+    minutes: { type: 'integer', description: 'set_event_reminder : minutes avant l\'événement. Sinon 0.' },
   },
 };
 const SCHEMA = {
@@ -266,6 +290,8 @@ export async function askClaude(text) {
   const system = [
     `Tu es l'assistant personnel intégré à l'agenda de ${st.settings.name}. Tu gères son calendrier, son échéancier (tâches avec date) et ses notes.`,
     st.settings.about ? `À propos de ${st.settings.name} : ${st.settings.about}` : '',
+    'Pour « rappelle-moi de X à tel moment », utilise add_reminder (title = X, start = moment). Pour « préviens-moi N min avant tel événement », utilise set_event_reminder (ref + minutes).',
+    'Tes réponses sont souvent lues à voix haute : fais des phrases courtes et naturelles, sans listes à puces longues.',
     'Quand on te demande de programmer, ajouter, déplacer, annuler ou noter quelque chose, renvoie les actions correspondantes : elles sont appliquées directement dans l\'agenda (et sur Google Agenda s\'il est connecté).',
     'Pour modifier/supprimer un élément existant, utilise sa référence (#E.. ou #T..). Vérifie les conflits d\'horaires et signale-les. Pour planifier des révisions, place-les dans des créneaux libres raisonnables (pas pendant les cours, pas après 22h).',
     'Si la demande est une question, réponds sans action. Ne crée jamais un doublon d\'un événement déjà présent.',
@@ -304,8 +330,18 @@ export async function askClaude(text) {
     return {
       type: a.type, id: refId(a.ref), title: a.title, location: a.location, category: a.category || undefined,
       start: s?.t, end: e ? e.t : s ? s.t + (allDay ? DAY : 3600000) : undefined, allDay,
-      due: d?.t ?? null, dueTime: !!d?.time, priority: a.priority || 'normale', text: a.text,
+      due: d?.t ?? null, dueTime: !!d?.time, priority: a.priority || 'normale', text: a.text, minutes: a.minutes,
     };
   });
   return { reply: out.reply, actions };
+}
+
+// Transforme une réponse écrite en phrase agréable à écouter
+export function spoken(text) {
+  return text
+    .replace(/[✦★⚠️🎯⏳📝🥊🌿🙌👌💪🎉👋«»]/gu, '')
+    .replace(/:\s*\n•\s*/g, '. ').replace(/\n•\s*/g, '. ').replace(/^•\s*/gm, '')
+    .replace(/(\d{1,2})h(\d{2})\b/g, '$1 h $2').replace(/(\d{1,2})h\b/g, '$1 heures')
+    .replace(/(\d+) min\b/g, '$1 minutes').replace(/\b1 heures\b/g, '1 heure').replace(/ · /g, ', ').replace(/\(J-(\d+)\)/g, '(dans $1 jours)')
+    .replace(/\s*:\s*\./g, '.').replace(/\n+/g, '. ').replace(/\s{2,}/g, ' ').replace(/\s+([.,])/g, '$1').replace(/\.\s*\./g, '.').trim();
 }

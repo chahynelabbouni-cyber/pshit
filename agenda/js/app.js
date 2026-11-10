@@ -7,7 +7,7 @@ import {
   DAY, MIN, startOfDay, addDays, sameDay, startOfWeek, startOfMonth, dayDiff, pad, hm, hm2, ymd, fromYmd,
   cap, fmtDay, fmtDayShort, relDay, fmtDuration, countdown, JOURS_C, MOIS,
 } from './dates.js';
-import { localAssistant, askClaude, revisionPlan, revisionTitle } from './ai.js';
+import { localAssistant, askClaude, revisionPlan, revisionTitle, spoken } from './ai.js';
 import {
   subjects, subjectOf, subjectColor, goalProgress, toggleCheck, busyMinutes, dayLoad, briefing, greetingWord,
   templates, countdownList, stats,
@@ -72,12 +72,17 @@ function applyLook() {
 // =====================================================================
 // Navigation
 // =====================================================================
+const ROOT_TABS = ['today', 'cal'];
+const TITLES = { todo: ['À faire', 'Mes échéances'], notes: ['Notes', 'À ne pas oublier'], rem: ['Rappels', 'Mes rappels'], me: ['Mon espace', ''], ai: ['Assistant', 'Conversation'] };
 function go(t) {
+  if (t === 'voice') return openVoice();
   tab = t;
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
   document.querySelectorAll('.view').forEach(v => { v.hidden = v.id !== 'v-' + t; });
-  $('#fab').hidden = t === 'ai' || t === 'me';
+  $('#fab').hidden = !['cal', 'todo', 'notes', 'rem'].includes(t);
   $('#ai-bar').hidden = t !== 'ai';
+  $('#btn-back').hidden = ROOT_TABS.includes(t);
+  $('#btn-me').hidden = !ROOT_TABS.includes(t);
   render();
   $('#main').scrollTop = 0;
   if (t === 'cal' && set().calView === 'day') scrollGridToNow();
@@ -88,9 +93,8 @@ function header(kicker, title) { $('#top-kicker').textContent = kicker; $('#top-
 
 function render() {
   applyLook();
-  ({ today: renderToday, cal: renderCal, todo: renderTodo, notes: renderNotes, me: renderMe, ai: renderAi })[tab]();
+  ({ today: renderToday, cal: renderCal, todo: renderTodo, notes: renderNotes, rem: renderRem, me: renderMe, ai: renderAi })[tab]();
   $('#me-avatar').textContent = set().avatar;
-  $('#btn-me').classList.toggle('on', tab === 'me');
   const sync = $('#btn-sync');
   sync.hidden = !set().googleConnected;
   sync.classList.toggle('ok', Date.now() - set().lastSync < 3600000);
@@ -351,11 +355,40 @@ function insights() {
   return out;
 }
 
+function nextUp() {
+  const now = Date.now();
+  const cur = eventsOfDay(new Date()).find(e => !e.allDay && e.start <= now && e.end > now);
+  if (cur) return { e: cur, lbl: `En ce moment, jusqu'à ${hm(cur.end)}` };
+  const e = eventsBetween(now, now + 21 * DAY).find(x => !x.allDay && x.start > now);
+  if (!e) return null;
+  const rd = relDay(e.start);
+  return { e, lbl: `${rd === "aujourd'hui" ? "Aujourd'hui" : cap(rd)} à ${hm(e.start)}` };
+}
+
 function renderToday() {
   const now = new Date();
-  header(cap(fmtDay(now)), `${greetingWord()}, ${set().name || 'toi'}`);
-  $('#v-today').innerHTML = set().homeModules.filter(m => m.on && HOME[m.id]).map(m => HOME[m.id]()).join('') +
-    `<button class="link-btn" data-a="set-home">✎ Choisir ce qui s'affiche ici</button>`;
+  const s = set();
+  header(cap(fmtDay(now)), `${greetingWord()}, ${s.name || 'toi'}`);
+  const n = nextUp();
+  const today = eventsOfDay(now).filter(e => !e.allDay);
+  const left = today.filter(e => e.end > Date.now()).length;
+  const due7 = deadlines({ from: Date.now() - DAY }).filter(d => !d.done && d.due < Date.now() + 7 * DAY).length;
+  const rems = S().tasks.filter(t => t.remind && !t.done && t.remind > Date.now()).length;
+  const g = s.goals[0] ? goalProgress(s.goals[0]) : null;
+  const tiles = [
+    ['cal', '📅', 'Mon planning', today.length ? `${left} encore aujourd'hui` : "Rien aujourd'hui"],
+    ['todo', '⏳', 'À faire', due7 ? `${due7} cette semaine` : 'Rien d\'urgent'],
+    ['rem', '⏰', 'Rappels', rems ? `${rems} à venir` : 'Aucun'],
+    ['notes', '📝', 'Notes', S().notes.length ? `${S().notes.length} note${S().notes.length > 1 ? 's' : ''}` : 'Vide'],
+    ['me:subjects', '📚', 'Mes cours', `${subjects().length} matières`],
+    ['me:goals', '🎯', 'Objectifs', g ? `${s.goals[0].emoji} ${g.done}/${s.goals[0].target} cette semaine` : 'À définir'],
+  ];
+  $('#v-today').innerHTML = `
+    ${!S().events.length ? `<div class="hero"><div class="ttl">Ton agenda est vide</div><div class="meta">Ouvre le lien d'import reçu, ou dis-moi quoi ajouter.</div></div>` :
+      n ? `<button class="next-card" style="--c:${colEv(n.e)}" data-a="ev" data-id="${n.e.id}"><span class="nc-lbl">${n.lbl}</span><span class="nc-ttl">${esc(shortTitle(n.e))}</span>${n.e.location ? `<span class="nc-loc">${esc(n.e.location)}</span>` : ''}</button>`
+        : `<div class="next-card"><span class="nc-ttl">Rien de prévu 🌿</span></div>`}
+    <button class="talk" data-a="voice"><span class="talk-orb">${icon('mic')}</span><span><b>Parle-moi</b><small>« Qu'est-ce que j'ai demain ? »</small></span></button>
+    <div class="tiles">${tiles.map(([to, e, t, sub]) => `<button class="tile" data-a="open" data-to="${to}"><span class="t-ic">${e}</span><b>${t}</b><small>${esc(sub)}</small></button>`).join('')}</div>`;
 }
 
 function weekChart() {
@@ -539,8 +572,23 @@ function calShift(dir) {
 // =====================================================================
 // MÉMO : échéancier + notes
 // =====================================================================
+function renderRem() {
+  const [k, t] = TITLES.rem; header(k, t);
+  const now = Date.now();
+  const tasks = S().tasks.filter(x => x.remind);
+  const next = tasks.filter(x => !x.done && x.remind > now - 60000).sort((a, b) => a.remind - b.remind);
+  const past = tasks.filter(x => x.done || x.remind <= now - 60000).sort((a, b) => b.remind - a.remind).slice(0, 10);
+  const evRem = eventsBetween(now, now + 14 * DAY).filter(e => e.reminder != null && !e.allDay);
+  const row = x => `<div class="rem ${x.done ? 'done' : ''}"><button class="check ${x.done ? 'on' : ''}" data-a="task-done" data-id="${x.id}">${icon('check')}</button><div class="grow" data-a="task" data-id="${x.id}"><b>${esc(x.title)}</b><small>${cap(relDay(x.remind))} à ${hm(x.remind)}</small></div><button class="x-mini" data-a="task-del" data-id="${x.id}" aria-label="Supprimer">✕</button></div>`;
+  $('#v-rem').innerHTML = `
+    ${quickBar('q-rem', 'Ex : « appeler maman demain 18h »')}
+    ${next.length ? next.map(row).join('') : '<div class="empty big-empty">Aucun rappel ⏰<br><small>Dis « rappelle-moi de… » à l\'assistant</small></div>'}
+    ${evRem.length ? `<div class="group-h">Alertes avant un événement</div>${evRem.map(e => `<div class="rem" data-a="ev" data-id="${e.id}"><span class="t-ic">🔔</span><div class="grow"><b>${esc(shortTitle(e))}</b><small>${fmtDuration((e.reminder || 0) * MIN)} avant · ${relDay(e.start)} ${hm(e.start)}</small></div></div>`).join('')}` : ''}
+    ${past.length ? `<div class="group-h">Passés</div>${past.map(row).join('')}` : ''}`;
+}
+
 function renderTodo() {
-  header('À faire', 'Mes échéances');
+  header(...TITLES.todo);
   $('#v-todo').innerHTML = dueView();
 }
 function renderNotes() {
@@ -607,7 +655,7 @@ function notesView() {
 const ME_SEGS = [['goals', 'Objectifs'], ['subjects', 'Matières'], ['focus', 'Focus'], ['stats', 'Stats'], ['cds', 'Dates']];
 function renderMe() {
   const s = set();
-  header('Mon espace', s.name);
+  header('Mon espace', ({ goals: 'Mes objectifs', subjects: 'Mes cours', focus: 'Réviser', stats: 'Mes stats' })[s.meSeg] || 'Mon espace');
   const seg = ME_SEGS.some(([k]) => k === s.meSeg) ? s.meSeg : 'goals';
   let body = '';
   if (seg === 'goals') body = s.goals.length ? `<div class="goals">${s.goals.map(goalTile).join('')}</div><button class="link-btn" data-a="set-goals">✎ Gérer mes objectifs</button>` : `<div class="empty">Aucun objectif.</div><button class="btn block" data-a="set-goals">+ Ajouter un objectif</button>`;
@@ -616,12 +664,7 @@ function renderMe() {
   if (seg === 'stats') body = statsCard();
   if (seg === 'cds') { const cds = countdownList(); body = (cds.length ? `<div class="cds">${cds.map(cdTile).join('')}</div>` : '<div class="empty">Aucune date pour l\'instant.</div>') + `<button class="link-btn" data-a="cd-new">+ Ajouter une date importante</button>`; }
   $('#v-me').innerHTML = `
-    <div class="profile">
-      <div class="avatar big" data-a="settings">${esc(s.avatar)}</div>
-      <div class="grow"><h2>${esc(s.name)}</h2><div class="muted small">Ton espace perso</div></div>
-      <button class="btn small" data-a="settings">${icon('gear')} Réglages</button>
-    </div>
-    <div class="chips me-tabs">${ME_SEGS.map(([k, l]) => `<button class="chip ${seg === k ? 'on' : ''}" data-a="me-seg" data-s="${k}">${l}</button>`).join('')}</div>
+    <div class="seg small">${ME_SEGS.filter(([k]) => k !== 'cds').map(([k, l]) => `<button class="${seg === k ? 'on' : ''}" data-a="me-seg" data-s="${k}">${l}</button>`).join('')}</div>
     <div class="card">${body}</div>`;
 }
 
@@ -696,31 +739,99 @@ function renderAi() {
   if (!$('#q-ai')) $('#ai-bar').innerHTML = quickBar('q-ai', 'Écris ici…');
 }
 
-async function runAssistant(text, { stay = false } = {}) {
+// Cœur de l'assistant : comprend, agit sur l'agenda, garde l'historique
+async function assistantCore(text, onPending) {
   const st = S();
-  text = text.trim();
-  if (!text) return;
   st.chat.push({ role: 'user', text });
   st.chat.push({ role: 'assistant', text: '…' });
   if (st.chat.length > 60) st.chat.splice(0, st.chat.length - 60);
   save();
-  if (tab === 'ai') { renderAi(); $('#main').scrollTop = 1e6; }
+  onPending?.();
   let res;
   try {
     res = st.settings.claudeKey ? await askClaude(text) : localAssistant(text);
   } catch (err) {
     console.warn(err);
     res = localAssistant(text);
-    res.reply = `(IA en ligne indisponible : ${err.message || err}. Je fais au mieux hors-ligne.)\n` + res.reply;
   }
   const idx = st.chat.length - 1;
   const acts = await applyActions(res.actions || [], idx);
   st.chat[idx] = { role: 'assistant', text: res.reply, acts: acts.map(a => ({ label: a.label, cat: a.cat, g: a.g || '' })) };
   save();
-  if (set().voiceReply) speak(res.reply);
-  if (tab === 'ai') { renderAi(); $('#main').scrollTop = 1e6; }
-  else if (acts.length && stay) { render(); toast(res.reply, acts.length === 1 ? { label: 'Annuler', fn: () => doUndo(`${idx}:0`) } : null); }
+  return { reply: res.reply, acts, idx };
+}
+
+async function runAssistant(text, { stay = false } = {}) {
+  text = text.trim();
+  if (!text) return;
+  const { reply, acts, idx } = await assistantCore(text, () => { if (tab === 'ai') { renderAi(); $('#main').scrollTop = 1e6; } });
+  if (tab === 'ai') { renderAi(); $('#main').scrollTop = 1e6; return; }
+  render();
+  if (acts.length) toast(reply, acts.length === 1 ? { label: 'Annuler', fn: () => doUndo(`${idx}:0`) } : null);
+  else if (stay) toast(reply);
   else go('ai');
+}
+
+// =====================================================================
+// MODE VOCAL : on parle, l'assistant répond à voix haute et agit
+// =====================================================================
+const VHINTS = ["Qu'est-ce que j'ai demain ?", "Rappelle-moi d'appeler maman demain à 18h", 'Ajoute boxe vendredi 21h', 'Quand est mon prochain examen ?'];
+let vOn = false, vBusy = false, vListening = false;
+const vState = (t, s = '') => { $('#v-state').textContent = t; $('#voice').dataset.s = s; };
+
+function openVoice() {
+  if (!$('#voice').hidden) return;
+  $('#voice').hidden = false; vOn = true;
+  $('#v-heard').textContent = '';
+  $('#v-reply').textContent = `Salut ${set().name} ! Qu'est-ce que je peux faire pour toi ?`;
+  $('#v-acts').innerHTML = '';
+  $('#v-hints').innerHTML = VHINTS.map(h => `<button class="chip" data-a="v-hint">${esc(h)}</button>`).join('');
+  if (!canListen) { vState('Le micro n\'est pas disponible ici : écris ta demande', 'idle'); $('#v-input').focus(); return; }
+  vListen();
+}
+function closeVoice() {
+  vOn = false; stopListening(); stopSpeaking();
+  $('#voice').hidden = true;
+  render();
+}
+async function vListen() {
+  if (!vOn || vBusy || vListening) return;
+  stopSpeaking();
+  vListening = true;
+  vState('Je t\'écoute…', 'listen');
+  let text = '';
+  try { text = await listen({ onPartial: t => { $('#v-heard').textContent = `« ${t} »`; } }); }
+  catch (e) {
+    vListening = false;
+    vState(/not-allowed|service-not-allowed/.test(e.message) ? 'Autorise le micro pour me parler (ou écris en bas)' : 'Touche le micro pour parler', 'idle');
+    return;
+  }
+  vListening = false;
+  if (!vOn) return;
+  if (!text) { vState('Touche le micro pour parler', 'idle'); return; }
+  vHandle(text);
+}
+async function vHandle(text) {
+  if (vBusy) return;
+  vBusy = true;
+  $('#v-heard').textContent = `« ${text} »`;
+  $('#v-hints').innerHTML = '';
+  if (/^\s*(merci|c'est (bon|tout)|stop|au revoir|ferme|à plus)\b/i.test(text)) {
+    $('#v-reply').textContent = 'Avec plaisir ! À plus 👋';
+    vBusy = false;
+    if (set().voiceSpeak !== false) await speak('Avec plaisir, à plus !');
+    closeVoice(); return;
+  }
+  vState('Je réfléchis…', 'think');
+  const { reply, acts, idx } = await assistantCore(text);
+  $('#v-reply').textContent = reply;
+  $('#v-acts').innerHTML = acts.map((a, j) => `<div class="act" style="--c:${col(a.cat)}"><div class="grow">${esc(a.label)}</div><button data-a="undo" data-k="${idx}:${j}">Annuler</button>${a.g ? `<a class="gbtn" href="${esc(a.g)}" target="_blank" rel="noopener">+ Google</a>` : ''}</div>`).join('');
+  vBusy = false;
+  if (!vOn) return;
+  if (set().voiceSpeak !== false) { vState('Je te réponds…', 'speak'); await speak(spoken(reply)); }
+  if (!vOn) return;
+  if (canListen && set().voiceLoop !== false) vListen();
+  else vState('Touche le micro pour continuer', 'idle');
 }
 
 async function applyActions(actions, msgIdx) {
@@ -758,6 +869,15 @@ async function applyActions(actions, msgIdx) {
       } else if (a.type === 'delete_task' && a.id) {
         const t = S().tasks.find(x => x.id === a.id);
         if (t) { const c = { ...t }; deleteTask(t.id); r = { label: `✕ ${c.title}`, cat: c.cat, undo: () => { S().tasks.push(c); save(); } }; }
+      } else if (a.type === 'add_reminder' && a.start) {
+        const t = addTask({ title: a.title || 'Rappel', due: a.start, dueTime: true, remind: a.start, cat: a.category || undefined });
+        r = { label: `⏰ ${t.title} · ${relDay(t.remind)} ${hm(t.remind)}`, cat: t.cat, undo: () => deleteTask(t.id) };
+      } else if (a.type === 'set_event_reminder' && a.id) {
+        const ev = S().events.find(e => e.id === a.id);
+        if (!ev) continue;
+        const before = ev.reminder;
+        ev.reminder = Math.max(0, +a.minutes || 0); save();
+        r = { label: `🔔 ${shortTitle(ev)} · alerte ${fmtDuration(ev.reminder * MIN)} avant`, cat: ev.cat, undo: () => { ev.reminder = before; save(); } };
       } else if (a.type === 'add_note') {
         const body = a.text || a.title || '';
         const n = addNote({ title: a.text && a.title && a.title !== a.text ? a.title : '', text: body, pinned: true, folder: 'Perso' });
@@ -1124,7 +1244,7 @@ let obStep = 0;
 function openOnboarding(step = 0) {
   obStep = step;
   const s = set();
-  const dots = `<div class="ob-dots">${[0, 1, 2].map(i => `<i class="${i === step ? 'on' : ''}"></i>`).join('')}</div>`;
+  const dots = `<div class="ob-dots">${[0, 1].map(i => `<i class="${i === step ? 'on' : ''}"></i>`).join('')}</div>`;
   let body = '';
   if (step === 0) body = `<div class="ob-emoji">${esc(s.avatar)}</div><h2>Salut ! Comment tu t'appelles ?</h2>
     <input class="big-input" data-set="name" value="${esc(s.name)}" placeholder="Ton prénom">
@@ -1136,7 +1256,7 @@ function openOnboarding(step = 0) {
     ${INTERESTS.map(([id, e, l]) => { const on = s.homeModules.find(m => m.id === id)?.on; return `<button class="ob-opt ${on ? 'on' : ''}" data-a="ob-int" data-id="${id}"><span>${e}</span><span class="grow">${l}</span><span class="box">${on ? '✓' : ''}</span></button>`; }).join('')}
     <p class="dim small">Tu pourras changer ça quand tu veux dans Réglages.</p>`;
   openSheet(`<div class="onboard">${dots}${body}
-    <div class="row" style="margin-top:18px">${step ? `<button class="btn" data-a="ob-prev">Retour</button>` : ''}<button class="btn gold grow" data-a="ob-next">${step < 2 ? 'Suivant' : 'C\'est parti !'}</button></div></div>`);
+    <div class="row" style="margin-top:18px">${step ? `<button class="btn" data-a="ob-prev">Retour</button>` : ''}<button class="btn gold grow" data-a="ob-next">${step < 1 ? 'Suivant' : 'C\'est parti !'}</button></div></div>`);
 }
 
 // ---------- Réglages ----------
@@ -1153,15 +1273,14 @@ function openSettings() {
     <div class="palettes">${Object.entries(PALETTES).map(([k, p]) => `<button class="pal ${s.palette === k ? 'on' : ''}" data-a="palette" data-v="${k}" style="background:${p.bg};color:${p.text};border-color:${s.palette === k ? p.accent : 'transparent'}"><i style="background:${p.accent}"></i>${p.name}</button>`).join('')}</div>
     <div class="field" style="margin-top:12px"><label>Taille du texte</label><div class="seg">${[[1, 'Normal'], [1.12, 'Grand'], [1.25, 'Très grand']].map(([v, l]) => `<button class="${s.textSize === v ? 'on' : ''}" data-a="textsize" data-v="${v}">${l}</button>`).join('')}</div></div>
 
-    <div class="set-sec">Mon écran d'accueil</div>
-    ${homeToggles()}
+    <div class="set-sec">Mode vocal</div>
+    <div class="switch"><div>Me répondre à voix haute</div><button class="tg ${s.voiceSpeak !== false ? 'on' : ''}" data-a="set-tg2" data-k="voiceSpeak"></button></div>
+    <div class="switch"><div>Conversation continue<small>Je réécoute après avoir répondu. Dis « merci » pour arrêter.</small></div><button class="tg ${s.voiceLoop !== false ? 'on' : ''}" data-a="set-tg2" data-k="voiceLoop"></button></div>
 
     <div class="set-sec">Google Agenda</div>
     <div class="guide">✅ <b>Rien à configurer.</b> Quand tu ajoutes un événement, un bouton <b>« + Google »</b> te permet de l'ajouter aussi dans ton Google Agenda en 1 clic.</div>
     <div class="switch"><div>Proposer « + Google » après chaque ajout</div><button class="tg ${s.googleAddPrompt ? 'on' : ''}" data-a="set-tg" data-k="googleAddPrompt"></button></div>
 
-    <div class="set-sec">Assistant</div>
-    <div class="guide">✅ <b>Gratuit, rien à configurer.</b> Il comprend : ajouter, déplacer, annuler, « qu'est-ce que j'ai demain ? », « quand est ma prochaine boxe ? », « planifie mes révisions »…</div>
 
     <details class="more-opts"><summary>Réglages avancés</summary>
       <button class="menu-row" data-a="set-cats"><span class="me-ic">🏷</span><span class="grow"><b>Catégories & couleurs</b><small>Renommer, recolorer, créer les tiennes</small></span>${icon('right')}</button>
@@ -1172,6 +1291,7 @@ function openSettings() {
       <div class="switch"><div>Masquer les doublons</div><button class="tg ${s.hideDups ? 'on' : ''}" data-a="set-tg" data-k="hideDups"></button></div>
       <div class="field" style="margin-top:12px"><label>Temps de trajet par défaut</label><select data-set="travelMin">${TRAVELS.map(m => `<option value="${m}" ${s.travelMin === m ? 'selected' : ''}>${m ? m + ' min' : 'Aucun'}</option>`).join('')}</select></div>
       <button class="btn block" data-a="notif">🔔 Activer les notifications</button>
+      <button class="btn block" style="margin-top:8px" data-a="go-ai">💬 Voir l'historique de l'assistant</button>
       <button class="btn block" style="margin-top:8px" data-a="onboard">Refaire l'accueil guidé</button>
     </details>`);
 }
@@ -1287,6 +1407,7 @@ function checkReminders() {
       once(e.id + ':go:' + e.start, () => notify('🚶 Pars dans 5 min', `${e.title} à ${hm(e.start)} · ${e.location}`));
     }
   }
+  for (const t of st.tasks) if (t.remind && t.remind <= now && !t.reminded && !t.done) { t.reminded = true; save(); notify('⏰ ' + t.title, `Rappel de ${hm(t.remind)}`); if (set().voiceReply) speak(`Rappel : ${t.title}`); }
   for (const n of st.notes) if (n.remind && n.remind <= now && !n.reminded) { n.reminded = true; save(); notify('⏰ ' + (n.title || 'À ne pas oublier'), n.text.slice(0, 120)); }
   if (changed) try { localStorage.setItem('agenda-notified', JSON.stringify([...notified].slice(-300))); } catch { /* */ }
 }
@@ -1360,6 +1481,11 @@ const ACTIONS = {
   'sheet-back': () => (sheetBack === 'goals' ? openGoals() : openSettings()),
   settings: openMenu,
   'set-look': openLook, 'set-home': openHome, 'set-cats': openCats, 'set-goals': openGoals, 'set-connect': openConnect, 'set-data': openData,
+  open: el => { const [t, seg] = el.dataset.to.split(':'); if (seg) { set().meSeg = seg; save(); } go(t); },
+  voice: () => openVoice(),
+  'go-ai': () => { closeSheet(); go('ai'); },
+  'v-hint': el => vHandle(el.textContent),
+  'set-tg2': el => { const k = el.dataset.k; set()[k] = set()[k] === false; save(); el.classList.toggle('on', set()[k] !== false); },
   'memo-due': () => go('todo'),
   'memo-notes': () => go('notes'),
   'me-seg': el => { set().meSeg = el.dataset.s; save(); go('me'); },
@@ -1372,7 +1498,7 @@ const ACTIONS = {
   'ob-int': el => { const m = set().homeModules.find(x => x.id === el.dataset.id); if (m) { m.on = !m.on; save(); } openOnboarding(2); },
   'ob-prev': () => openOnboarding(Math.max(0, obStep - 1)),
   'ob-next': () => {
-    if (obStep < 2) return openOnboarding(obStep + 1);
+    if (obStep < 1) return openOnboarding(obStep + 1);
     set().onboarded = true; save(); closeSheet(); go('today');
     toast(`C'est prêt, ${set().name} ✨`);
   },
@@ -1487,7 +1613,7 @@ const ACTIONS = {
     closeSheet(); render(); toast(`${plan.length} séances de révision ajoutées 💪`);
   },
   sugg: el => runAssistant(el.textContent),
-  undo: el => doUndo(el.dataset.k),
+  undo: el => { doUndo(el.dataset.k); el.closest('.act')?.classList.add('undone'); el.remove(); },
   'chat-clear': () => { S().chat = []; undoBag.clear(); save(); renderAi(); },
   mic: async el => {
     const input = document.getElementById(el.dataset.for);
@@ -1555,6 +1681,7 @@ document.addEventListener('submit', ev => {
       addNote({ text: isChk ? v.replace(/^\[ ?\]\s*/, '[ ] ') : v, folder: noteFolder.startsWith('s:') ? 'Cours' : noteFolder === 'Tout' ? 'Perso' : noteFolder, subject: noteFolder.startsWith('s:') ? noteFolder.slice(2) : '' });
       render(); toast('Note ajoutée ✓'); return;
     }
+    if (f.dataset.quick === 'q-rem') { runAssistant(/rappel|pr[ée]vien/i.test(v) ? v : 'rappelle-moi de ' + v, { stay: true }); return; }
     if (f.dataset.quick === 'q-due' && !/\b(ajoute|programme|rdv|rendez|cours|réunion)\b/i.test(v)) {
       const r = localAssistant(/rendre|avant|tâche|deadline/i.test(v) ? v : 'à faire : ' + v);
       if (r.actions[0]?.type === 'add_task') { applyActions(r.actions, -1).then(() => { render(); toast(r.reply); }); return; }
@@ -1594,11 +1721,16 @@ document.addEventListener('change', ev => { const t = ev.target; if (t.dataset.c
 $('#file-in').addEventListener('change', e => { const f = e.target.files[0]; if (f) handleFile(f); e.target.value = ''; });
 $('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) go(b.dataset.tab); });
 $('#btn-settings').onclick = openSettings;
-$('#btn-me').onclick = () => go(tab === 'me' ? 'today' : 'me');
+$('#btn-me').onclick = openSettings;
+$('#btn-back').onclick = () => go('today');
+$('#voice-close').onclick = closeVoice;
+$('#v-orb').onclick = () => { if (vListening) { stopListening(); return; } if (!vBusy) vListen(); };
+$('#v-type').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const i = $('#v-input'); const v = i.value.trim(); if (v) { i.value = ''; stopListening(); vHandle(v); } });
 $('#btn-sync').onclick = syncNow;
 $('#btn-search').onclick = openSearch;
 $('#sheet-bg').onclick = closeSheet;
 $('#fab').onclick = () => {
+  if (tab === 'rem') return $('#q-rem')?.focus();
   if (tab === 'todo') return editTask(null);
   if (tab === 'notes') return editNote(null);
   editEvent(null, tab === 'cal' && !sameDay(selDay, new Date()) ? { start: new Date(selDay).setHours(10), end: new Date(selDay).setHours(11) } : {});
@@ -1619,7 +1751,9 @@ $('#sheet').addEventListener('touchend', e => { if (shY >= 0 && e.changedTouches
 
 // Démarrage
 const qp = new URLSearchParams(location.search);
-go(['today', 'cal', 'todo', 'notes', 'me', 'ai'].includes(qp.get('tab')) ? qp.get('tab') : 'today');
+const startTab = qp.get('tab');
+go(['today', 'cal', 'todo', 'notes', 'rem', 'me', 'ai'].includes(startTab) ? startTab : 'today');
+if (startTab === 'voice' && set().onboarded) setTimeout(openVoice, 300);
 
 // Lien d'import en 1 clic : …/agenda/#import=<données compressées>. Les données restent dans le lien
 // (la partie après # n'est jamais envoyée au serveur) puis sont effacées de l'adresse.

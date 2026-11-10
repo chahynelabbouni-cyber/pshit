@@ -559,3 +559,53 @@ body { font-size: 17px; }
 .ob-opt.on .box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .card h2 .more { margin-left: auto; }
 #sheet-wrap:not([hidden]) ~ #toast { top: calc(var(--safe-t) + 12px); bottom: auto; }
+
+/* =====================================================================
+   v4 — accueil = menu de gros boutons, mode vocal
+   ===================================================================== */
+#tabs .tab-ai .ai-orb { width: 56px; height: 56px; margin-top: -24px; }
+#tabs .tab-ai .ai-orb svg { width: 26px; height: 26px; }
+.back-btn { margin-left: -8px; color: var(--text); }
+.next-card { display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left; padding: 18px 20px; border-radius: 22px; background: var(--bg2); border: 1px solid var(--line2); border-left: 5px solid var(--c, var(--accent)); margin-bottom: 14px; }
+.nc-lbl { font-size: 15px; font-weight: 700; color: var(--c, var(--accent)); }
+.nc-ttl { font-size: 23px; font-weight: 750; line-height: 1.2; }
+.nc-loc { font-size: 15px; color: var(--muted); }
+.talk { display: flex; align-items: center; gap: 16px; width: 100%; text-align: left; padding: 16px 18px; border-radius: 22px; margin-bottom: 18px; background: color-mix(in srgb, var(--accent) 14%, var(--bg2)); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.talk b { display: block; font-size: 20px; }
+.talk small { color: var(--muted); font-size: 15px; }
+.talk-orb { width: 58px; height: 58px; border-radius: 50%; background: var(--grad); color: #1a1206; display: grid; place-items: center; flex: none; box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 35%, transparent); }
+.talk-orb svg { width: 28px; height: 28px; }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 18px 16px; min-height: 128px; border-radius: 22px; background: var(--bg2); border: 1px solid var(--line2); }
+.tile:active { transform: scale(.97); background: var(--bg3); }
+.tile .t-ic { font-size: 32px; line-height: 1; margin-bottom: auto; }
+.tile b { font-size: 18px; margin-top: 12px; }
+.tile small { font-size: 14px; color: var(--muted); }
+
+.rem { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 18px; background: var(--bg2); border: 1px solid var(--line2); margin-bottom: 8px; }
+.rem b { display: block; font-size: 17px; }
+.rem small { color: var(--muted); font-size: 15px; }
+.rem.done { opacity: .5; }
+.rem .t-ic { font-size: 22px; }
+
+/* mode vocal plein écran */
+#voice { position: fixed; inset: 0; z-index: 70; background: radial-gradient(120% 80% at 50% 30%, color-mix(in srgb, var(--accent) 16%, var(--bg)) 0%, var(--bg) 70%); display: flex; flex-direction: column; align-items: center; padding: calc(var(--safe-t) + 20px) 22px calc(var(--safe-b) + 16px); overflow-y: auto; animation: fadein .25s; zoom: var(--z, 1); }
+#voice-close { position: absolute; top: calc(var(--safe-t) + 10px); right: 12px; color: var(--muted); }
+.v-state { margin-top: 30px; font-size: 18px; font-weight: 700; color: var(--accent); min-height: 26px; text-align: center; }
+.v-orb { width: 150px; height: 150px; border-radius: 50%; margin: 26px 0; background: var(--grad); color: #1a1206; display: grid; place-items: center; box-shadow: 0 20px 60px color-mix(in srgb, var(--accent) 40%, transparent); transition: transform .3s; flex: none; }
+.v-orb svg { width: 56px; height: 56px; }
+#voice[data-s=listen] .v-orb { animation: breathe 1.4s ease-in-out infinite; }
+#voice[data-s=think] .v-orb { animation: spin2 1.2s linear infinite; opacity: .8; }
+#voice[data-s=speak] .v-orb { animation: talkp .5s ease-in-out infinite alternate; }
+#voice[data-s=idle] .v-orb { opacity: .75; }
+@keyframes breathe { 50% { transform: scale(1.1); box-shadow: 0 0 0 22px color-mix(in srgb, var(--accent) 14%, transparent); } }
+@keyframes spin2 { to { transform: rotate(360deg); } }
+@keyframes talkp { to { transform: scale(1.05); } }
+.v-heard { font-size: 17px; color: var(--muted); text-align: center; min-height: 24px; font-style: italic; }
+.v-reply { font-size: 22px; font-weight: 600; line-height: 1.4; text-align: center; margin: 14px 0; white-space: pre-wrap; max-width: 520px; }
+.v-acts { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: 8px; }
+.act.undone { opacity: .45; text-decoration: line-through; }
+.v-hints { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 10px; max-width: 520px; }
+.v-type { margin-top: auto; width: 100%; max-width: 520px; display: flex; gap: 8px; padding-top: 18px; }
+.v-type input { flex: 1; min-width: 0; background: var(--bg2); border: 1px solid var(--line2); border-radius: 16px; padding: 14px; font-size: 16px; outline: 0; }
+.v-type button { width: 52px; border-radius: 16px; background: var(--bg3); display: grid; place-items: center; color: var(--accent); }
