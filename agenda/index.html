@@ -48,19 +48,21 @@
 
 <div id="app">
   <header id="top">
+    <button id="btn-me" class="me-btn" aria-label="Mon profil"><span id="me-avatar">🥊</span></button>
     <div class="top-title">
       <div id="top-kicker" class="kicker"></div>
       <h1 id="top-h"></h1>
     </div>
     <button id="btn-search" class="icon-btn" aria-label="Rechercher"><svg><use href="#i-search"/></svg></button>
-    <button id="btn-sync" class="icon-btn" aria-label="Synchroniser Google Agenda"><svg><use href="#i-sync"/></svg></button>
+    <button id="btn-sync" class="icon-btn" aria-label="Synchroniser Google Agenda" hidden><svg><use href="#i-sync"/></svg></button>
     <button id="btn-settings" class="icon-btn" aria-label="Réglages"><svg><use href="#i-gear"/></svg></button>
   </header>
 
   <main id="main">
     <section id="v-today" class="view"></section>
     <section id="v-cal" class="view" hidden></section>
-    <section id="v-memo" class="view" hidden></section>
+    <section id="v-todo" class="view" hidden></section>
+    <section id="v-notes" class="view" hidden></section>
     <section id="v-me" class="view" hidden></section>
     <section id="v-ai" class="view" hidden></section>
   </main>
@@ -70,11 +72,11 @@
   <button id="fab" aria-label="Ajouter"><svg><use href="#i-plus"/></svg></button>
 
   <nav id="tabs">
-    <button data-tab="today" class="on"><svg><use href="#i-today"/></svg><span>Accueil</span></button>
-    <button data-tab="cal"><svg><use href="#i-cal"/></svg><span>Calendrier</span></button>
+    <button data-tab="today" class="on"><svg><use href="#i-today"/></svg><span>Aujourd'hui</span></button>
+    <button data-tab="cal"><svg><use href="#i-cal"/></svg><span>Agenda</span></button>
     <button data-tab="ai" class="tab-ai"><span class="ai-orb"><svg><use href="#i-spark"/></svg></span><span>Assistant</span></button>
-    <button data-tab="memo"><svg><use href="#i-memo"/></svg><span>Mémo</span></button>
-    <button data-tab="me"><svg><use href="#i-user"/></svg><span>Moi</span></button>
+    <button data-tab="todo"><svg><use href="#i-memo"/></svg><span>À faire</span></button>
+    <button data-tab="notes"><svg><use href="#i-note"/></svg><span>Notes</span></button>
   </nav>
 </div>
 

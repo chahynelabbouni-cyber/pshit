@@ -27,11 +27,11 @@ const col = k => catOf(k).color;
 let tab = 'today';
 let calDate = startOfDay(new Date());
 let selDay = startOfDay(new Date());
-let memoSeg = 'due';
 let dueFilter = 'all';
 let noteQuery = '';
 let noteFolder = 'Tout';
 let statPeriod = 'week';
+let showAllDue = false;
 const undoBag = new Map();
 
 // =====================================================================
@@ -80,7 +80,7 @@ function go(t) {
   $('#ai-bar').hidden = t !== 'ai';
   render();
   $('#main').scrollTop = 0;
-  if (t === 'cal' && ['grid', '3days', 'day'].includes(set().calView)) scrollGridToNow();
+  if (t === 'cal' && set().calView === 'day') scrollGridToNow();
   if (t === 'ai') setTimeout(() => { $('#main').scrollTop = 1e6; }, 30);
 }
 
@@ -88,10 +88,12 @@ function header(kicker, title) { $('#top-kicker').textContent = kicker; $('#top-
 
 function render() {
   applyLook();
-  ({ today: renderToday, cal: renderCal, memo: renderMemo, me: renderMe, ai: renderAi })[tab]();
+  ({ today: renderToday, cal: renderCal, todo: renderTodo, notes: renderNotes, me: renderMe, ai: renderAi })[tab]();
+  $('#me-avatar').textContent = set().avatar;
+  $('#btn-me').classList.toggle('on', tab === 'me');
   const sync = $('#btn-sync');
-  sync.hidden = !set().googleClientId;
-  sync.classList.toggle('ok', set().googleConnected && Date.now() - set().lastSync < 3600000);
+  sync.hidden = !set().googleConnected;
+  sync.classList.toggle('ok', Date.now() - set().lastSync < 3600000);
 }
 
 // =====================================================================
@@ -99,30 +101,31 @@ function render() {
 // =====================================================================
 const travelOf = e => e.travel ?? (e.location && !/visio|teams|zoom|en ligne/i.test(e.location) ? set().travelMin : 0);
 
+// Titre allégé : sans ⚠️ ni nom du prof pour les cours (le titre complet reste dans la fiche)
+const shortTitle = e => {
+  let t = e.title.replace(/⚠️?\s*/g, '').trim();
+  if (['cours', 'exam', 'echeance'].includes(e.cat)) t = t.replace(/\s*\((?:G\d|TD\d[^)]*|CC\d?|Visio|en visio)\)/gi, '').trim();
+  if (e.cat === 'cours' || e.cat === 'exam') t = t.replace(/\s[–—-]\s(?:M\.|Mme|Mr)?\s?[A-ZÉ][\w.\-' ]*(\s\([^)]*\))?$/u, '').trim();
+  return t;
+};
+
 function tlItem(e, now = Date.now()) {
   const c = colEv(e);
   const cls = e.end < now ? 'past' : e.start <= now && e.end > now ? 'now' : '';
-  const time = e.allDay ? `<div class="tl-time">${catOf(e.cat).emoji}<small>journée</small></div>`
+  const time = e.allDay ? `<div class="tl-time">${catOf(e.cat).emoji}</div>`
     : `<div class="tl-time">${hm(e.start)}<small>${hm(e.end)}</small></div>`;
-  const subj = subjectOf(e);
   const tr = travelOf(e);
-  const sub = [e.location, e.allDay ? '' : fmtDuration(e.end - e.start)].filter(Boolean).join(' · ');
-  const badges = [
-    e.star ? '<span class="mini star">★ important</span>' : '',
-    e.bring?.some(b => !b.done) ? `<span class="mini">🎒 ${e.bring.filter(b => !b.done).length}</span>` : '',
-    e.memo ? '<span class="mini">📝 note</span>' : '',
-    tr && e.start > now && e.start - now < DAY ? `<span class="mini go">🚶 partir ${hm(e.start - tr * MIN)}</span>` : '',
-  ].join('');
+  const sub = [e.location, tr && e.start > now && e.start - now < DAY ? `🚶 partir à ${hm(e.start - tr * MIN)}` : ''].filter(Boolean).join(' · ');
   return `<div class="tl-item ${cls}" style="--c:${c}" data-a="ev" data-id="${e.id}">${time}<div class="tl-bar"></div>
-    <div class="tl-body"><div class="tl-title">${esc(e.title)}</div><div class="tl-sub">${subj ? `<span class="subj" style="--s:${subjectColor(subj.key)}">${esc(subj.name)}</span>` : ''}${esc(sub || catOf(e.cat).label)}</div>${badges ? `<div class="badges">${badges}</div>` : ''}</div></div>`;
+    <div class="tl-body"><div class="tl-title">${e.star ? '<span class="star">★</span> ' : ''}${esc(shortTitle(e))}</div>${sub ? `<div class="tl-sub">${esc(sub)}</div>` : ''}</div></div>`;
 }
 
-function timeline(evs, { gaps = false } = {}) {
-  if (!evs.length) return '<div class="empty">Rien de prévu. 🌿</div>';
+function timeline(evs, { gaps = false, empty = 'Rien de prévu 🌿' } = {}) {
+  if (!evs.length) return `<div class="empty">${empty}</div>`;
   let out = '', last = null;
   for (const e of evs) {
-    if (gaps && !e.allDay && last && e.start - last >= 75 * MIN && e.start > Date.now()) {
-      out += `<div class="free-gap" data-a="new-at" data-t="${Math.max(last, Date.now())}">✦ Libre ${fmtDuration(e.start - Math.max(last, Date.now()))} · toucher pour ajouter</div>`;
+    if (gaps && !e.allDay && last && e.start - last >= 90 * MIN && e.start > Date.now()) {
+      out += `<div class="free-gap" data-a="new-at" data-t="${Math.max(last, Date.now())}">Libre ${fmtDuration(e.start - Math.max(last, Date.now()))}</div>`;
     }
     out += tlItem(e);
     if (!e.allDay) last = Math.max(last || 0, e.end);
@@ -141,19 +144,18 @@ function urgency(due) {
 }
 
 function dueItem(d) {
-  const u = d.due ? urgency(d.due) : { c: 'var(--dim)', b: '—', s: 'sans date' };
-  const when = d.due ? cap(relDay(d.due)) + (d.dueTime ? ' · ' + hm(d.due) : '') : 'Quand tu peux';
-  const isExam = d.kind === 'event' && d.cat === 'exam' && !d.done;
-  const subj = d.kind === 'event' ? subjectOf(d.ref) : null;
+  const u = d.due ? urgency(d.due) : { c: 'var(--dim)', b: '—', s: '' };
+  const when = d.due ? cap(relDay(d.due)) + (d.dueTime ? ' à ' + hm(d.due) : '') : 'Sans date';
+  const canRevise = d.kind === 'event' && d.cat === 'exam' && !d.done && d.due - Date.now() < 15 * DAY;
   const left = d.kind === 'task'
     ? `<button class="check ${d.done ? 'on' : ''}" data-a="task-done" data-id="${d.id}" aria-label="Fait">${icon('check')}</button>` : '';
   return `<div class="due ${d.done ? 'done' : ''} ${d.priority === 'haute' ? 'prio-haute' : ''}" style="--u:${u.c}">
-    ${left}<div class="jx"><b>${u.b}</b><small>${u.s}</small></div>
+    ${left}<div class="jx"><b>${u.b}</b>${u.s ? `<small>${u.s}</small>` : ''}</div>
     <div class="grow" data-a="${d.kind === 'task' ? 'task' : 'ev'}" data-id="${d.id}">
-      <div class="ttl">${esc(d.title.replace(/⚠️?\s*/g, ''))}</div>
-      <div class="sub">${catOf(d.cat).emoji} ${when}${subj ? ` · <span class="subj" style="--s:${subjectColor(subj.key)}">${esc(subj.name)}</span>` : ''}</div>
+      <div class="ttl">${esc(d.kind === 'event' ? shortTitle(d.ref) : d.title)}</div>
+      <div class="sub">${when}</div>
     </div>
-    ${isExam ? `<button class="btn small" data-a="plan-rev" data-id="${d.id}">Réviser</button>` : ''}
+    ${canRevise ? `<button class="btn small" data-a="plan-rev" data-id="${d.id}">Réviser</button>` : ''}
   </div>`;
 }
 
@@ -202,93 +204,96 @@ const more = (label, a, extra = '') => `<span class="more" data-a="${a}" ${extra
 // =====================================================================
 // ACCUEIL — modules personnalisables
 // =====================================================================
+function shortBrief(d = new Date()) {
+  const L = dayLoad(d);
+  const evs = L.evs.filter(e => !e.allDay);
+  const now = Date.now();
+  const left = evs.filter(e => e.end > now);
+  let s;
+  if (!evs.length) s = 'Rien de prévu aujourd\'hui. Journée libre.';
+  else if (!left.length) s = `Ta journée est finie (${fmtDuration(L.minutes * MIN)} occupées). Repose-toi.`;
+  else s = `${left.length} chose${left.length > 1 ? 's' : ''} encore prévue${left.length > 1 ? 's' : ''}, tu finis vers ${hm(Math.max(...evs.map(e => e.end)))}.`;
+  const dl = deadlines({ from: now }).filter(x => !x.done && x.due < now + 3 * DAY)[0];
+  if (dl) s += ` À ne pas oublier : ${shortTitle(dl.ref || dl)} (${relDay(dl.due)}).`;
+  return { L, s };
+}
+
 const HOME = {
-  brief() {
-    const L = dayLoad(new Date());
-    const pct = Math.min(1, L.score / 10);
-    return `<div class="brief">
-      <div class="brief-top"><div class="avatar">${esc(set().avatar)}</div>
-        <div class="grow"><div class="load" style="--l:${L.c}">${L.emoji} ${L.label}<span>${L.minutes ? fmtDuration(L.minutes * MIN) + ' occupées' : 'libre'}</span></div>
-        <div class="meter"><i style="width:${Math.max(4, pct * 100)}%;background:${L.c}"></i></div></div>
-        <button class="icon-btn" data-a="speak-brief" aria-label="Écouter le briefing">${icon('speaker')}</button></div>
-      <p class="brief-txt">${esc(briefing()).replace(/\. /g, '.<br>')}</p></div>`;
-  },
   now() {
     const now = new Date();
+    if (!S().events.length && !S().tasks.length) {
+      return `<div class="hero"><div class="lbl">Bienvenue ${esc(set().avatar)}</div><div class="ttl">Ton agenda est vide</div>
+        <div class="meta">Ouvre le lien d'import que tu as reçu, ou ajoute ton premier événement avec le bouton +.</div>
+        <div class="actions"><button class="btn" data-a="import">Importer un fichier</button></div></div>`;
+    }
     const timed = eventsOfDay(now).filter(e => !e.allDay);
     const cur = timed.find(e => e.start <= now && e.end > now);
     const upcoming = eventsBetween(now.getTime(), now.getTime() + 21 * DAY).filter(e => !e.allDay && e.start > now);
     const next = upcoming[0];
-    if (!S().events.length && !S().tasks.length) {
-      return `<div class="hero"><div class="lbl">Bienvenue</div><div class="ttl">On remplit ton agenda ?</div>
-        <div class="meta">Connecte ton Google Agenda ou importe ton fichier (.json ou .ics) pour retrouver tous tes événements.</div>
-        <div class="actions"><button class="btn gold" data-a="set-connect">${icon('google')} Connecter Google</button><button class="btn" data-a="import">Importer</button></div></div>`;
-    }
-    const heroOf = (e, lbl, cd) => {
+    const block = (e, lbl, cd, extra = '') => {
       const tr = travelOf(e);
       return `<div class="hero" style="--c:${colEv(e)}" data-a="ev" data-id="${e.id}">
-      <div class="cd">${cd}</div>
-      <div class="lbl">${lbl}</div><div class="ttl">${esc(e.title)}</div>
-      <div class="meta"><span>${icon('clock')}${cap(relDay(e.start))} · ${hm(e.start)} – ${hm(e.end)}</span>${e.location ? `<span>${icon('place')}${esc(e.location)}</span>` : ''}${tr && e.start > now ? `<span class="go">${icon('walk')}Partir à ${hm(e.start - tr * MIN)}</span>` : ''}</div>
-      ${e.bring?.length ? `<div class="bring-line">🎒 ${e.bring.map(b => `<span class="${b.done ? 'ok' : ''}">${esc(b.t)}</span>`).join('')}</div>` : ''}`;
+        <div class="lbl">${lbl}</div>
+        <div class="ttl">${esc(shortTitle(e))}</div>
+        <div class="hero-when"><b>${cd}</b>${e.start > now ? ` · ${relDay(e.start) === "aujourd'hui" ? '' : relDay(e.start) + ' '}${hm(e.start)}` : ` · jusqu'à ${hm(e.end)}`}</div>
+        ${e.location ? `<div class="meta">${icon('place')}${esc(e.location)}</div>` : ''}
+        ${tr && e.start > now ? `<div class="meta go">${icon('walk')}Partir à ${hm(e.start - tr * MIN)}</div>` : ''}
+        ${extra}</div>`;
     };
     if (cur) {
       const p = Math.min(100, (now - cur.start) / (cur.end - cur.start) * 100);
-      return heroOf(cur, 'En ce moment', `encore ${fmtDuration(cur.end - now)}`) + `<div class="progress"><i style="width:${p}%"></i></div>
-        ${next ? `<div class="next2">Ensuite : <b>${esc(next.title)}</b> · ${relDay(next.start) === "aujourd'hui" ? '' : relDay(next.start) + ' '}${hm(next.start)}</div>` : ''}</div>`;
+      return block(cur, 'En ce moment', `Encore ${fmtDuration(cur.end - now)}`, `<div class="progress"><i style="width:${p}%"></i></div>${next ? `<div class="next2">Ensuite : <b>${esc(shortTitle(next))}</b> à ${hm(next.start)}</div>` : ''}`);
     }
-    if (next) {
-      const after = upcoming[1];
-      return heroOf(next, `Prochain · ${esc(catOf(next.cat).label)}`, countdown(next.start)) +
-        `${after ? `<div class="next2">Puis : <b>${esc(after.title)}</b> · ${relDay(after.start) === "aujourd'hui" ? '' : relDay(after.start) + ' '}${hm(after.start)}</div>` : ''}</div>`;
-    }
-    return `<div class="hero"><div class="lbl">Tranquille</div><div class="ttl">Rien de prévu pour l'instant</div><div class="meta">Dis-moi ce que tu veux programmer ↓</div></div>`;
+    if (next) return block(next, 'Ensuite', cap(countdown(next.start)));
+    return `<div class="hero"><div class="lbl">Tranquille</div><div class="ttl">Rien de prévu</div><div class="meta">Profite 🌿</div></div>`;
   },
   quick() {
-    const tp = templates();
-    return quickBar('q-today', 'Ex : « boxe jeudi 20h30 » ou « note : appeler la CAF »') +
-      (tp.length ? `<div class="chips tpl"><span class="dim small">Raccourcis</span>${tp.map((t, i) => `<button class="chip" data-a="tpl" data-i="${i}" style="border-color:${col(t.cat)}">${esc(t.label)}</button>`).join('')}</div>` : '');
+    return quickBar('q-today', 'Ajouter… ex : « boxe jeudi 20h30 »');
   },
   insights() {
-    return insights().map(i => `<div class="insight" style="--c:${i.c}"><div class="ic">${i.ic}</div><div class="grow"><p>${i.html}</p>${i.btn ? `<div class="row wrap">${i.btn}</div>` : ''}</div></div>`).join('');
+    const i = insights()[0];
+    if (!i) return '';
+    return `<div class="insight" style="--c:${i.c}"><div class="ic">${i.ic}</div><div class="grow"><p>${i.html}</p>${i.btn ? `<div class="row wrap">${i.btn}</div>` : ''}</div></div>`;
   },
   day() {
     const now = new Date();
-    return card('📅 Ma journée', `<div class="tl">${timeline(eventsOfDay(now), { gaps: true })}</div>`, more('Ouvrir', 'day', `data-d="${ymd(now)}"`));
+    return card("Aujourd'hui", `<div class="tl">${timeline(eventsOfDay(now), { gaps: true })}</div>`);
   },
   due() {
-    const dl = deadlines({ from: Date.now() - DAY }).filter(d => !d.done);
-    const todo = S().tasks.filter(t => !t.done && !t.due);
-    if (!dl.length && !todo.length) return '';
-    return card('⏳ Échéances & tâches', dl.slice(0, 4).map(dueItem).join('') + todo.slice(0, 3).map(t => dueItem({ kind: 'task', id: t.id, title: t.title, due: null, cat: t.cat, done: false, priority: t.priority, ref: t })).join(''), more('Tout voir', 'memo-due'));
+    const dl = deadlines({ from: Date.now() - DAY }).filter(d => !d.done).slice(0, 3);
+    if (!dl.length) return '';
+    return card('À ne pas rater', dl.map(dueItem).join(''), more('Tout voir', 'tab', 'data-tab="todo"'));
+  },
+  brief() {
+    const { L, s } = shortBrief();
+    return `<div class="brief" style="--l:${L.c}"><div class="row"><div class="load grow">${L.emoji} ${L.label}</div><button class="icon-btn" data-a="speak-brief" aria-label="Écouter">${icon('speaker')}</button></div><p class="brief-txt">${esc(s)}</p></div>`;
+  },
+  tomorrow() {
+    const t = addDays(new Date(), 1);
+    return card(`Demain · ${fmtDayShort(t)}`, `<div class="tl">${timeline(eventsOfDay(t), { empty: 'Rien de prévu demain 🌿' })}</div>`);
   },
   goals() {
     const gs = set().goals;
     if (!gs.length) return '';
-    return card('🎯 Objectifs de la semaine', `<div class="goals">${gs.map(goalTile).join('')}</div>`, more('Modifier', 'set-goals'));
+    return card('Mes objectifs', `<div class="goals">${gs.map(goalTile).join('')}</div>`, more('Gérer', 'set-goals'));
   },
-  focus() { return card('🧠 Focus', focusBlock()); },
+  focus() { return card('Minuteur de révision', focusBlock()); },
   countdowns() {
-    const list = countdownList().slice(0, 4);
+    const list = countdownList().slice(0, 2);
     if (!list.length) return '';
-    return card('⌛ Comptes à rebours', `<div class="cds">${list.map(cdTile).join('')}</div>`, more('+ Ajouter', 'cd-new'));
+    return card('Comptes à rebours', `<div class="cds">${list.map(cdTile).join('')}</div>`);
   },
   subjects() {
-    const ss = subjects().filter(s => s.next || s.nextExam).slice(0, 5);
+    const ss = subjects().filter(s => s.next || s.nextExam).slice(0, 4);
     if (!ss.length) return '';
-    return card('📚 Mes matières', ss.map(subjRow).join(''), more('Toutes', 'tab', 'data-tab="me"'));
+    return card('Mes matières', ss.map(subjRow).join(''), more('Toutes', 'me-seg', 'data-s="subjects"'));
   },
   notes() {
     const pinned = S().notes.filter(n => n.pinned);
     if (!pinned.length) return '';
-    return card('📌 À ne pas oublier', noteGrid(pinned), more('Notes', 'memo-notes'));
+    return card('Notes épinglées', noteGrid(pinned), more('Notes', 'tab', 'data-tab="notes"'));
   },
-  tomorrow() {
-    const t = addDays(new Date(), 1);
-    const L = dayLoad(t);
-    return card(`🌙 Demain · ${fmtDayShort(t)}`, `<div class="load small" style="--l:${L.c}">${L.emoji} ${L.label}<span>${L.minutes ? fmtDuration(L.minutes * MIN) : 'libre'}</span></div><div class="tl">${timeline(eventsOfDay(t))}</div>`, more('Ouvrir', 'day', `data-d="${ymd(t)}"`));
-  },
-  week() { return card('📊 Ma semaine', weekChart()); },
+  week() { return card('Ma semaine', weekChart()); },
 };
 
 function goalTile(g) {
@@ -350,7 +355,7 @@ function renderToday() {
   const now = new Date();
   header(cap(fmtDay(now)), `${greetingWord()}, ${set().name || 'toi'}`);
   $('#v-today').innerHTML = set().homeModules.filter(m => m.on && HOME[m.id]).map(m => HOME[m.id]()).join('') +
-    `<button class="btn block ghost" data-a="set-home">✎ Personnaliser mon accueil</button>`;
+    `<button class="link-btn" data-a="set-home">✎ Choisir ce qui s'affiche ici</button>`;
 }
 
 function weekChart() {
@@ -375,37 +380,28 @@ function weekChart() {
 // =====================================================================
 // CALENDRIER
 // =====================================================================
-const VIEWS = [['month', 'Mois'], ['week', 'Semaine'], ['grid', 'Grille'], ['3days', '3 jours'], ['day', 'Jour'], ['list', 'Liste']];
+const VIEWS = [['day', 'Jour'], ['week', 'Semaine'], ['month', 'Mois']];
+const calView = () => (['day', 'week', 'month'].includes(set().calView) ? set().calView : 'week');
 
 function calTitle(v) {
-  if (v === 'month') return `${MOIS[calDate.getMonth()]} ${calDate.getFullYear()}`;
-  if (v === 'day') return fmtDay(calDate);
-  if (v === 'list') return `Dès le ${fmtDayShort(calDate)}`;
-  const a = ['week', 'grid'].includes(v) ? startOfWeek(calDate) : calDate;
-  const b = addDays(a, v === '3days' ? 2 : 6);
-  return a.getMonth() === b.getMonth() ? `${a.getDate()}–${b.getDate()} ${MOIS[a.getMonth()]}` : `${a.getDate()} ${MOIS[a.getMonth()].slice(0, 4)}. – ${b.getDate()} ${MOIS[b.getMonth()].slice(0, 4)}.`;
+  if (v === 'month') return cap(`${MOIS[calDate.getMonth()]} ${calDate.getFullYear()}`);
+  if (v === 'day') return cap(relDay(calDate) === fmtDayShort(calDate) ? fmtDay(calDate) : relDay(calDate) + ' · ' + fmtDayShort(calDate));
+  const a = startOfWeek(calDate), b = addDays(a, 6);
+  return a.getMonth() === b.getMonth() ? `${a.getDate()} – ${b.getDate()} ${MOIS[a.getMonth()]}` : `${a.getDate()} ${MOIS[a.getMonth()].slice(0, 4)}. – ${b.getDate()} ${MOIS[b.getMonth()].slice(0, 4)}.`;
 }
 
 function renderCal() {
-  const v = set().calView;
-  header(cap(fmtDay(new Date())), 'Mon calendrier');
-  const hidden = new Set(set().hiddenCats);
-  const chips = Object.entries(CATS).map(([k, c]) => `<button class="chip ${hidden.has(k) ? '' : 'on'}" data-a="cat-toggle" data-cat="${k}" style="${hidden.has(k) ? '' : `background:${c.color};color:#111`}"><span>${c.emoji}</span>${esc(c.label)}</button>`).join('');
-  let body;
-  if (v === 'month') body = monthView();
-  else if (v === 'list') body = listView();
-  else if (v === 'week') body = weekRows();
-  else if (v === 'day') body = dayBanner(calDate) + gridView(1, calDate);
-  else body = gridView(v === '3days' ? 3 : 7, v === 'grid' ? startOfWeek(calDate) : calDate);
+  const v = calView();
+  header(cap(fmtDay(new Date())), 'Mon agenda');
+  const body = v === 'month' ? monthView() : v === 'week' ? weekRows() : gridView(1, calDate);
   $('#v-cal').innerHTML = `
-    <div class="chips views">${VIEWS.map(([k, l]) => `<button class="chip ${k === v ? 'on' : ''}" data-a="view" data-v="${k}">${l}</button>`).join('')}</div>
+    <div class="seg">${VIEWS.map(([k, l]) => `<button class="${k === v ? 'on' : ''}" data-a="view" data-v="${k}">${l}</button>`).join('')}</div>
     <div class="cal-bar">
       <button class="icon-btn" data-a="cal-prev" aria-label="Précédent">${icon('left')}</button>
       <h2>${calTitle(v)}</h2>
-      <button class="btn small" data-a="cal-today">Auj.</button>
       <button class="icon-btn" data-a="cal-next" aria-label="Suivant">${icon('right')}</button>
     </div>
-    <div class="chips">${chips}</div>
+    ${sameDay(calDate, new Date()) && v === 'day' || (v === 'week' && sameDay(startOfWeek(calDate), startOfWeek(new Date()))) || (v === 'month' && calDate.getMonth() === new Date().getMonth() && calDate.getFullYear() === new Date().getFullYear()) ? '' : `<button class="link-btn top" data-a="cal-today">↺ Revenir à aujourd'hui</button>`}
     <div id="cal-body">${body}</div>`;
 }
 
@@ -418,25 +414,23 @@ function monthView() {
   const m0 = startOfMonth(calDate);
   const g0 = startOfWeek(m0);
   const evs = eventsBetween(g0.getTime(), addDays(g0, 42).getTime());
-  let cells = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'].map(d => `<div class="wd">${d}</div>`).join('');
+  let cells = ['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(d => `<div class="wd">${d}</div>`).join('');
   for (let i = 0; i < 42; i++) {
     const d = addDays(g0, i);
     if (i === 35 && d.getMonth() !== m0.getMonth()) break;
     const a = d.getTime(), b = a + DAY;
     const de = evs.filter(e => e.start < b && e.end > a);
-    const hours = busyMinutes(de) / 60;
-    const hasExam = de.some(e => e.cat === 'exam' || e.cat === 'echeance');
-    const vac = de.find(e => e.allDay && e.cat === 'ferie');
+    const vac = de.some(e => e.allDay && e.cat === 'ferie');
     const visible = de.filter(e => !(e.allDay && e.cat === 'ferie'));
-    const shown = visible.slice(0, 3).map(e => `<div class="ev" style="--c:${colEv(e)}">${esc(e.title.replace(/^(CM|TD|TP)\s/, '').replace(/⚠️?\s*/g, ''))}</div>`).join('');
-    cells += `<div class="mc ${d.getMonth() !== m0.getMonth() ? 'out' : ''} ${sameDay(d, new Date()) ? 'today' : ''} ${sameDay(d, selDay) ? 'sel' : ''} ${vac ? 'vac' : ''}" data-a="sel" data-d="${ymd(d)}">
-      <div class="dn">${d.getDate()}${hasExam ? '<i class="exam-dot"></i>' : ''}</div>${shown}${visible.length > 3 ? `<div class="more">+${visible.length - 3}</div>` : ''}<div class="heat" style="--h:${Math.min(1, hours / 8)}"></div></div>`;
+    const exam = visible.some(e => e.cat === 'exam' || e.cat === 'echeance');
+    const dots = [...new Set(visible.map(e => colEv(e)))].slice(0, 4).map(c => `<i style="background:${c}"></i>`).join('');
+    cells += `<div class="mc ${d.getMonth() !== m0.getMonth() ? 'out' : ''} ${sameDay(d, new Date()) ? 'today' : ''} ${sameDay(d, selDay) ? 'sel' : ''} ${vac ? 'vac' : ''} ${exam ? 'exam' : ''}" data-a="sel" data-d="${ymd(d)}">
+      <div class="dn">${d.getDate()}</div><div class="dots">${dots}</div></div>`;
   }
   const list = eventsOfDay(selDay);
-  const L = dayLoad(selDay);
   return `<div class="month" id="swipe">${cells}</div>
-    <div class="legend small"><span><i style="background:var(--danger);border-radius:50%"></i>examen / remise</span><span><i style="background:var(--accent);height:3px"></i>charge du jour</span><span><i style="background:${col('ferie')}"></i>vacances</span></div>
-    <div class="daylist-h">${['aujourd\'hui', 'demain', 'hier'].includes(relDay(selDay)) ? cap(relDay(selDay)) + ' · ' : ''}${fmtDay(selDay)} <span class="tag" style="color:${L.c}">${L.emoji} ${L.minutes ? fmtDuration(L.minutes * MIN) : 'libre'}</span></div>
+    <div class="legend small"><span><i class="lg-exam"></i>examen ou remise</span><span><i class="lg-vac"></i>vacances</span></div>
+    <div class="daylist-h">${cap(['aujourd\'hui', 'demain', 'hier'].includes(relDay(selDay)) ? relDay(selDay) + ' · ' + fmtDayShort(selDay) : fmtDay(selDay))}</div>
     <div class="tl">${timeline(list, { gaps: true })}</div>`;
 }
 
@@ -535,19 +529,23 @@ function scrollGridToNow() {
 }
 
 function calShift(dir) {
-  const v = set().calView;
+  const v = calView();
   if (v === 'month') { calDate = new Date(calDate.getFullYear(), calDate.getMonth() + dir, 1); selDay = sameDay(startOfMonth(new Date()), calDate) ? startOfDay(new Date()) : calDate; }
-  else calDate = addDays(calDate, dir * (['week', 'grid'].includes(v) ? 7 : v === '3days' ? 3 : v === 'list' ? 30 : 1));
+  else calDate = addDays(calDate, dir * (v === 'week' ? 7 : 1));
   renderCal();
+  if (v === 'day') scrollGridToNow();
 }
 
 // =====================================================================
 // MÉMO : échéancier + notes
 // =====================================================================
-function renderMemo() {
-  header('Mémo', memoSeg === 'due' ? 'Mes échéances' : 'Mes notes');
-  const seg = `<div class="seg"><button class="${memoSeg === 'due' ? 'on' : ''}" data-a="memo-seg" data-s="due">⏳ Échéancier</button><button class="${memoSeg === 'notes' ? 'on' : ''}" data-a="memo-seg" data-s="notes">📝 Notes</button></div>`;
-  $('#v-memo').innerHTML = seg + (memoSeg === 'due' ? dueView() : notesView());
+function renderTodo() {
+  header('À faire', 'Mes échéances');
+  $('#v-todo').innerHTML = dueView();
+}
+function renderNotes() {
+  header('Notes', 'À ne pas oublier');
+  $('#v-notes').innerHTML = notesView();
 }
 
 function dueView() {
@@ -558,96 +556,83 @@ function dueView() {
   if (dueFilter === 'done') list = all.filter(d => d.done).reverse();
   else list = list.filter(d => !d.done);
   const t0 = startOfDay(new Date()).getTime();
-  const late = all.filter(d => !d.done && d.due < t0).length;
-  const w = all.filter(d => !d.done && d.due >= t0 && d.due < t0 + 7 * DAY).length;
   const nodate = S().tasks.filter(t => !t.due && !t.done);
   const groups = [
-    ['🔴 En retard', d => d.due < t0],
-    ["📍 Aujourd'hui", d => d.due >= t0 && d.due < t0 + DAY],
-    ['🔥 Cette semaine', d => d.due >= t0 + DAY && d.due < t0 + 7 * DAY],
-    ['📅 Ce mois-ci', d => d.due >= t0 + 7 * DAY && d.due < t0 + 31 * DAY],
-    ['🔭 Plus tard', d => d.due >= t0 + 31 * DAY],
+    ['En retard', d => d.due < t0, 'var(--danger)'],
+    ["Aujourd'hui", d => d.due >= t0 && d.due < t0 + DAY, 'var(--danger)'],
+    ['Cette semaine', d => d.due >= t0 + DAY && d.due < t0 + 7 * DAY, 'var(--warn)'],
+    ['Plus tard', d => d.due >= t0 + 7 * DAY && (showAllDue || d.due < t0 + 45 * DAY), 'var(--muted)'],
   ];
   let body = '';
   if (dueFilter === 'done') body = list.length ? list.map(dueItem).join('') : '<div class="empty">Rien de terminé pour l\'instant.</div>';
   else {
-    for (const [label, fn] of groups) {
+    for (const [label, fn, c] of groups) {
       const g = list.filter(fn);
-      if (g.length) body += `<div class="group-h">${label} <span class="n">${g.length}</span></div>` + g.map(dueItem).join('');
+      if (g.length) body += `<div class="group-h" style="color:${c}">${label}</div>` + g.map(dueItem).join('');
     }
-    if (dueFilter !== 'exam' && nodate.length) body += `<div class="group-h">🗂 Sans date <span class="n">${nodate.length}</span></div>` + nodate.map(t => dueItem({ kind: 'task', id: t.id, title: t.title, due: null, cat: t.cat, done: false, priority: t.priority, ref: t })).join('');
-    if (!body) body = '<div class="empty" style="text-align:center;padding:30px 0">Aucune échéance 🎉<br>Ajoute une tâche avec le bouton +</div>';
+    const hiddenLater = list.filter(d => d.due >= t0 + 45 * DAY).length;
+    if (!showAllDue && hiddenLater) body += `<button class="link-btn" data-a="due-more">Voir les ${hiddenLater} suivantes</button>`;
+    if (dueFilter !== 'exam' && nodate.length) body += `<div class="group-h">Sans date</div>` + nodate.map(t => dueItem({ kind: 'task', id: t.id, title: t.title, due: null, cat: t.cat, done: false, priority: t.priority, ref: t })).join('');
+    if (!body) body = '<div class="empty big-empty">Rien à faire 🎉<br><small>Ajoute une tâche avec le bouton +</small></div>';
   }
   return `
-    <div class="stats">
-      <div class="stat"><b style="color:${late ? 'var(--danger)' : 'inherit'}">${late}</b><span>en retard</span></div>
-      <div class="stat"><b style="color:${w ? 'var(--warn)' : 'inherit'}">${w}</b><span>sous 7 jours</span></div>
-      <div class="stat"><b>${all.filter(d => !d.done).length + nodate.length}</b><span>au total</span></div>
-    </div>
-    ${quickBar('q-due', 'Ex : « dossier stage à rendre vendredi »')}
-    <div class="chips">${[['all', 'Tout'], ['exam', '⚠️ Examens & remises'], ['task', '✅ Mes tâches'], ['done', 'Terminé']].map(([k, l]) => `<button class="chip ${dueFilter === k ? 'on' : ''}" data-a="due-f" data-f="${k}">${l}</button>`).join('')}</div>
+    ${quickBar('q-due', 'Ajouter… ex : « dossier stage pour vendredi »')}
+    <div class="seg small">${[['all', 'Tout'], ['exam', 'Examens'], ['task', 'Mes tâches'], ['done', 'Fait']].map(([k, l]) => `<button class="${dueFilter === k ? 'on' : ''}" data-a="due-f" data-f="${k}">${l}</button>`).join('')}</div>
     ${body}`;
 }
 
 function notesView() {
   const q = norm(noteQuery);
   const subjs = subjects();
-  let notes = S().notes.filter(n => !q || norm(n.title + ' ' + n.text).includes(q));
+  const allNotes = S().notes;
+  let notes = allNotes.filter(n => !q || norm(n.title + ' ' + n.text).includes(q));
   if (noteFolder.startsWith('s:')) notes = notes.filter(n => n.subject === noteFolder.slice(2));
   else if (noteFolder !== 'Tout') notes = notes.filter(n => (n.folder || 'Perso') === noteFolder);
   notes.sort((a, b) => (b.pinned - a.pinned) || b.updated - a.updated);
-  const folders = NOTE_FOLDERS.map(f => `<button class="chip ${noteFolder === f ? 'on' : ''}" data-a="note-f" data-f="${f}">${f}</button>`).join('') +
-    subjs.filter(s => S().notes.some(n => n.subject === s.key)).map(s => `<button class="chip ${noteFolder === 's:' + s.key ? 'on' : ''}" data-a="note-f" data-f="s:${esc(s.key)}" style="border-color:${s.color}">${esc(s.name)}</button>`).join('');
+  const usedFolders = NOTE_FOLDERS.slice(1).filter(f => allNotes.some(n => (n.folder || 'Perso') === f));
+  const usedSubjects = subjs.filter(s => allNotes.some(n => n.subject === s.key));
+  const showFilters = usedFolders.length + usedSubjects.length > 1;
   return `
-    <div class="search">${icon('search')}<input id="note-q" placeholder="Rechercher dans mes notes" value="${esc(noteQuery)}"></div>
     ${quickBar('q-note', 'Note rapide… (« [ ] » = case à cocher)')}
-    <div class="chips">${folders}</div>
-    ${notes.length ? noteGrid(notes) : `<div class="empty" style="text-align:center;padding:30px 0">${q ? 'Aucun résultat.' : 'Aucune note ici. Écris ce que tu ne veux pas oublier ✍️'}</div>`}`;
+    ${allNotes.length > 6 ? `<div class="search">${icon('search')}<input id="note-q" placeholder="Rechercher" value="${esc(noteQuery)}"></div>` : ''}
+    ${showFilters ? `<div class="chips">${['Tout', ...usedFolders].map(f => `<button class="chip ${noteFolder === f ? 'on' : ''}" data-a="note-f" data-f="${f}">${f}</button>`).join('')}${usedSubjects.map(s => `<button class="chip ${noteFolder === 's:' + s.key ? 'on' : ''}" data-a="note-f" data-f="s:${esc(s.key)}">${esc(s.name)}</button>`).join('')}</div>` : ''}
+    ${notes.length ? noteGrid(notes) : `<div class="empty big-empty">${q ? 'Aucun résultat.' : 'Aucune note ✍️<br><small>Écris ce que tu ne veux pas oublier</small>'}</div>`}`;
 }
 
 // =====================================================================
 // MOI : profil, focus, objectifs, matières, comptes à rebours, stats
 // =====================================================================
-const MENU = [['set-look', '🎨', 'Apparence & lisibilité', 'Ambiance, couleur, taille du texte, avatar'], ['set-home', '🏠', 'Mon accueil', 'Choisir et ordonner les blocs'], ['set-cats', '🏷', 'Catégories & règles', 'Noms, couleurs, emojis, mots-clés'], ['set-goals', '🎯', 'Objectifs & habitudes', 'Ce que tu veux suivre chaque semaine'], ['set-connect', '🔗', 'Google, IA & rappels', 'Synchro, clé Claude, notifications'], ['set-data', '💾', 'Mes données', 'Importer, exporter, doublons']];
-const menuHtml = () => `<div class="menu">${MENU.map(([a, e, t, d]) => `<button class="menu-row" data-a="${a}"><span class="me-ic">${e}</span><span class="grow"><b>${t}</b><small>${d}</small></span>${icon('right')}</button>`).join('')}</div>`;
 
+
+const ME_SEGS = [['goals', 'Objectifs'], ['subjects', 'Matières'], ['focus', 'Focus'], ['stats', 'Stats'], ['cds', 'Dates']];
 function renderMe() {
   const s = set();
   header('Mon espace', s.name);
-  const st = stats('week');
-  const subs = subjects();
-  const cds = countdownList();
+  const seg = ME_SEGS.some(([k]) => k === s.meSeg) ? s.meSeg : 'goals';
+  let body = '';
+  if (seg === 'goals') body = s.goals.length ? `<div class="goals">${s.goals.map(goalTile).join('')}</div><button class="link-btn" data-a="set-goals">✎ Gérer mes objectifs</button>` : `<div class="empty">Aucun objectif.</div><button class="btn block" data-a="set-goals">+ Ajouter un objectif</button>`;
+  if (seg === 'subjects') { const subs = subjects(); body = subs.length ? subs.map(subjRow).join('') : '<div class="empty">Tes matières apparaissent toutes seules à partir de tes cours (CM, TD, CC…).</div>'; }
+  if (seg === 'focus') body = focusBlock();
+  if (seg === 'stats') body = statsCard();
+  if (seg === 'cds') { const cds = countdownList(); body = (cds.length ? `<div class="cds">${cds.map(cdTile).join('')}</div>` : '<div class="empty">Aucune date pour l\'instant.</div>') + `<button class="link-btn" data-a="cd-new">+ Ajouter une date importante</button>`; }
   $('#v-me').innerHTML = `
     <div class="profile">
-      <div class="avatar big" data-a="set-look">${esc(s.avatar)}</div>
-      <div class="grow"><h2>${esc(s.name)}</h2><div class="muted">${Math.round(st.total)} h programmées cette semaine · ${st.count} événements</div></div>
-      <button class="btn small" data-a="settings">Personnaliser</button>
+      <div class="avatar big" data-a="settings">${esc(s.avatar)}</div>
+      <div class="grow"><h2>${esc(s.name)}</h2><div class="muted small">Ton espace perso</div></div>
+      <button class="btn small" data-a="settings">${icon('gear')} Réglages</button>
     </div>
-    ${card('🧠 Focus', focusBlock())}
-    ${card('🎯 Objectifs & habitudes', s.goals.length ? `<div class="goals">${s.goals.map(goalTile).join('')}</div>` : '<div class="empty">Aucun objectif.</div>', more('Gérer', 'set-goals'))}
-    ${card(`📚 Mes matières <span class="tag">${subs.length}</span>`, subs.length ? subs.map(subjRow).join('') : '<div class="empty">Les matières apparaissent automatiquement à partir de tes cours (CM, TD, CC…).</div>')}
-    ${card('⌛ Comptes à rebours', cds.length ? `<div class="cds">${cds.map(cdTile).join('')}</div>` : '<div class="empty">Aucun pour le moment.</div>', more('+ Ajouter', 'cd-new'))}
-    ${statsCard()}
-    ${menuHtml()}`;
+    <div class="chips me-tabs">${ME_SEGS.map(([k, l]) => `<button class="chip ${seg === k ? 'on' : ''}" data-a="me-seg" data-s="${k}">${l}</button>`).join('')}</div>
+    <div class="card">${body}</div>`;
 }
 
 function statsCard() {
   const st = stats(statPeriod);
   const cats = Object.entries(st.byCat).filter(([k]) => k !== 'ferie').sort((a, b) => b[1] - a[1]);
   const max = Math.max(1, ...cats.map(c => c[1]));
-  const subs = Object.entries(st.bySubj).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const all = subjects();
-  const name = k => all.find(s => s.key === k)?.name || k;
-  return card('📈 Mes stats', `
+  return `
     <div class="seg small">${[['week', 'Cette semaine'], ['month', 'Ce mois-ci']].map(([k, l]) => `<button class="${statPeriod === k ? 'on' : ''}" data-a="stat-p" data-p="${k}">${l}</button>`).join('')}</div>
-    <div class="stats">
-      <div class="stat"><b>${Math.round(st.total)}h</b><span>programmées</span></div>
-      <div class="stat"><b>${st.sport}</b><span>séance${st.sport > 1 ? 's' : ''} de sport</span></div>
-      <div class="stat"><b>${st.avgStart || '—'}</b><span>début moyen</span></div>
-    </div>
-    ${cats.map(([k, h]) => `<div class="bar-row"><span>${catOf(k).emoji} ${esc(catOf(k).label)}</span><div class="bar"><i style="width:${h / max * 100}%;background:${col(k)}"></i></div><b>${Math.round(h * 10) / 10}h</b></div>`).join('') || '<div class="empty">Pas encore de données.</div>'}
-    ${subs.length ? `<div class="group-h">Heures de cours par matière</div>${subs.map(([k, h]) => `<div class="bar-row"><span>${esc(name(k))}</span><div class="bar"><i style="width:${h / subs[0][1] * 100}%;background:${subjectColor(k)}"></i></div><b>${Math.round(h * 10) / 10}h</b></div>`).join('')}` : ''}
-    <div class="dim small" style="margin-top:10px">${st.busiest ? `Jour le plus chargé : ${fmtDay(fromYmd(st.busiest.day))} (${Math.round(st.busiest.h * 10) / 10} h). ` : ''}${st.focusH ? `Focus : ${Math.round(st.focusH * 10) / 10} h. ` : ''}${st.sante ? `${st.sante} rdv santé.` : ''}</div>`);
+    <div class="big-num">${Math.round(st.total)} h <span>programmées</span></div>
+    ${cats.map(([k, h]) => `<div class="bar-row"><span>${catOf(k).emoji} ${esc(catOf(k).label)}</span><div class="bar"><i style="width:${h / max * 100}%;background:${col(k)}"></i></div><b>${Math.round(h * 10) / 10}h</b></div>`).join('') || '<div class="empty">Pas encore de données.</div>'}`;
 }
 
 // =====================================================================
@@ -694,28 +679,21 @@ function finishFocus(completed) {
 // ASSISTANT
 // =====================================================================
 const SUGG = [
-  'Résume ma journée',
   "Qu'est-ce que j'ai demain ?",
-  'Mes examens à venir',
-  'Planifie mes révisions',
   'Quand est ma prochaine boxe ?',
-  'Combien d\'heures de cours cette semaine ?',
-  'Ajoute boxe vendredi de 21h à 22h30',
-  'Rappelle-moi de payer le loyer le 5',
-  'Quels créneaux libres jeudi ?',
+  'Ajoute boxe vendredi 21h',
+  'Planifie mes révisions',
 ];
 
 function renderAi() {
-  header('Assistant', `Ton assistant ${set().avatar}`);
+  header('Assistant', 'Dis-moi tout');
   const chat = S().chat;
-  const hasKey = !!set().claudeKey;
-  const msgs = chat.map((m, i) => `<div class="msg ${m.role}">${esc(m.text)}${m.acts?.length ? `<div class="acts">${m.acts.map((a, j) => `<div class="act" style="--c:${col(a.cat)}"><div class="grow">${esc(a.label)}</div>${undoBag.has(`${i}:${j}`) ? `<button data-a="undo" data-k="${i}:${j}">Annuler</button>` : ''}</div>`).join('')}</div>` : ''}</div>`).join('');
-  $('#v-ai').innerHTML = `
-    ${chat.length ? '' : `<div class="ai-hello"><div class="orb">${icon('spark')}</div><h2>Que veux-tu programmer, ${esc(set().name)} ?</h2><p>Écris ou dicte : je range tout dans ton calendrier${set().googleConnected ? ' et sur Google Agenda' : ''}, ton échéancier ou tes notes.</p></div>`}
-    <div class="mode">${hasKey ? '✦ Mode Claude : je comprends toutes tes demandes' : 'Mode hors-ligne · ajoute ta clé Claude (Moi → Google, IA & rappels) pour une IA complète'}${chat.length ? ' · <a href="#" data-a="chat-clear">Effacer</a>' : ''}</div>
-    <div class="chat">${msgs}</div>
-    <div class="sugg">${SUGG.map(s => `<button class="chip" data-a="sugg">${esc(s)}</button>`).join('')}</div>`;
-  if (!$('#q-ai')) $('#ai-bar').innerHTML = quickBar('q-ai', 'Demande-moi quelque chose…');
+  const msgs = chat.map((m, i) => `<div class="msg ${m.role}">${esc(m.text)}${m.acts?.length ? `<div class="acts">${m.acts.map((a, j) => `<div class="act" style="--c:${col(a.cat)}"><div class="grow">${esc(a.label)}</div>${undoBag.has(`${i}:${j}`) ? `<button data-a="undo" data-k="${i}:${j}">Annuler</button>` : ''}${a.g ? `<a class="gbtn" href="${esc(a.g)}" target="_blank" rel="noopener">+ Google</a>` : ''}</div>`).join('')}</div>` : ''}</div>`).join('');
+  $('#v-ai').innerHTML = chat.length
+    ? `<div class="chat">${msgs}</div><button class="link-btn" data-a="chat-clear">Effacer la conversation</button>`
+    : `<div class="ai-hello"><div class="orb">${icon('spark')}</div><h2>Que veux-tu faire ?</h2><p>Écris ou appuie sur le micro 🎙️<br>Je range tout dans ton agenda.</p></div>
+       <div class="sugg">${SUGG.map(s => `<button class="chip" data-a="sugg">${esc(s)}</button>`).join('')}</div>`;
+  if (!$('#q-ai')) $('#ai-bar').innerHTML = quickBar('q-ai', 'Écris ici…');
 }
 
 async function runAssistant(text, { stay = false } = {}) {
@@ -737,7 +715,7 @@ async function runAssistant(text, { stay = false } = {}) {
   }
   const idx = st.chat.length - 1;
   const acts = await applyActions(res.actions || [], idx);
-  st.chat[idx] = { role: 'assistant', text: res.reply, acts: acts.map(a => ({ label: a.label, cat: a.cat })) };
+  st.chat[idx] = { role: 'assistant', text: res.reply, acts: acts.map(a => ({ label: a.label, cat: a.cat, g: a.g || '' })) };
   save();
   if (set().voiceReply) speak(res.reply);
   if (tab === 'ai') { renderAi(); $('#main').scrollTop = 1e6; }
@@ -753,7 +731,7 @@ async function applyActions(actions, msgIdx) {
       if (a.type === 'create_event' && a.start) {
         const ev = addEvent({ title: a.title || 'Événement', start: a.start, end: a.end || a.start + 3600000, allDay: !!a.allDay, location: a.location || '', cat: a.category || guessCat(a.title || '') });
         gpush(ev);
-        r = { label: `＋ ${ev.title} · ${relDay(ev.start)}${ev.allDay ? '' : ' ' + hm(ev.start) + '–' + hm(ev.end)}`, cat: ev.cat, undo: () => { deleteEvent(ev.id); flushDeletes(); } };
+        r = { label: `＋ ${ev.title} · ${relDay(ev.start)}${ev.allDay ? '' : ' ' + hm(ev.start) + '–' + hm(ev.end)}`, cat: ev.cat, g: set().googleConnected ? '' : googleAddUrl(ev), undo: () => { deleteEvent(ev.id); flushDeletes(); } };
       } else if (a.type === 'update_event' && a.id) {
         const ev = S().events.find(e => e.id === a.id);
         if (!ev) continue;
@@ -843,38 +821,56 @@ const shTitle = (t, back = false) => `<div class="sh-title">${back ? `<button ty
 
 // ---------- Événement : fiche détaillée ----------
 const TRAVELS = [0, 10, 15, 20, 30, 45, 60];
+// Lien « ajouter à Google Agenda » : ouvre Google Agenda pré-rempli, sans aucun réglage
+function googleAddUrl(e) {
+  const z = t => new Date(t).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const dates = e.allDay ? `${ymd(e.start).replace(/-/g, '')}/${ymd(e.end).replace(/-/g, '')}` : `${z(e.start)}/${z(e.end)}`;
+  const q = new URLSearchParams({ action: 'TEMPLATE', text: e.title, dates });
+  if (e.location) q.set('location', e.location);
+  if (e.notes) q.set('details', e.notes);
+  return 'https://calendar.google.com/calendar/render?' + q;
+}
+const inGoogle = e => e.source === 'google' || e.gid || e.addedToGoogle;
+
 function openEvent(id) {
   const e = S().events.find(x => x.id === id);
   if (!e) return;
   const c = catOf(e.cat);
   const when = e.allDay
-    ? (e.end - e.start > DAY ? `Du ${fmtDay(e.start)} au ${fmtDay(e.end - DAY)}` : cap(fmtDay(e.start)) + ' · journée')
-    : `${cap(fmtDay(e.start))} · ${hm(e.start)} – ${hm(e.end)} (${fmtDuration(e.end - e.start)})`;
+    ? (e.end - e.start > DAY ? `Du ${fmtDay(e.start)} au ${fmtDay(e.end - DAY)}` : cap(fmtDay(e.start)))
+    : `${cap(fmtDay(e.start))}<br><b>${hm(e.start)} – ${hm(e.end)}</b> <span class="dim">(${fmtDuration(e.end - e.start)})</span>`;
   const subj = subjectOf(e);
   const tr = travelOf(e);
   const future = e.start > Date.now();
+  const nBring = (e.bring || []).length;
   openSheet(`<div class="ev-detail">
-    <div class="row" style="margin-bottom:8px;flex-wrap:wrap"><span class="tag" style="background:${colEv(e)};color:#111">${c.emoji} ${esc(c.label)}</span>${e.source === 'google' ? '<span class="tag">Google</span>' : ''}${future ? `<span class="tag">${countdown(e.start)}</span>` : ''}
+    <div class="row" style="margin-bottom:6px"><span class="tag" style="background:${colEv(e)};color:#111">${c.emoji} ${esc(c.label)}</span>${future ? `<span class="tag">${countdown(e.start)}</span>` : ''}
       <button class="icon-btn" style="margin-left:auto;color:${e.star ? 'var(--accent)' : 'var(--dim)'}" data-a="ev-star" data-id="${e.id}" aria-label="Important">${icon(e.star ? 'star-f' : 'star')}</button><button class="icon-btn" data-a="close" aria-label="Fermer">${icon('x')}</button></div>
     <div class="big">${esc(e.title)}</div>
     <div class="line">${icon('clock')}<div>${when}</div></div>
     ${e.location ? `<div class="line">${icon('place')}<div><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}" target="_blank" rel="noopener">${esc(e.location)}</a></div></div>` : ''}
-    ${subj ? `<div class="line"><span style="width:20px;text-align:center">📚</span><div><button class="subj big" style="--s:${subjectColor(subj.key)}" data-a="subj" data-k="${esc(subj.key)}">${esc(subj.name)} ›</button></div></div>` : ''}
-    ${!e.allDay && future ? `<div class="line">${icon('walk')}<div class="grow">${tr ? `Partir à <b style="color:var(--text)">${hm(e.start - tr * MIN)}</b> (${tr} min de trajet)` : 'Temps de trajet'}<div class="chips" style="padding-top:6px">${TRAVELS.map(m => `<button class="chip ${tr === m ? 'on' : ''}" data-a="ev-travel" data-id="${e.id}" data-m="${m}">${m ? m + ' min' : 'Aucun'}</button>`).join('')}</div></div></div>` : ''}
-    <div class="sub-h">Catégorie</div>
-    <div class="chips">${Object.entries(CATS).map(([k, cc]) => `<button class="chip ${e.cat === k ? 'on' : ''}" data-a="ev-cat" data-id="${e.id}" data-cat="${k}" style="${e.cat === k ? `background:${cc.color};color:#111` : ''}">${cc.emoji} ${esc(cc.label)}</button>`).join('')}</div>
-    <div class="sub-h">🎒 À apporter / à préparer</div>
-    <div class="bring">${(e.bring || []).map((b, i) => `<div class="ck ${b.done ? 'on' : ''}" data-a="ev-bring" data-id="${e.id}" data-i="${i}"><span class="box">${b.done ? '✓' : ''}</span><span class="grow">${esc(b.t)}</span><button class="x-mini" data-a="ev-bring-del" data-id="${e.id}" data-i="${i}" aria-label="Retirer">✕</button></div>`).join('')}
-      <form class="mini-form" data-form="bring" data-id="${e.id}"><input class="inp grow" placeholder="Ex : calculatrice, carte étudiante…"><button class="btn small">Ajouter</button></form></div>
-    <div class="sub-h">📝 Mes notes perso</div>
-    <textarea class="memo" data-memo="${e.id}" placeholder="Ce que je dois retenir, questions à poser…">${esc(e.memo || '')}</textarea>
-    ${e.notes ? `<div class="sub-h">Description</div><div class="notes">${esc(e.notes)}</div>` : ''}
+    ${tr && future && !e.allDay ? `<div class="line go">${icon('walk')}<div>Partir à <b>${hm(e.start - tr * MIN)}</b></div></div>` : ''}
+    ${subj ? `<button class="subj-link" data-a="subj" data-k="${esc(subj.key)}" style="--s:${subjectColor(subj.key)}">📚 ${esc(subj.name)} <span>›</span></button>` : ''}
+    ${e.bring?.length ? `<div class="bring-line">🎒 ${e.bring.map(b => `<span class="${b.done ? 'ok' : ''}">${esc(b.t)}</span>`).join('')}</div>` : ''}
+    ${e.memo ? `<div class="notes">📝 ${esc(e.memo)}</div>` : ''}
     <div class="actions">
       <button class="btn gold" data-a="ev-edit" data-id="${e.id}">Modifier</button>
-      <button class="btn" data-a="ev-dup" data-id="${e.id}">Dupliquer</button>
       <button class="btn danger" data-a="ev-del" data-id="${e.id}">Supprimer</button>
     </div>
-    ${(e.cat === 'exam' || e.cat === 'echeance') && future ? `<button class="btn block" style="margin-top:8px" data-a="plan-rev" data-id="${e.id}">🧠 Planifier des révisions avant</button>` : ''}
+    ${!inGoogle(e) ? `<a class="btn block gbtn-big" href="${esc(googleAddUrl(e))}" target="_blank" rel="noopener" data-a="g-added" data-id="${e.id}">${icon('google')} Ajouter aussi à Google Agenda</a>` : ''}
+    ${(e.cat === 'exam' || e.cat === 'echeance') && future ? `<button class="btn block" style="margin-top:8px" data-a="plan-rev" data-id="${e.id}">🧠 Planifier des révisions</button>` : ''}
+    <details class="more-opts"><summary>Plus d'options</summary>
+      ${!e.allDay && future ? `<div class="sub-h">🚶 Temps de trajet</div><div class="chips">${TRAVELS.map(m => `<button class="chip ${tr === m ? 'on' : ''}" data-a="ev-travel" data-id="${e.id}" data-m="${m}">${m ? m + ' min' : 'Aucun'}</button>`).join('')}</div>` : ''}
+      <div class="sub-h">🎒 À apporter${nBring ? ` (${nBring})` : ''}</div>
+      <div class="bring">${(e.bring || []).map((b, i) => `<div class="ck ${b.done ? 'on' : ''}" data-a="ev-bring" data-id="${e.id}" data-i="${i}"><span class="box">${b.done ? '✓' : ''}</span><span class="grow">${esc(b.t)}</span><button class="x-mini" data-a="ev-bring-del" data-id="${e.id}" data-i="${i}" aria-label="Retirer">✕</button></div>`).join('')}
+        <form class="mini-form" data-form="bring" data-id="${e.id}"><input class="inp grow" placeholder="Ex : calculatrice"><button class="btn small">Ajouter</button></form></div>
+      <div class="sub-h">📝 Ma note</div>
+      <textarea class="memo" data-memo="${e.id}" placeholder="À retenir…">${esc(e.memo || '')}</textarea>
+      <div class="sub-h">Catégorie</div>
+      <div class="chips wrap">${Object.entries(CATS).map(([k, cc]) => `<button class="chip ${e.cat === k ? 'on' : ''}" data-a="ev-cat" data-id="${e.id}" data-cat="${k}" style="${e.cat === k ? `background:${cc.color};color:#111` : ''}">${cc.emoji} ${esc(cc.label)}</button>`).join('')}</div>
+      ${e.notes ? `<div class="sub-h">Description</div><div class="notes">${esc(e.notes)}</div>` : ''}
+      <button class="btn block" style="margin-top:12px" data-a="ev-dup" data-id="${e.id}">Dupliquer</button>
+    </details>
   </div>`);
 }
 
@@ -889,29 +885,31 @@ function editEvent(id, preset = {}) {
   const catOpts = Object.entries(CATS).map(([k, c]) => `<option value="${k}" ${base.cat === k ? 'selected' : ''}>${c.emoji} ${esc(c.label)}</option>`).join('');
   openSheet(`<form id="ev-form">
     ${shTitle(e ? 'Modifier' : 'Nouvel événement')}
-    <div class="field"><label>Titre</label><input name="title" value="${esc(base.title)}" placeholder="Ex : TD Stats, Boxe, RDV médecin…" required></div>
-    <div class="field"><label>Catégorie</label><select name="cat"><option value="">✦ Automatique (d'après le titre)</option>${catOpts}</select></div>
-    <div class="switch">Toute la journée<button type="button" class="tg ${base.allDay ? 'on' : ''}" data-a="tg" data-name="allDay"></button><input type="hidden" name="allDay" value="${base.allDay ? 1 : 0}"></div>
-    <div class="fields2" style="margin-top:12px">
-      <div class="field"><label>Date</label><input type="date" name="date" value="${ymd(base.start)}" required></div>
-      <div class="field"><label>Fin (date)</label><input type="date" name="date2" value="${ymd(base.allDay ? base.end - DAY : base.end)}"></div>
-      <div class="field tm"><label>Début</label><input type="time" name="t1" value="${hm2(base.start)}"></div>
-      <div class="field tm"><label>Fin</label><input type="time" name="t2" value="${hm2(base.end)}"></div>
+    <div class="field"><input name="title" class="big-input" value="${esc(base.title)}" placeholder="Quoi ? (ex : Boxe, RDV médecin…)" required></div>
+    <div class="field"><label>Quand ?</label><input type="date" name="date" value="${ymd(base.start)}" required></div>
+    <div class="fields2 tm">
+      <div class="field"><label>De</label><input type="time" name="t1" value="${hm2(base.start)}"></div>
+      <div class="field"><label>À</label><input type="time" name="t2" value="${hm2(base.end)}"></div>
     </div>
-    <div class="chips tm"><span class="dim small">Durée :</span>${[30, 60, 90, 120, 180].map(m => `<button type="button" class="chip" data-a="dur" data-m="${m}">${fmtDuration(m * MIN)}</button>`).join('')}</div>
-    ${e ? '' : `<div class="field"><label>Répéter</label><select name="repeat"><option value="0">Ne se répète pas</option><option value="w4">Chaque semaine · 4 semaines</option><option value="w8">Chaque semaine · 8 semaines</option><option value="w15">Chaque semaine · tout le semestre</option><option value="d5">Chaque jour · 5 jours</option><option value="d7">Chaque jour · 7 jours</option></select></div>`}
-    <div class="field"><label>Lieu</label><input name="location" value="${esc(base.location)}" placeholder="Amphi, adresse…"></div>
-    <div class="fields2">
-      <div class="field"><label>Rappel</label><select name="reminder">${REMINDERS.map(([v, l]) => `<option value="${v ?? ''}" ${base.reminder === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-      <div class="field"><label>Trajet</label><select name="travel"><option value="">Par défaut</option>${TRAVELS.map(m => `<option value="${m}" ${base.travel === m ? 'selected' : ''}>${m ? m + ' min' : 'Aucun'}</option>`).join('')}</select></div>
-    </div>
-    <div class="field"><label>Couleur</label><div class="swatches">${EV_COLORS.map(c => `<button type="button" class="sw ${(base.color || '') === c ? 'on' : ''} ${c ? '' : 'auto'}" style="--c:${c || 'var(--bg4)'}" data-a="sw" data-c="${c}" aria-label="${c || 'Couleur de la catégorie'}">${c ? '' : 'A'}</button>`).join('')}</div><input type="hidden" name="color" value="${base.color || ''}"></div>
-    <div class="switch">⭐ Important (compte à rebours)<button type="button" class="tg ${base.star ? 'on' : ''}" data-a="tg" data-name="star"></button><input type="hidden" name="star" value="${base.star ? 1 : 0}"></div>
-    <div class="field" style="margin-top:12px"><label>Description</label><textarea name="notes" placeholder="Détails…">${esc(base.notes)}</textarea></div>
-    <button class="btn gold block">${e ? 'Enregistrer' : 'Ajouter au calendrier'}</button>
+    <div class="field"><label>Où ? (facultatif)</label><input name="location" value="${esc(base.location)}" placeholder="Salle, adresse…"></div>
+    <button class="btn gold block">${e ? 'Enregistrer' : 'Ajouter'}</button>
+    <details class="more-opts"><summary>Plus d'options</summary>
+      <div class="switch">Toute la journée<button type="button" class="tg ${base.allDay ? 'on' : ''}" data-a="tg" data-name="allDay"></button><input type="hidden" name="allDay" value="${base.allDay ? 1 : 0}"></div>
+      <div class="field" style="margin-top:12px"><label>Jusqu'au (plusieurs jours)</label><input type="date" name="date2" value="${ymd(base.allDay ? base.end - DAY : base.end)}"></div>
+      ${e ? '' : `<div class="field"><label>Répéter</label><select name="repeat"><option value="0">Non</option><option value="w4">Chaque semaine (4 fois)</option><option value="w8">Chaque semaine (8 fois)</option><option value="w15">Chaque semaine (tout le semestre)</option><option value="d5">Chaque jour (5 jours)</option></select></div>`}
+      <div class="field"><label>Catégorie</label><select name="cat"><option value="">Automatique</option>${catOpts}</select></div>
+      <div class="fields2">
+        <div class="field"><label>Rappel</label><select name="reminder">${REMINDERS.map(([v, l]) => `<option value="${v ?? ''}" ${base.reminder === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div class="field"><label>Trajet</label><select name="travel"><option value="">Par défaut</option>${TRAVELS.map(m => `<option value="${m}" ${base.travel === m ? 'selected' : ''}>${m ? m + ' min' : 'Aucun'}</option>`).join('')}</select></div>
+      </div>
+      <div class="field"><label>Couleur</label><div class="swatches">${EV_COLORS.map(c => `<button type="button" class="sw ${(base.color || '') === c ? 'on' : ''} ${c ? '' : 'auto'}" style="--c:${c || 'var(--bg4)'}" data-a="sw" data-c="${c}" aria-label="${c || 'Automatique'}">${c ? '' : 'A'}</button>`).join('')}</div><input type="hidden" name="color" value="${base.color || ''}"></div>
+      <div class="switch">⭐ Important<button type="button" class="tg ${base.star ? 'on' : ''}" data-a="tg" data-name="star"></button><input type="hidden" name="star" value="${base.star ? 1 : 0}"></div>
+      <div class="field" style="margin-top:12px"><label>Description</label><textarea name="notes">${esc(base.notes)}</textarea></div>
+    </details>
     <input type="hidden" name="id" value="${e?.id || ''}">
   </form>`);
   toggleTimeFields();
+  if (!e) setTimeout(() => $('#ev-form [name=title]')?.focus(), 60);
 }
 function toggleTimeFields() {
   const f = $('#ev-form');
@@ -956,7 +954,8 @@ function saveEventForm(f) {
   closeSheet();
   selDay = startOfDay(ev.start);
   render();
-  toast(f.id.value ? 'Modifié ✓' : `Ajouté : ${ev.title}, ${relDay(ev.start)}${ev.allDay ? '' : ' à ' + hm(ev.start)}`);
+  if (!f.id.value && set().googleAddPrompt && !set().googleConnected) toast(`Ajouté ✓ ${ev.title}, ${relDay(ev.start)}${ev.allDay ? '' : ' à ' + hm(ev.start)}`, { label: '+ Google', href: googleAddUrl(ev), fn: () => { ev.addedToGoogle = true; save(); } });
+  else toast(f.id.value ? 'Modifié ✓' : `Ajouté ✓ ${ev.title}, ${relDay(ev.start)}${ev.allDay ? '' : ' à ' + hm(ev.start)}`);
 }
 
 // ---------- Tâches ----------
@@ -1108,29 +1107,81 @@ function editCountdown(id) {
     <input type="hidden" name="cid" value="${c.id}"></form>`);
 }
 
-// ---------- Réglages ----------
-function openMenu() { openSheet(`${shTitle('Personnaliser')}${menuHtml()}`); }
+function keepScroll(fn) { const y = $('#sheet').scrollTop; fn(); $('#sheet').scrollTop = y; }
+function reopenHome() { if (sheetBack === 'home') keepScroll(openHome); else keepScroll(openSettings); }
 
-function openLook() {
+// ---------- Accueil guidé ----------
+const INTERESTS = [
+  ['brief', '☀️', 'Un résumé de ma journée'],
+  ['tomorrow', '🌙', 'Voir aussi demain'],
+  ['subjects', '📚', 'Mes cours par matière'],
+  ['goals', '🎯', 'Suivre mes objectifs (boxe, révisions…)'],
+  ['focus', '🧠', 'Un minuteur pour réviser'],
+  ['countdowns', '⌛', 'Compter les jours avant les vacances et examens'],
+  ['notes', '📌', 'Mes notes importantes'],
+];
+let obStep = 0;
+function openOnboarding(step = 0) {
+  obStep = step;
   const s = set();
-  openSheet(`${shTitle('🎨 Apparence', true)}
+  const dots = `<div class="ob-dots">${[0, 1, 2].map(i => `<i class="${i === step ? 'on' : ''}"></i>`).join('')}</div>`;
+  let body = '';
+  if (step === 0) body = `<div class="ob-emoji">${esc(s.avatar)}</div><h2>Salut ! Comment tu t'appelles ?</h2>
+    <input class="big-input" data-set="name" value="${esc(s.name)}" placeholder="Ton prénom">
+    <p class="muted">Choisis ton emoji :</p><div class="emoji-pick center">${AVATARS.map(a => `<button class="${s.avatar === a ? 'on' : ''}" data-a="ob-avatar" data-v="${a}">${a}</button>`).join('')}</div>`;
+  if (step === 1) body = `<h2>Ton style</h2>
+    <div class="palettes">${Object.entries(PALETTES).map(([k, p]) => `<button class="pal ${s.palette === k ? 'on' : ''}" data-a="ob-palette" data-v="${k}" style="background:${p.bg};color:${p.text};border-color:${s.palette === k ? p.accent : 'transparent'}"><i style="background:${p.accent}"></i>${p.name}</button>`).join('')}</div>
+    <p class="muted">Taille du texte :</p><div class="seg">${[[1, 'Normal'], [1.12, 'Grand'], [1.25, 'Très grand']].map(([v, l]) => `<button class="${s.textSize === v ? 'on' : ''}" data-a="ob-size" data-v="${v}">${l}</button>`).join('')}</div>`;
+  if (step === 2) body = `<h2>Sur ton écran d'accueil</h2><p class="muted">Tu auras toujours : ce qui se passe maintenant, ta journée et ce qu'il ne faut pas rater. Tu veux ajouter quoi d'autre ?</p>
+    ${INTERESTS.map(([id, e, l]) => { const on = s.homeModules.find(m => m.id === id)?.on; return `<button class="ob-opt ${on ? 'on' : ''}" data-a="ob-int" data-id="${id}"><span>${e}</span><span class="grow">${l}</span><span class="box">${on ? '✓' : ''}</span></button>`; }).join('')}
+    <p class="dim small">Tu pourras changer ça quand tu veux dans Réglages.</p>`;
+  openSheet(`<div class="onboard">${dots}${body}
+    <div class="row" style="margin-top:18px">${step ? `<button class="btn" data-a="ob-prev">Retour</button>` : ''}<button class="btn gold grow" data-a="ob-next">${step < 2 ? 'Suivant' : 'C\'est parti !'}</button></div></div>`);
+}
+
+// ---------- Réglages ----------
+function openMenu() { openSettings(); }
+function openLook() { openSettings(); }
+function openSettings() {
+  const s = set();
+  openSheet(`${shTitle('Réglages')}
+    <div class="set-sec">Moi</div>
     <div class="field"><label>Prénom</label><input data-set="name" value="${esc(s.name)}"></div>
-    <div class="field"><label>Avatar</label><div class="emoji-pick">${AVATARS.map(a => `<button class="${s.avatar === a ? 'on' : ''}" data-a="avatar" data-v="${a}">${a}</button>`).join('')}</div></div>
-    <div class="field"><label>Ambiance</label><div class="palettes">${Object.entries(PALETTES).map(([k, p]) => `<button class="pal ${s.palette === k ? 'on' : ''}" data-a="palette" data-v="${k}" style="background:${p.bg};color:${p.text};border-color:${s.palette === k ? p.accent : 'transparent'}"><i style="background:${p.accent}"></i>${p.name}</button>`).join('')}</div></div>
-    <div class="field"><label>Couleur d'accent</label><div class="swatches">${ACCENTS.map(c => `<button class="sw ${s.accent === c ? 'on' : ''} ${c ? '' : 'auto'}" style="--c:${c || 'var(--bg4)'}" data-a="accent" data-v="${c}">${c ? '' : 'A'}</button>`).join('')}</div></div>
-    <div class="field"><label>Taille du texte</label><div class="seg">${[[0.9, 'A−'], [1, 'A'], [1.12, 'A+'], [1.25, 'A++']].map(([v, l]) => `<button class="${s.textSize === v ? 'on' : ''}" data-a="textsize" data-v="${v}" style="font-size:${14 * v}px">${l}</button>`).join('')}</div></div>
-    <div class="switch"><div>Contraste renforcé<small>Textes plus nets, bordures plus visibles</small></div><button class="tg ${s.contrast ? 'on' : ''}" data-a="set-tg" data-k="contrast"></button></div>
-    <div class="switch"><div>Masquer les doublons<small>Même horaire et titre presque identique</small></div><button class="tg ${s.hideDups ? 'on' : ''}" data-a="set-tg" data-k="hideDups"></button></div>
-    <div class="fields2" style="margin-top:12px"><div class="field"><label>Ma journée commence à</label><input type="number" min="0" max="12" data-set="dayStart" value="${s.dayStart}"></div><div class="field"><label>et finit à</label><input type="number" min="13" max="24" data-set="dayEnd" value="${s.dayEnd}"></div></div>
-    <div class="field"><label>Temps de trajet par défaut (si un lieu est indiqué)</label><select data-set="travelMin">${TRAVELS.map(m => `<option value="${m}" ${s.travelMin === m ? 'selected' : ''}>${m ? m + ' min' : 'Aucun'}</option>`).join('')}</select></div>
-    <div class="field"><label>Vue du calendrier par défaut</label><select data-set="calView">${VIEWS.map(([k, l]) => `<option value="${k}" ${s.calView === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`, 'menu');
+    <div class="emoji-pick">${AVATARS.map(a => `<button class="${s.avatar === a ? 'on' : ''}" data-a="avatar" data-v="${a}">${a}</button>`).join('')}</div>
+
+    <div class="set-sec">Style</div>
+    <div class="palettes">${Object.entries(PALETTES).map(([k, p]) => `<button class="pal ${s.palette === k ? 'on' : ''}" data-a="palette" data-v="${k}" style="background:${p.bg};color:${p.text};border-color:${s.palette === k ? p.accent : 'transparent'}"><i style="background:${p.accent}"></i>${p.name}</button>`).join('')}</div>
+    <div class="field" style="margin-top:12px"><label>Taille du texte</label><div class="seg">${[[1, 'Normal'], [1.12, 'Grand'], [1.25, 'Très grand']].map(([v, l]) => `<button class="${s.textSize === v ? 'on' : ''}" data-a="textsize" data-v="${v}">${l}</button>`).join('')}</div></div>
+
+    <div class="set-sec">Mon écran d'accueil</div>
+    ${homeToggles()}
+
+    <div class="set-sec">Google Agenda</div>
+    <div class="guide">✅ <b>Rien à configurer.</b> Quand tu ajoutes un événement, un bouton <b>« + Google »</b> te permet de l'ajouter aussi dans ton Google Agenda en 1 clic.</div>
+    <div class="switch"><div>Proposer « + Google » après chaque ajout</div><button class="tg ${s.googleAddPrompt ? 'on' : ''}" data-a="set-tg" data-k="googleAddPrompt"></button></div>
+
+    <div class="set-sec">Assistant</div>
+    <div class="guide">✅ <b>Gratuit, rien à configurer.</b> Il comprend : ajouter, déplacer, annuler, « qu'est-ce que j'ai demain ? », « quand est ma prochaine boxe ? », « planifie mes révisions »…</div>
+
+    <details class="more-opts"><summary>Réglages avancés</summary>
+      <button class="menu-row" data-a="set-cats"><span class="me-ic">🏷</span><span class="grow"><b>Catégories & couleurs</b><small>Renommer, recolorer, créer les tiennes</small></span>${icon('right')}</button>
+      <button class="menu-row" data-a="set-goals"><span class="me-ic">🎯</span><span class="grow"><b>Objectifs</b><small>Boxe, révisions, habitudes</small></span>${icon('right')}</button>
+      <button class="menu-row" data-a="set-connect"><span class="me-ic">🔗</span><span class="grow"><b>Synchro Google automatique & IA Claude</b><small>Pour les experts, facultatif</small></span>${icon('right')}</button>
+      <button class="menu-row" data-a="set-data"><span class="me-ic">💾</span><span class="grow"><b>Mes données</b><small>Importer, sauvegarder, doublons</small></span>${icon('right')}</button>
+      <div class="switch"><div>Contraste renforcé</div><button class="tg ${s.contrast ? 'on' : ''}" data-a="set-tg" data-k="contrast"></button></div>
+      <div class="switch"><div>Masquer les doublons</div><button class="tg ${s.hideDups ? 'on' : ''}" data-a="set-tg" data-k="hideDups"></button></div>
+      <div class="field" style="margin-top:12px"><label>Temps de trajet par défaut</label><select data-set="travelMin">${TRAVELS.map(m => `<option value="${m}" ${s.travelMin === m ? 'selected' : ''}>${m ? m + ' min' : 'Aucun'}</option>`).join('')}</select></div>
+      <button class="btn block" data-a="notif">🔔 Activer les notifications</button>
+      <button class="btn block" style="margin-top:8px" data-a="onboard">Refaire l'accueil guidé</button>
+    </details>`);
+}
+function homeToggles() {
+  const mods = set().homeModules;
+  return mods.map((m, i) => `<div class="set-row"><div class="grow"><b>${HOME_MODULES[m.id][0]}</b><small>${HOME_MODULES[m.id][1]}</small></div>${m.on ? `<button class="icon-btn" data-a="home-up" data-i="${i}" ${i ? '' : 'disabled'} aria-label="Monter">${icon('up')}</button>` : ''}<button class="tg ${m.on ? 'on' : ''}" data-a="home-tg" data-i="${i}" aria-label="Afficher"></button></div>`).join('');
 }
 
 function openHome() {
-  const mods = set().homeModules;
-  openSheet(`${shTitle('🏠 Mon accueil', true)}
-    <p class="muted" style="margin-top:0">Choisis ce que tu veux voir en ouvrant l'appli, et dans quel ordre.</p>
-    ${mods.map((m, i) => `<div class="set-row"><button class="tg ${m.on ? 'on' : ''}" data-a="home-tg" data-i="${i}" aria-label="Afficher"></button><div class="grow"><b>${HOME_MODULES[m.id]}</b></div><button class="icon-btn" data-a="home-up" data-i="${i}" ${i ? '' : 'disabled'} aria-label="Monter">${icon('up')}</button><button class="icon-btn" data-a="home-down" data-i="${i}" ${i < mods.length - 1 ? '' : 'disabled'} aria-label="Descendre">${icon('down')}</button></div>`).join('')}`, 'menu');
+  openSheet(`${shTitle('Mon écran d\'accueil')}<p class="muted" style="margin-top:0">Allume ce que tu veux voir. Moins tu en mets, plus c'est clair.</p>${homeToggles()}`, 'home');
 }
 
 function openCats() {
@@ -1205,11 +1256,11 @@ function saveConnect(f, silent = false) {
 let toastT = null;
 function toast(msg, action = null) {
   const t = $('#toast');
-  t.innerHTML = `<span>${esc(msg).replace(/\n/g, '<br>')}</span>${action ? `<button>${esc(action.label)}</button>` : ''}`;
+  t.innerHTML = `<span>${esc(msg).replace(/\n/g, '<br>')}</span>${action ? (action.href ? `<a href="${esc(action.href)}" target="_blank" rel="noopener">${esc(action.label)}</a>` : `<button>${esc(action.label)}</button>`) : ''}`;
   t.hidden = false;
-  if (action) t.querySelector('button').onclick = () => { action.fn(); t.hidden = true; };
+  if (action) t.querySelector('a,button').onclick = () => { action.fn?.(); t.hidden = true; };
   clearTimeout(toastT);
-  toastT = setTimeout(() => { t.hidden = true; }, action ? 6000 : 3500);
+  toastT = setTimeout(() => { t.hidden = true; }, action ? 7000 : 3500);
 }
 
 let notified = new Set();
@@ -1306,12 +1357,25 @@ const ACTIONS = {
   note: el => editNote(el.dataset.id),
   subj: el => openSubject(el.dataset.k),
   close: closeSheet,
-  'sheet-back': () => (sheetBack === 'goals' ? openGoals() : openMenu()),
+  'sheet-back': () => (sheetBack === 'goals' ? openGoals() : openSettings()),
   settings: openMenu,
   'set-look': openLook, 'set-home': openHome, 'set-cats': openCats, 'set-goals': openGoals, 'set-connect': openConnect, 'set-data': openData,
-  'memo-due': () => { memoSeg = 'due'; go('memo'); },
-  'memo-notes': () => { memoSeg = 'notes'; go('memo'); },
-  'memo-seg': el => { memoSeg = el.dataset.s; renderMemo(); },
+  'memo-due': () => go('todo'),
+  'memo-notes': () => go('notes'),
+  'me-seg': el => { set().meSeg = el.dataset.s; save(); go('me'); },
+  'due-more': () => { showAllDue = true; renderTodo(); },
+  'g-added': el => { const e = evById(el.dataset.id); if (e) { e.addedToGoogle = true; save(); setTimeout(() => { closeSheet(); render(); toast('Ajouté dans Google Agenda ✓'); }, 400); } },
+  onboard: () => openOnboarding(0),
+  'ob-avatar': el => { set().avatar = el.dataset.v; save(); render(); openOnboarding(0); },
+  'ob-palette': el => { set().palette = el.dataset.v; set().accent = ''; save(); render(); openOnboarding(1); },
+  'ob-size': el => { set().textSize = +el.dataset.v; save(); render(); openOnboarding(1); },
+  'ob-int': el => { const m = set().homeModules.find(x => x.id === el.dataset.id); if (m) { m.on = !m.on; save(); } openOnboarding(2); },
+  'ob-prev': () => openOnboarding(Math.max(0, obStep - 1)),
+  'ob-next': () => {
+    if (obStep < 2) return openOnboarding(obStep + 1);
+    set().onboarded = true; save(); closeSheet(); go('today');
+    toast(`C'est prêt, ${set().name} ✨`);
+  },
   sync: () => { saveConnect($('#set-form'), true); closeSheet(); syncNow(); },
   'g-connect': () => { saveConnect($('#set-form'), true); closeSheet(); syncNow(); },
   'g-off': () => { G.disconnect(); closeSheet(); render(); toast('Google Agenda déconnecté.'); },
@@ -1326,14 +1390,14 @@ const ACTIONS = {
     toast(p === 'granted' ? 'Notifications activées 🔔' : 'Notifications refusées.');
   },
   // apparence
-  avatar: el => { set().avatar = el.dataset.v; save(); openLook(); render(); },
-  palette: el => { set().palette = el.dataset.v; set().accent = ''; save(); openLook(); render(); },
-  accent: el => { set().accent = el.dataset.v; save(); openLook(); render(); },
-  textsize: el => { set().textSize = +el.dataset.v; save(); openLook(); render(); },
+  avatar: el => { set().avatar = el.dataset.v; save(); keepScroll(openSettings); render(); },
+  palette: el => { set().palette = el.dataset.v; set().accent = ''; save(); keepScroll(openSettings); render(); },
+  accent: el => { set().accent = el.dataset.v; save(); keepScroll(openSettings); render(); },
+  textsize: el => { set().textSize = +el.dataset.v; save(); keepScroll(openSettings); render(); },
   'set-tg': el => { const k = el.dataset.k; set()[k] = !set()[k]; save(); el.classList.toggle('on', set()[k]); render(); },
   // accueil
-  'home-tg': el => { const m = set().homeModules[+el.dataset.i]; m.on = !m.on; save(); openHome(); render(); },
-  'home-up': el => { const a = set().homeModules, i = +el.dataset.i; if (i > 0) { [a[i - 1], a[i]] = [a[i], a[i - 1]]; save(); openHome(); render(); } },
+  'home-tg': el => { const m = set().homeModules[+el.dataset.i]; m.on = !m.on; save(); reopenHome(); render(); },
+  'home-up': el => { const a = set().homeModules, i = +el.dataset.i; if (i > 0) { [a[i - 1], a[i]] = [a[i], a[i - 1]]; save(); reopenHome(); render(); } },
   'home-down': el => { const a = set().homeModules, i = +el.dataset.i; if (i < a.length - 1) { [a[i + 1], a[i]] = [a[i], a[i + 1]]; save(); openHome(); render(); } },
   // catégories
   'cat-vis': el => { const s = set(), k = el.dataset.cat; s.hiddenCats = s.hiddenCats.includes(k) ? s.hiddenCats.filter(x => x !== k) : [...s.hiddenCats, k]; save(); el.classList.toggle('on', !s.hiddenCats.includes(k)); render(); },
@@ -1375,11 +1439,11 @@ const ACTIONS = {
   },
   'task-quick-date': el => { const f = $('#task-form'); const n = +el.dataset.n; f.date.value = n < 0 ? '' : ymd(addDays(new Date(), n)); if (n < 0) f.time.value = ''; },
   'cat-toggle': el => { const s = set(); const k = el.dataset.cat; s.hiddenCats = s.hiddenCats.includes(k) ? s.hiddenCats.filter(x => x !== k) : [...s.hiddenCats, k]; save(); render(); },
-  view: el => { set().calView = el.dataset.v; save(); renderCal(); if (['grid', '3days', 'day'].includes(el.dataset.v)) scrollGridToNow(); },
+  view: el => { set().calView = el.dataset.v; save(); renderCal(); if (el.dataset.v === 'day') scrollGridToNow(); },
   'cal-prev': () => calShift(-1),
   'cal-next': () => calShift(1),
   'cal-today': () => { calDate = startOfDay(new Date()); selDay = calDate; renderCal(); scrollGridToNow(); },
-  sel: el => { const d = fromYmd(el.dataset.d); if (sameDay(d, selDay)) { set().calView = 'day'; calDate = d; save(); renderCal(); scrollGridToNow(); return; } selDay = d; renderCal(); },
+  sel: el => { selDay = fromYmd(el.dataset.d); renderCal(); setTimeout(() => document.querySelector('.daylist-h')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); },
   day: el => { calDate = fromYmd(el.dataset.d); selDay = calDate; set().calView = 'day'; save(); go('cal'); },
   'new-at': el => { const d = new Date(+el.dataset.t); d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0); editEvent(null, { start: d.getTime(), end: d.getTime() + 3600000 }); },
   slot: (el, ev) => {
@@ -1413,8 +1477,8 @@ const ACTIONS = {
     if ($('#gsearch')) runSearch($('#gsearch').value);
   },
   'note-add-chk': () => { const t = $('#note-text'); t.value = (t.value && !t.value.endsWith('\n') ? t.value + '\n' : t.value) + '[ ] '; t.focus(); },
-  'note-f': el => { noteFolder = el.dataset.f; renderMemo(); },
-  'due-f': el => { dueFilter = el.dataset.f; renderMemo(); },
+  'note-f': el => { noteFolder = el.dataset.f; renderNotes(); },
+  'due-f': el => { dueFilter = el.dataset.f; showAllDue = false; renderTodo(); },
   'plan-rev': el => planRevisions(el.dataset.id),
   'plan-ok': el => {
     const ev = evById(el.dataset.id);
@@ -1505,7 +1569,7 @@ document.addEventListener('input', ev => {
   if (t.id === 'note-q') {
     noteQuery = t.value;
     const pos = t.selectionStart;
-    renderMemo();
+    renderNotes();
     const i = $('#note-q'); i.focus(); i.setSelectionRange(pos, pos);
   } else if (t.id === 'gsearch') runSearch(t.value);
   else if (t.dataset.memo) {
@@ -1529,12 +1593,14 @@ document.addEventListener('change', ev => { const t = ev.target; if (t.dataset.c
 
 $('#file-in').addEventListener('change', e => { const f = e.target.files[0]; if (f) handleFile(f); e.target.value = ''; });
 $('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) go(b.dataset.tab); });
-$('#btn-settings').onclick = openMenu;
+$('#btn-settings').onclick = openSettings;
+$('#btn-me').onclick = () => go(tab === 'me' ? 'today' : 'me');
 $('#btn-sync').onclick = syncNow;
 $('#btn-search').onclick = openSearch;
 $('#sheet-bg').onclick = closeSheet;
 $('#fab').onclick = () => {
-  if (tab === 'memo') return memoSeg === 'due' ? editTask(null) : editNote(null);
+  if (tab === 'todo') return editTask(null);
+  if (tab === 'notes') return editNote(null);
   editEvent(null, tab === 'cal' && !sameDay(selDay, new Date()) ? { start: new Date(selDay).setHours(10), end: new Date(selDay).setHours(11) } : {});
 };
 $('#main').addEventListener('scroll', () => $('#top').classList.toggle('scrolled', $('#main').scrollTop > 4), { passive: true });
@@ -1553,7 +1619,29 @@ $('#sheet').addEventListener('touchend', e => { if (shY >= 0 && e.changedTouches
 
 // Démarrage
 const qp = new URLSearchParams(location.search);
-go(['today', 'cal', 'memo', 'me', 'ai'].includes(qp.get('tab')) ? qp.get('tab') : 'today');
+go(['today', 'cal', 'todo', 'notes', 'me', 'ai'].includes(qp.get('tab')) ? qp.get('tab') : 'today');
+
+// Lien d'import en 1 clic : …/agenda/#import=<données compressées>. Les données restent dans le lien
+// (la partie après # n'est jamais envoyée au serveur) puis sont effacées de l'adresse.
+async function importFromLink() {
+  const m = /#import=([A-Za-z0-9_-]+)/.exec(location.hash);
+  if (!m) return false;
+  history.replaceState(null, '', location.pathname + location.search);
+  try {
+    const b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(b64 + '==='.slice((b64.length + 3) % 4)), c => c.charCodeAt(0));
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    const data = JSON.parse(await new Response(stream).text());
+    const events = (data.e || []).map(x => ({ gid: x.g, calId: 'primary', source: 'google', title: x.t, start: x.s, end: x.f, allDay: !!x.a, location: x.l || '', notes: '' }));
+    const r = mergeEvents(events);
+    if (data.n && (!set().name || set().name === 'Chahyn')) set().name = data.n;
+    if (data.ab && !set().about) set().about = data.ab;
+    save(); render();
+    toast(`Ton agenda est importé : ${r.added + r.updated} événements ✓`);
+    return true;
+  } catch (e) { console.warn(e); toast('Le lien d\'import est incomplet. Réessaie depuis le message d\'origine.'); return false; }
+}
+importFromLink().then(() => { if (!set().onboarded) openOnboarding(0); });
 setInterval(focusTick, 1000);
 setInterval(() => {
   checkReminders();
