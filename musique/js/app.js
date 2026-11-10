@@ -1383,6 +1383,20 @@ async function smartCommand(text) {
   const mg = await manageCommand(n);
   if (mg) return mg;
 
+  // --- correction : « je voulais les sons officiels, pas des compils / vidéos »
+  if (S.lastYtQuery && S.settings.ytKey && /(officiel|vrais? sons?|vraies? musiques?|pas (des |de |une )?(compil|mix|video|ensemble|longue)|que des sons|titre par titre|morceaux? separes?)/.test(n)) {
+    try {
+      const res = await Src.ytSearch(S.settings.ytKey, S.lastYtQuery + ' official audio', 20);
+      if (res.length) {
+        const ts = res.map(x => remoteTrack(x, 'yt'));
+        const last = S.lastPlaylistId && S.playlists.get(S.lastPlaylistId);
+        if (last) { for (const t of ts) { t.saved = true; await db.put('tracks', t); } last.trackIds = ts.map(t => t.id); last.updatedAt = Date.now(); await db.put('playlists', last); bump(); }
+        playIds(ts.map(t => t.id), 0, { context: { label: last?.name || 'YouTube' } });
+        return `Compris : que des morceaux officiels, titre par titre. ${plural(ts.length, 'son')}${last ? ` dans « ${last.name} »` : ''}, je lance.`;
+      }
+    } catch { /* suite */ }
+  }
+
   // --- minuteur
   let m = n.match(/(?:arrete|coupe|stop|eteins|pause).*?(?:dans|d ici|apres)\s*(\d+)\s*(min|minute|h|heure)/);
   if (m) { const mins = m[2].startsWith('h') ? +m[1] * 60 : +m[1]; player.setSleep(mins); return `D'accord, j'arrête la musique dans ${mins} minutes.`; }
@@ -1453,6 +1467,7 @@ async function smartCommand(text) {
     if (lib.length >= 5 && !/radio/.test(ask)) { playIds(lib.map(t => t.id), 0, { context: { label: label }, shuffle: true }); return `Je lance ${plural(lib.length, 'titre')} ${label} de ta bibliothèque.`; }
     if (S.settings.ytKey && !/radio/.test(ask)) {
       try {
+        S.lastYtQuery = ytq;
         const res = await Src.ytSearch(S.settings.ytKey, ytq, 20);
         if (res.length) return await ytMix(label.charAt(0).toUpperCase() + label.slice(1), res.map(x => remoteTrack(x, 'yt')), n);
       } catch { /* on tente la radio */ }
@@ -1470,6 +1485,7 @@ async function smartCommand(text) {
     if (mood) {
       const [tag, ytq] = MOOD_RADIO[mood[0]];
       if (S.settings.ytKey) {
+        S.lastYtQuery = ytq;
         try { const res = await Src.ytSearch(S.settings.ytKey, ytq, 25); if (res.length) return await ytMix(AI.MOODS[mood[0]]?.label || ytq, res.map(x => remoteTrack(x, 'yt')), n); } catch { /* radio */ }
       }
       try { const list = await Src.radioByTag(tag, 5); if (list.length) { const t = remoteTrack(list[0], 'radio'); playIds([t.id], 0, { context: { label: 'Radio' } }); return `Pour ça, je te mets la radio ${t.title}.`; } } catch { /* rien */ }
