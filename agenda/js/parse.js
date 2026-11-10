@@ -12,8 +12,25 @@ const monthIdx = s => MOIS.findIndex(m => m.startsWith(s.replace('.', '').slice(
 const NUM = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6, sept: 7, huit: 8, neuf: 9, dix: 10, onze: 11, douze: 12, quinze: 15, vingt: 20, trente: 30 };
 const num = s => (s in NUM ? NUM[s] : parseInt(s, 10));
 
+// Retire les formules d'oral : « je voudrais que tu mettes… », « est-ce que tu peux ajouter… »
+export function stripPreamble(input) {
+  let s = input.trim().replace(/[’]/g, "'"), prev;
+  let guard = 0;
+  do {
+    prev = s;
+    s = s
+      .replace(/^(alors|euh+|bon|ok|okay|ben|du coup|hey|salut|dis|écoute|ecoute|s'il te pla[iî]t|stp)[ ,!.]+/i, '')
+      .replace(/^(est[- ]ce (que|qu')\s*)?(tu (peux|pourrais|veux|voudrais) ?(bien)?|peux[- ]tu|pourrais[- ]tu|j'aimerais|je voudrais|je veux|je souhaite|il faudrait|il faut|faudrait|j'ai besoin|merci de|n'oublie pas de)( bien)?( (que|qu'))?( tu| je| j'|\s)?\s*/i, '')
+      .replace(/^(me |m')?(mettre|mette|mettes|mets|met|ajouter|ajoute|ajoutes|rajouter|rajoute|programmer|programme|programmes|cr[ée]er|cr[ée]e|cr[ée]es|planifier|planifie|noter|note|notes|inscrire|inscris|placer|place|caler|cale|bloquer|bloque|enregistrer|enregistre|r[ée]server|r[ée]serve)(-moi| moi)?\b\s*/i, '')
+      .replace(/^(pour |dans (mon |l'|le )?(agenda|calendrier|planning)\s*)/i, '')
+      .replace(/^(que |qu')?(je dois|je devrai|il faut que je|faut que je|je dois aller|je vais)\s+/i, '')
+      .trim();
+  } while (s !== prev && guard++ < 6);
+  return s || input.trim();
+}
+
 export function parseFr(input, now = new Date()) {
-  const src = input.trim();
+  const src = stripPreamble(input);
   let t = norm(src);
   const full = t;
   const spans = [];
@@ -35,9 +52,9 @@ export function parseFr(input, now = new Date()) {
     if (m[1].includes('soir')) part = 19; else if (m[1].includes('matin')) part = 9;
     else if (m[1].includes('apres') || m[1].includes('aprem')) part = 14; else if (m[1].includes('midi')) part = 12; else if (m[1].includes('nuit')) part = 22;
   }) ||
-  take(/\bapres[- ]demain\b/, () => { day = addDays(today, 2); explicitDay = true; }) ||
+  take(/\bapres[- ]demain\b/, () => { day = addDays(today, now.getHours() < 4 ? 1 : 2); explicitDay = true; }) ||
   take(/\bdemain( (matin|soir|apres[- ]?midi|aprem|midi))?\b/, m => {
-    day = addDays(today, 1); explicitDay = true;
+    day = addDays(today, now.getHours() < 4 ? 0 : 1); explicitDay = true; // à 1h du matin, « demain » = la journée qui commence
     if (m[2]) part = m[2] === 'matin' ? 9 : m[2] === 'soir' ? 19 : m[2] === 'midi' ? 12 : 14;
   }) ||
   take(/\bdans (\d+|un|une|deux|trois|quatre|cinq|six|sept|huit|dix|quinze) (jours?|semaines?|mois)\b/, m => {
@@ -98,7 +115,7 @@ export function parseFr(input, now = new Date()) {
   // ----- intention -----
   t = full;
   let intent = 'event';
-  if (/^(qu'?est[- ]ce (que|qu')|qu'ai[- ]je|j'ai quoi|c'est quoi|quoi de prevu|montre|affiche|liste|quel(le)?s? |quand |combien |ai[- ]je |est[- ]ce que j'ai|mon programme|mes (examens|echeances|devoirs|rdv|rendez|cours|notes|taches))/.test(t) ||
+  if (/^(dis[- ]moi|je fais quoi|j'ai (quelque chose|des trucs|un truc|cours|quoi)|j'ai de prevu|quel est mon|c'est quoi mon|qu'?est[- ]ce (que|qu')|qu'ai[- ]je|j'ai quoi|c'est quoi|quoi de prevu|montre|affiche|liste|quel(le)?s? |quand |combien |ai[- ]je |est[- ]ce que j'ai|mon programme|mes (examens|echeances|devoirs|rdv|rendez|cours|notes|taches))/.test(t) ||
       (/\?$/.test(t) && !/^(ajoute|mets|programme|planifie|cree|note|rappelle)/.test(t))) intent = 'query';
   else if (/\b(a rendre|rendre|deadline|date limite|echeance|avant (le |lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain|\d)|tache|devoir|a faire|to ?do)\b/.test(t)) intent = 'task';
   else if (/^(note|noter|notes?\b|retiens|n'oublie pas|rappelle[- ]moi|pense a|souviens[- ]toi|idee)/.test(t) && !time) intent = explicitDay ? 'task' : 'note';
@@ -120,6 +137,14 @@ export function parseFr(input, now = new Date()) {
     .replace(/^[\s,:;.-]+|[\s,:;.-]+$/g, '')
     .trim();
   title = title.replace(/\b(avant|pour|le|à|a|de|du|vers|ce|cet|cette|et)\s*$/i, '').trim();
+  // « … qui s'appelle Test » → le titre, c'est « Test »
+  const named = /(?:qui s'appelle(?:ra)?|qui s'intitule|intitul[ée]e?s?|nomm[ée]e?s?|appel[ée]e?s?|avec (?:le|comme) (?:titre|nom))(?:\s*:\s*|\s+)(.+)$/i.exec(title);
+  if (named) title = named[1];
+  title = title
+    .replace(/^(pour |un |une |le |la )+/i, '')
+    .replace(/\b(un |une )?(nouvel(le)? |nouveau )?(événement|évènement|evenement|truc|chose|activité|activite|créneau|creneau)\b\s*/gi, '')
+    .replace(/^(pour |un |une |de |d')+/i, '')
+    .replace(/\s{2,}/g, ' ').replace(/^[\s,:;.-]+|[\s,:;.-]+$/g, '').trim();
   if (title) title = title[0].toUpperCase() + title.slice(1);
 
   // ----- construction -----

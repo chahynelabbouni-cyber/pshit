@@ -609,3 +609,38 @@ body { font-size: 17px; }
 .v-type { margin-top: auto; width: 100%; max-width: 520px; display: flex; gap: 8px; padding-top: 18px; }
 .v-type input { flex: 1; min-width: 0; background: var(--bg2); border: 1px solid var(--line2); border-radius: 16px; padding: 14px; font-size: 16px; outline: 0; }
 .v-type button { width: 52px; border-radius: 16px; background: var(--bg3); display: grid; place-items: center; color: var(--accent); }
+
+/* =====================================================================
+   v5 — planning : barre des jours + journée en grand
+   ===================================================================== */
+.cal-top { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.cal-top .seg { flex: 1; margin: 0; }
+.wstrip { display: flex; align-items: stretch; gap: 4px; margin-bottom: 18px; touch-action: pan-y; }
+.ws-nav { width: 30px; flex: none; display: grid; place-items: center; color: var(--muted); border-radius: 12px; }
+.ws-nav svg { width: 20px; height: 20px; }
+.ws-day { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0 8px; border-radius: 16px; background: var(--bg2); border: 1px solid var(--line2); }
+.ws-day span { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; }
+.ws-day b { font-size: 20px; font-weight: 800; line-height: 1; }
+.ws-day.today b { color: var(--accent); }
+.ws-day.sel { background: var(--accent); border-color: var(--accent); }
+.ws-day.sel span, .ws-day.sel b { color: var(--on-accent); }
+.ws-dots { display: flex; gap: 3px; height: 6px; justify-content: center; }
+.ws-dots em { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+.ws-day.sel .ws-dots em { background: var(--on-accent) !important; }
+.mnav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.mnav b { font-size: 18px; }
+.month { margin-bottom: 18px; }
+.month .mc { border: 1px solid transparent; font: inherit; color: inherit; min-height: 50px; justify-content: center; gap: 4px; }
+.month .mc .dn { font-size: 16px; font-weight: 650; width: auto; height: auto; line-height: 1.2; box-shadow: none !important; }
+.month .mc.today .dn { color: var(--accent); background: none; font-weight: 800; }
+.month .mc.sel { background: var(--accent); }
+.month .mc.sel .dn { color: var(--on-accent); }
+.month .mc.sel .ws-dots em { background: var(--on-accent) !important; }
+.day-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin: 0 4px 10px; }
+.day-head b { display: block; font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+.day-head span { color: var(--muted); font-size: 15px; }
+.day-head .day-load { font-size: 14px; font-weight: 700; color: var(--l); background: color-mix(in srgb, var(--l) 14%, transparent); padding: 5px 10px; border-radius: 10px; white-space: nowrap; }
+.day-list { background: var(--bg2); border: 1px solid var(--line2); border-radius: 22px; padding: 8px 10px; min-height: 120px; touch-action: pan-y; }
+.day-list .empty { text-align: center; padding: 30px 0; }
+.day-list .empty small { color: var(--dim); }
+#fab { bottom: calc(var(--tabs-h) + var(--safe-b) + 28px); }

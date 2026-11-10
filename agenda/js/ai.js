@@ -122,8 +122,61 @@ function answerQuery(text, p) {
   return `${cap(label)}, tu as ${evs.length} chose${evs.length > 1 ? 's' : ''} de prévue${evs.length > 1 ? 's' : ''}${timed.length ? `, de ${hm(timed[0].start)} à ${hm(Math.max(...timed.map(e => e.end)))}` : ''} :\n` + evs.map(listLine).join('\n');
 }
 
+// Après minuit, on parle de « ce mercredi » plutôt que d'« aujourd'hui »
+const rd = d => (new Date().getHours() < 4 && dayDiff(new Date(), d) === 0) ? 'ce ' + fmtDay(d).split(' ')[0] : relDay(d);
+
+// Conversation : quand il manque une info, l'assistant pose la question et attend la réponse
+let pending = null; // { kind: 'time' | 'title' | 'date', ev, at }
+const ask = (kind, ev, reply) => { pending = { kind, ev, at: Date.now() }; return { reply, actions: [], expectsAnswer: true }; };
+function finishEvent(ev) {
+  pending = null;
+  const title = ev.title || 'Événement';
+  return {
+    reply: `C'est programmé : ${title}, ${rd(ev.start)}${ev.allDay ? ', toute la journée' : ` de ${hm(ev.start)} à ${hm(ev.end)}`}.`,
+    actions: [{ type: 'create_event', title, start: ev.start, end: ev.end, allDay: ev.allDay }],
+  };
+}
+const VAGUE = /^(rendez[- ]vous|rdv|événement|évènement|evenement|truc|chose|activité|un truc|quelque chose)$/i;
+function nextQuestion(ev) {
+  if (ev.title && VAGUE.test(ev.title.trim())) ev.title = '';
+  if (!ev.start) return ask('date', ev, ev.title ? `« ${ev.title} », c'est pour quand ?` : 'Pour quand ? (ex : « vendredi à 10h »)');
+  if (ev.allDay && !ev.allDayConfirmed) return ask('time', ev, `${ev.title ? `« ${ev.title} » ` : ''}${rd(ev.start)}, à quelle heure ? (ou dis « toute la journée »)`);
+  if (!ev.title) return ask('title', ev, `${cap(rd(ev.start))}${ev.allDay ? '' : ' à ' + hm(ev.start)}, c'est noté. Comment je l'appelle ?`);
+  return finishEvent(ev);
+}
+function continuePending(text, p) {
+  const tn = norm(text).trim();
+  if (/^(non|annule|laisse tomber|rien|oublie|stop|pas grave)\b/.test(tn)) { pending = null; return { reply: "D'accord, j'annule.", actions: [] }; }
+  const ev = { ...pending.ev };
+  if (pending.kind === 'title') {
+    const t = text.replace(/^(ça s'appelle|ca s'appelle|appelle[- ]le|appelle[- ]la|mets|c'est|le titre c'est|le nom c'est)\s*/i, '').replace(/[.!]+$/, '').trim();
+    if (!t) return null;
+    ev.title = t[0].toUpperCase() + t.slice(1);
+    return nextQuestion(ev);
+  }
+  if (pending.kind === 'time') {
+    if (/journee|toute la journee|pas d'heure|sans heure/.test(tn)) { ev.allDayConfirmed = true; return nextQuestion(ev); }
+    if (!p.hasTime) return null;
+    const base = new Date(ev.start), t1 = new Date(p.start);
+    base.setHours(t1.getHours(), t1.getMinutes(), 0, 0);
+    ev.start = base.getTime(); ev.end = ev.start + (p.end - p.start); ev.allDay = false;
+    return nextQuestion(ev);
+  }
+  if (pending.kind === 'date') {
+    if (!p.start) return null;
+    Object.assign(ev, { start: p.start, end: p.end, allDay: p.allDay });
+    return nextQuestion(ev);
+  }
+  return null;
+}
+
 export function localAssistant(text) {
   const p = parseFr(text);
+  if (pending && Date.now() - pending.at < 3 * 60000) {
+    const r = continuePending(text, p);
+    if (r) return r;
+  }
+  pending = null;
   const t = text.toLowerCase();
   const tn = norm(text);
   // briefing
@@ -148,14 +201,14 @@ export function localAssistant(text) {
     const now = Date.now();
     const isExam = /(examen|exam|controle|partiel|cc)/.test(kw);
     const e = eventsBetween(now, now + 200 * DAY).sort((a, b) => a.start - b.start).find(ev => isExam ? ev.cat === 'exam' : words.length && words.every(w => norm(ev.title + ' ' + ev.location).includes(w)));
-    if (e) return { reply: `${cleanT(e)} : ${relDay(e.start)}${e.allDay ? '' : ' à ' + hm(e.start)}${e.location ? ', ' + e.location : ''}.`, actions: [] };
+    if (e) return { reply: `${cleanT(e)} : ${rd(e.start)}${e.allDay ? '' : ' à ' + hm(e.start)}${e.location ? ', ' + e.location : ''}.`, actions: [] };
     if (words.length) return { reply: `Je ne trouve rien de prévu pour « ${nm[1].trim()} ».`, actions: [] };
   }
   // supprimer / annuler
   if (/^(supprime|annule|efface|retire|enleve|enlève)/.test(tn)) {
     const e = findEvent(text, p);
     if (!e) return { reply: 'Je ne vois pas de quel événement tu parles. Donne-moi son nom (ex : « annule la boxe de vendredi »).', actions: [] };
-    return { reply: `J'ai supprimé « ${e.title} » (${relDay(e.start)}${e.allDay ? '' : ' ' + hm(e.start)}).`, actions: [{ type: 'delete_event', id: e.id }] };
+    return { reply: `J'ai supprimé « ${e.title} » (${rd(e.start)}${e.allDay ? '' : ' ' + hm(e.start)}).`, actions: [{ type: 'delete_event', id: e.id }] };
   }
   // déplacer
   if (/^(deplace|decale|bouge|avance|recule|repousse|reporte|change)/.test(tn)) {
@@ -174,7 +227,7 @@ export function localAssistant(text) {
       start = base.getTime();
     }
     if (!start) return { reply: `À quel moment veux-tu déplacer « ${e.title} » ?`, actions: [] };
-    return { reply: `« ${e.title} » est déplacé à ${relDay(start)} ${hm(start)}.`, actions: [{ type: 'update_event', id: e.id, start, end: start + dur }] };
+    return { reply: `« ${e.title} » est déplacé à ${rd(start)} ${hm(start)}.`, actions: [{ type: 'update_event', id: e.id, start, end: start + dur }] };
   }
   // demandes spéciales
   if (/(planifi|organise|pr[ée]vois).*(r[ée]vision|r[ée]viser)/.test(t)) {
@@ -184,7 +237,7 @@ export function localAssistant(text) {
     const plan = revisionPlan(ex.ref);
     if (!plan.length) return { reply: `Je n'ai pas trouvé de créneau libre avant « ${ex.title} ».`, actions: [] };
     return {
-      reply: `Je te bloque ${plan.length} séance${plan.length > 1 ? 's' : ''} de révision avant « ${ex.title} » (${relDay(ex.due)}).`,
+      reply: `Je te bloque ${plan.length} séance${plan.length > 1 ? 's' : ''} de révision avant « ${ex.title} » (${rd(ex.due)}).`,
       actions: plan.map(s => ({ type: 'create_event', title: revisionTitle(ex.ref), start: s.start, end: s.end, category: 'revision' })),
     };
   }
@@ -194,33 +247,31 @@ export function localAssistant(text) {
     const e = findEvent(text.replace(before[0], ' '), p);
     const min = +before[1] * (before[2].startsWith('h') ? 60 : 1);
     if (!e) return { reply: 'Pour quel événement ? Ex : « rappel 30 min avant la boxe ».', actions: [] };
-    return { reply: `D'accord, je te préviens ${fmtDuration(min * MIN)} avant « ${cleanT(e)} » (${relDay(e.start)} ${hm(e.start)}).`, actions: [{ type: 'set_event_reminder', id: e.id, minutes: min }] };
+    return { reply: `D'accord, je te préviens ${fmtDuration(min * MIN)} avant « ${cleanT(e)} » (${rd(e.start)} ${hm(e.start)}).`, actions: [{ type: 'set_event_reminder', id: e.id, minutes: min }] };
   }
   // rappel à un moment précis : « rappelle-moi d'appeler maman demain à 18h »
   if (/(rappelle|rappel|previens|previens[- ]moi|alerte|reveille|n'oublie pas de me)/.test(tn) && (p.hasTime || p.explicitDay)) {
     let at = p.start;
     if (!p.hasTime) at = new Date(p.start).setHours(9, 0, 0, 0);
-    const what = (p.title || 'Rappel').replace(/^(un |le )?rappel\s*(pour|de|d')?\s*/i, '') || 'Rappel';
+    const what = (p.title || 'Rappel').replace(/^(me |m')?(rappeler|rappelle[- ]moi|pr[ée]venir|pr[ée]viens[- ]moi)\s*(de |d'|que |qu')?/i, '').replace(/^(un |le )?rappel\s*(pour|de|d')?\s*/i, '') || 'Rappel';
     const title = what[0].toUpperCase() + what.slice(1);
-    return { reply: `C'est noté, je te le rappelle ${relDay(at)} à ${hm(at)} : « ${title} ».`, actions: [{ type: 'add_reminder', title, start: at }] };
+    return { reply: `C'est noté, je te le rappelle ${rd(at)} à ${hm(at)} : « ${title} ».`, actions: [{ type: 'add_reminder', title, start: at }] };
   }
   if (p.intent === 'query') return { reply: answerQuery(text, p), actions: [] };
+  if (p.intent === 'note' && /(evenement|rdv|rendez|seance|cours|reunion)/.test(tn) && /(ajoute|mets|met |programme|cree|planifie|mettre)/.test(tn)) {
+    return nextQuestion({ title: p.title, start: null });
+  }
   if (p.intent === 'note') {
     if (!p.title) return { reply: 'Dis-moi ce que tu veux noter 🙂', actions: [] };
     return { reply: `C'est noté : « ${p.title} ».`, actions: [{ type: 'add_note', text: p.title }] };
   }
   if (p.intent === 'task') {
     return {
-      reply: `Ajouté à ton échéancier : « ${p.title || 'Tâche'} »${p.start ? ', pour ' + relDay(p.start) + (p.hasTime ? ' à ' + hm(p.start) : '') : ''}.`.replace('..', '.'),
+      reply: `Ajouté à ton échéancier : « ${p.title || 'Tâche'} »${p.start ? ', pour ' + rd(p.start) + (p.hasTime ? ' à ' + hm(p.start) : '') : ''}.`.replace('..', '.'),
       actions: [{ type: 'add_task', title: p.title || 'Tâche', due: p.start, dueTime: p.hasTime }],
     };
   }
-  if (!p.start) return { reply: 'Je n\'ai pas compris la date. Essaie par ex. « boxe jeudi 20h30 ».', actions: [] };
-  const title = p.title || 'Événement';
-  return {
-    reply: `C'est programmé : ${title}, ${relDay(p.start)}${p.allDay ? ' (journée)' : ` de ${hm(p.start)} à ${hm(p.end)}`}.`.replace('..', '.'),
-    actions: [{ type: 'create_event', title, start: p.start, end: p.end, allDay: p.allDay }],
-  };
+  return nextQuestion({ title: p.title, start: p.start, end: p.end, allDay: p.allDay });
 }
 
 // ---------------------------------------------------------------------
