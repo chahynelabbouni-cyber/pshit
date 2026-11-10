@@ -1,10 +1,10 @@
-import { db } from './db.js?v=14';
-import { readTags } from './tags.js?v=14';
-import { Player, isIOS } from './player.js?v=14';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=14';
-import * as AI from './ai.js?v=14';
-import * as Voice from './voice.js?v=14';
-import * as Src from './sources.js?v=14';
+import { db } from './db.js?v=15';
+import { readTags } from './tags.js?v=15';
+import { Player, isIOS } from './player.js?v=15';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=15';
+import * as AI from './ai.js?v=15';
+import * as Voice from './voice.js?v=15';
+import * as Src from './sources.js?v=15';
 
 const BRAND = 'Maison Chahyn';
 
@@ -1267,7 +1267,7 @@ async function aiSend(text, { navigate = true } = {}) {
     S.aiBusy = false; document.body.classList.remove('ai-busy');
   }
   if (!quick) { try { quick = await smartCommand(text); } catch (e) { console.warn(e); } }
-  if (!quick && !tracks.length) quick = 'Ta bibliothèque est vide pour l\'instant. Demande-moi une radio (« mets Skyrock »), ajoute ta clé YouTube dans les Réglages pour que je trouve n\'importe quel son, ou importe tes fichiers.';
+  if (!quick && !tracks.length) quick = S.settings.ytKey ? 'Je n\'ai pas compris. Essaie « mets Ninho », « mets Skyrock », « mets les infos », « pause » ou « suivant ».' : 'Je n\'ai pas compris. Essaie « mets Skyrock » ou « mets les infos ». Ajoute ta clé YouTube dans les Réglages pour que je trouve n\'importe quel son.';
   if (quick) {
     const lm = S.lastMix; S.lastMix = null;
     S.chat.push({ role: 'assistant', text: quick, mix: lm ? { name: lm.name, desc: lm.desc, ids: lm.tracks.map(t => t.id) } : null });
@@ -1339,8 +1339,8 @@ async function aiSend(text, { navigate = true } = {}) {
 const GENRES = [
   ['classique', /\b(classique|classical|mozart|beethoven|chopin|bach|piano classique|orchestre|symphonie|opera)\b/, 'classical', 'musique classique'],
   ['jazz', /\bjazz\b/, 'jazz', 'jazz'],
+  ['hip-hop', /\b(hip hop|hiphop|hip-hop|us rap|rap us|rap americain)\b/, 'hip-hop', 'rap us hits'],
   ['rap fr', /\b(rap fr|rap francais|rap)\b/, 'rap francais', 'rap français'],
-  ['hip-hop', /\b(hip hop|hiphop|hip-hop|us rap)\b/, 'hip-hop', 'hip hop'],
   ['drill', /\bdrill\b/, 'drill', 'drill'],
   ['rnb', /\b(rnb|r n b|r&b|r and b)\b/, 'rnb', 'rnb'],
   ['afro', /\b(afro|afrobeat|afrobeats|amapiano)\b/, 'afrobeats', 'afrobeats'],
@@ -1364,13 +1364,29 @@ const MOOD_RADIO = { ecole: ['lofi', 'lofi hip hop pour étudier'], sport: ['edm
 
 function cleanAsk(text) {
   let n = norm(text).replace(/[.!?,;:"«»]/g, ' ').replace(/['’`-]/g, ' ').replace(/\s+/g, ' ').trim();
-  n = n.replace(/^((hey|ok|okay|dis|allez|bon|alors|euh|concierge|maison)\s+)+/, '');
-  n = n.replace(/\b(s il te plait|s il vous plait|stp|svp|merci|please)\b/g, ' ').replace(/\s+/g, ' ').trim();
-  n = n.replace(/^(est ce que |est ce qu )?(tu peux|tu pourrais|peux tu|pourrais tu|tu veux bien|je veux|je voudrais|j aimerais|j ai envie d ecouter|j ai envie de|j ai envie d|vas y|fais moi|on ecoute|on met)\s+/, '');
+  n = n.replace(/^((hey|ok|okay|dis|allez|bon|alors|euh|wesh|wsh|yo|jsp|bref|frere|frerot|gros|concierge|maison|stp)\s+)+/, '');
+  n = n.replace(/\b(s il te plait|s il vous plait|stp|svp|please|merci)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  n = n.replace(/^(est ce que |est ce qu )?(tu peux|tu pourrais|peux tu|pourrais tu|tu veux bien|je veux|jveux|j veux|je voudrais|jvoudrais|j aimerais|j ai envie d ecouter|j ai envie de|j ai envie d|vas y|fais moi|on ecoute|on met)\s+/, '');
+  n = n.replace(/^(?:me |m )?(mettre|lancer|jouer|passer|ecouter)\s+/, (_, v) => ({ mettre: 'mets ', lancer: 'lance ', jouer: 'joue ', passer: 'passe ', ecouter: 'ecoute ' })[v]);
+  // nombres écrits en lettres → chiffres (« avance d une minute »)
+  const NUM = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, dix: 10, quinze: 15, vingt: 20, trente: 30, quarante: 40, cinquante: 50 };
+  n = n.replace(/\b(une?|deux|trois|quatre|cinq|dix|quinze|vingt|trente|quarante|cinquante)\s+(s|sec|secondes?|min|minutes?|h|heures?)\b/g, (_, w, u) => NUM[w] + ' ' + u);
   return n.trim();
 }
 
 function fmtDur(sec) { return sec >= 60 ? `${Math.floor(sec / 60)} min ${String(Math.round(sec % 60)).padStart(2, '0')}` : `${Math.round(sec)} s`; }
+
+async function playYtQuery(q, label) {
+  if (!S.settings.ytKey) return null;
+  try {
+    S.lastYtQuery = q;
+    const res = await Src.ytSearch(S.settings.ytKey, q, 15);
+    if (!res.length) return null;
+    const ts = res.map(x => remoteTrack(x, 'yt'));
+    playIds(ts.map(t => t.id), 0, { context: { label: label || q } });
+    return `Je lance ${label || q} : « ${ts[0].title} »${ts[0].artist ? ' de ' + ts[0].artist : ''}.`;
+  } catch { return null; }
+}
 
 async function smartCommand(text) {
   const n = cleanAsk(text);
@@ -1378,11 +1394,36 @@ async function smartCommand(text) {
   const cur = player.current;
   S.cmdPaused = false;
   S.lastMix = null;
+
+  // --- petite conversation (testée avant le nettoyage, qui retire « merci »)
+  const raw = norm(text).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const SMALL = [
+    [/^(salut|slt|bonjour|bjr|coucou|hello|hey|yo|wesh|wsh|bonsoir|cc)( concierge| frere| toi| maison)?$/, () => `Salut${S.settings.name ? ' ' + S.settings.name : ''} ! Je te mets quoi ?`],
+    [/^(merci|mrc|thx|merci (beaucoup|bcp)|(merci )?c (est )?(bien|cool|top|parfait|lourd|chaud)( merci)?|nickel|parfait|top|trop bien)$/, () => 'Avec plaisir !'],
+    [/^(t es qui|tes qui|tu es qui|qui es tu|c est qui toi|t es quoi)$/, () => 'Je suis le Concierge, ton assistant musique : sons, radios, podcasts, infos et playlists.'],
+    [/^(tu sais faire quoi|tu fais quoi|aide|help|qu est ce que tu sais faire|comment ca marche|tu peux faire quoi)$/, () => 'Dis-moi par exemple « mets Ninho », « mets Skyrock », « mets les infos », « lance LEGEND », « une playlist pour le sport », « pause », « suivant », « supprime cette playlist ».'],
+    [/^((salut|slt|bonjour|bjr|coucou|hello|hey|yo|wesh|wsh|bonsoir|cc)( toi)? )?(ca va|cv|tu vas bien|la forme|ca va toi|comment ca va|comment tu vas)$/, () => 'Ça va bien ! Je te mets quoi ?'],
+    [/^(mdr|lol|ptdr|xd|haha+|ok|okay|d accord|dac|ouais|oui|non merci)$/, () => 'Ok ! Dis-moi si tu veux autre chose.'],
+  ];
+  for (const [re, f] of SMALL) if (re.test(raw)) return f();
   if (!n) return null;
+
+  // --- volume (avant la gestion des playlists : « mets le son à 30 » ne crée pas de playlist)
+  if (/(volume|son).*(au max|a fond|au maximum|a 100)|^a fond$/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; player.setVolume(1); return 'Volume à 100 %.'; }
+  let mv = n.match(/(?:volume|son)\s+(?:a\s+|au\s+)?(\d+)/);
+  if (mv) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume(+mv[1] / 100); return `Volume à ${Math.round(v * 100)} %.`; }
+  // --- répétition et minuteur « off » (avant la pause : « arrête de répéter » ne met pas en pause)
+  if (/(boucle|repet)/.test(n)) { player.repeat = /(arrete|plus|stop|desactive|enleve|retire|annule|coupe|sans|enlever)/.test(n) ? 'off' : 'one'; player.emit('modes'); return player.repeat === 'one' ? 'Je répète ce titre.' : 'Répétition désactivée.'; }
+  if (/(annule|enleve|desactive|supprime|stop|arrete).*(minuteur|timer|mise en veille)/.test(n)) { player.setSleep(0); return 'Minuteur annulé.'; }
 
   // --- gestion : supprimer / annuler / renommer / retirer / ajouter
   const mg = await manageCommand(n);
   if (mg) return mg;
+
+  // --- suite de conversation : même artiste, demandes vagues
+  if (cur && cur.artist && /\b(de lui|d elle|d eux|meme artiste|du meme|de cet artiste|plus de lui|plus d elle|d autres sons de)\b/.test(n)) {
+    return await playYtQuery(cur.artist, `d'autres sons de ${cur.artist}`) || `Je n'ai rien trouvé d'autre de ${cur.artist}.`;
+  }
 
   // --- correction : « je voulais les sons officiels, pas des compils / vidéos »
   if (S.lastYtQuery && S.settings.ytKey && /(officiel|vrais? sons?|vraies? musiques?|pas (des |de |une )?(compil|mix|video|ensemble|longue)|que des sons|titre par titre|morceaux? separes?)/.test(n)) {
@@ -1408,20 +1449,20 @@ async function smartCommand(text) {
     if (/\b(pause|stop|stoppe|arrete|arreter|coupe|silence|tais toi|chut)\b/.test(n) && !/\b(pas|plus de pub)\b/.test(n)) { player.pause(); S.cmdPaused = true; return 'Pause.'; }
     if (/^(reprends?|reprendre|relance|relancer|remets?|remettre|continue|continuer|play|lecture|joue|vas y|go|allez|resume)( la musique| le son| la lecture| le morceau| le titre)?$/.test(n)) { if (!cur) return 'Il n\'y a rien en cours. Dis-moi quoi écouter.'; player.play(); return 'C\'est reparti.'; }
     if (/(recommence|depuis le debut|au debut|reprends au debut)/.test(n)) { player.seek(0); player.play(); return 'Je reprends depuis le début.'; }
-    if (/\b(suivant|suivante|next|skip|zappe|zapper)\b|passe (a la suivante|au suivant|le son|la musique|ce son|cette musique|le titre|ce titre)|change (de )?(son|musique|titre|chanson|morceau)|une autre|j aime pas|nul$/.test(n)) { if (!cur) return 'Rien en cours.'; S.voiceNext = true; player.next(); return 'Titre suivant.'; }
+    if (/\b(suivant|suivante|next|skip|zappe|zapper|la suite)\b|^passe$|^(non )?(pas (ca|celui la|celle la|ce son|ce titre)|une? autre( son| chanson| version)?|autre chose)\b|passe (a la suivante|au suivant|le son|la musique|ce son|cette musique|le titre|ce titre)|change (de )?(son|musique|titre|chanson|morceau)|j ?aime pas|nul$/.test(n)) { if (!cur) return 'Rien en cours.'; S.voiceNext = true; player.next(); return 'Titre suivant.'; }
     if (/\b(precedent|precedente|d avant)\b|reviens (en arriere|au precedent|a la precedente)|remets la (derniere|precedente)/.test(n)) { player.prev(); return 'Titre précédent.'; }
-    m = n.match(/(avance|saute|passe|va)\s+(de\s+)?(\d+)\s*(s|sec|secondes?|min|minutes?)/);
+    m = n.match(/(?:va|aller|saute|passe)\s+a\s+(\d+)\s*(?:minutes?|min|m)\s*(?:et\s*)?(\d+)?/);
+    if (m && cur) { const t = +m[1] * 60 + (+m[2] || 0); player.seek(t); return `Je vais à ${fmtDur(t)}.`; }
+    m = n.match(/(avance|saute|passe|va)\s+(de\s+|d\s+)?(\d+)\s*(s|sec|secondes?|min|minutes?)/);
     if (m && cur) { const sec = +m[3] * (m[4].startsWith('m') ? 60 : 1); player.seek(player.time + sec); return `J'avance de ${fmtDur(sec)}.`; }
-    m = n.match(/(recule|reviens|retourne)\s+(de\s+)?(\d+)\s*(s|sec|secondes?|min|minutes?)/);
+    m = n.match(/(recule|reviens|retourne)\s+(de\s+|d\s+)?(\d+)\s*(s|sec|secondes?|min|minutes?)/);
     if (m && cur) { const sec = +m[3] * (m[4].startsWith('m') ? 60 : 1); player.seek(player.time - sec); return `Je recule de ${fmtDur(sec)}.`; }
-    m = n.match(/(volume|son)\s+(a\s+)?(\d+)/);
-    if (m) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume(+m[3] / 100); return `Volume à ${Math.round(v * 100)} %.`; }
     if (/(monte|augmente|plus fort|hausse|monter) ?(le )?(son|volume)?|^plus fort$/.test(n) && !/\b(sport|energie)\b/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) + 0.2); return `Volume à ${Math.round(v * 100)} %.`; }
     if (/(baisse|diminue|moins fort|plus bas|baisser) ?(le )?(son|volume)?/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) - 0.25); return `Volume à ${Math.round(v * 100)} %.`; }
     if (/\b(aleatoire|shuffle|melange|melanger)\b/.test(n)) { player.toggleShuffle(); return player.shuffle ? 'Lecture aléatoire activée.' : 'Lecture aléatoire désactivée.'; }
-    if (/(en boucle|repete|repeter|boucle)/.test(n)) { player.repeat = /(arrete|plus|stop|desactive)/.test(n) ? 'off' : 'one'; player.emit('modes'); return player.repeat === 'one' ? 'Je répète ce titre.' : 'Répétition désactivée.'; }
-    if (cur && /(j aime|like|liker|coeur|favori|kiffe|ajoute (le |ce |aux? )?(titre |son )?(aux? )?(likes?|favoris|coups? de coeur))/.test(n) && !/(playlist|mix|pas)/.test(n)) { if (!cur.liked) toggleLike(cur); return `« ${cur.title} » est dans tes titres likés.`; }
-    if (cur && /(c est quoi|c quoi|quel est|qu est ce que c est|qui chante|comment (ca |il )?s appelle|c est qui|quelle (musique|chanson|radio|emission))/.test(n)) return cur.source === 'radio' ? `Tu écoutes ${cur.title} en direct.` : `C'est « ${cur.title} »${cur.artist ? ' de ' + cur.artist : ''}.`;
+    if (/\b(file d attente|a suivre|apres|ensuite|prochain)\b/.test(n) && /(quoi|qu est|c est|koi)/.test(n)) { const nx = S.tracks.get(player.queue[player.index + 1]); return nx ? `Ensuite : « ${nx.title} »${nx.artist ? ' de ' + nx.artist : ''}.` : 'Rien à suivre pour l\'instant.'; }
+    if (cur && /(j ?aime|like|liker|coeur|favori|kiffe|adore|banger|love|trop bien ce son|ajoute (le |ce |aux? )?(titre |son )?(aux? )?(likes?|favoris|coups? de coeur))/.test(n) && !/(playlist|mix|pas)/.test(n)) { if (!cur.liked) toggleLike(cur); return `« ${cur.title} » est dans tes titres likés.`; }
+    if (cur && /(c est quoi|cest quoi|c quoi|c koi|ckoi|quel est|qu est ce que c est|qui chante|comment (ca |il )?s appelle|c est qui|quelle (musique|chanson|radio|emission))/.test(n) && !/\b(infos?|actus?|journal|news|apres|a suivre|ensuite|prochain|meteo)\b/.test(n)) return cur.source === 'radio' ? `Tu écoutes ${cur.title} en direct.` : `C'est « ${cur.title} »${cur.artist ? ' de ' + cur.artist : ''}.`;
     if (cur && /\bparoles?\b/.test(n)) { openNP(); setTimeout(openLyrics, 450); return 'Voici les paroles.'; }
     if (/\b(file d attente|a suivre|apres)\b/.test(n) && /(quoi|qu est|c est)/.test(n)) { const nx = S.tracks.get(player.queue[player.index + 1]); return nx ? `Ensuite : « ${nx.title} »${nx.artist ? ' de ' + nx.artist : ''}.` : 'Rien à suivre pour l\'instant.'; }
   }
@@ -1431,7 +1472,7 @@ async function smartCommand(text) {
   const ask = vm ? vm[1].trim() : n;
 
   // --- infos
-  if (/\b(infos?|informations?|actu|actus|actualites?|journal|flash)\b/.test(ask) && !/podcast/.test(ask)) {
+  if ((/\b(infos?|informations?|actu|actus|actualites?|journal|flash|news|nouvelles)\b/.test(ask) || /quoi de neuf|ce qui se passe/.test(ask)) && !/podcast/.test(ask)) {
     const i = /inter/.test(ask) ? 1 : /rfi/.test(ask) ? 2 : 0;
     const live = /(direct|en continu|radio)/.test(ask);
     if (live) return await playRadioByName(i === 1 ? 'France Inter' : i === 2 ? 'RFI' : 'franceinfo') || null;
@@ -1440,13 +1481,15 @@ async function smartCommand(text) {
 
   // --- radios par nom
   const stations = [...Src.FR_STATIONS, ...Src.NEWS_STATIONS];
-  const st = stations.filter(x => new RegExp(`\\b${norm(x).replace(/[^a-z0-9 ]/g, '.')}\\b`).test(ask)).sort((a, b) => b.length - a.length)[0];
+  const flat = ask.replace(/[^a-z0-9]/g, '');
+  const st = stations.filter(x => { const k = norm(x).replace(/[^a-z0-9]/g, ''); return new RegExp(`\\b${norm(x).replace(/[^a-z0-9 ]/g, '.')}\\b`).test(ask) || (k.length >= 5 && flat.includes(k)); }).sort((a, b) => b.length - a.length)[0];
   if (st) return await playRadioByName(st) || null;
 
   // --- podcasts (sélection) par nom, ou « podcast … »
   const allPods = Src.PODCAST_CATEGORIES.flatMap(c => c.items);
-  const pod = allPods.find(p => ask.includes(norm(p.name).replace(/['’]/g, ' ')));
-  if (pod || /\bpodcast\b/.test(ask)) {
+  const ALIAS = { legend: /\blegend\b|guillaume pley/, hondelatte: /hondelatte/, 'affaires sensibles': /affaires sensibles/, transfert: /\btransfert\b/, 'heure du crime': /heure du crime/, 'grosses tetes': /grosses tetes/, floodcast: /floodcast/, 'meta de choc': /meta de choc/, 'generation do it yourself': /generation do it|gdiy/, 'le gratin': /\ble gratin\b/, 'code source': /code source/, 'l heure du monde': /heure du monde/, 'pieds sur terre': /pieds sur terre/ };
+  const pod = allPods.find(p => { const k = norm(p.name).replace(/['’]/g, ' '); const al = Object.entries(ALIAS).find(([key]) => k.includes(key)); return ask.includes(k) || (al && al[1].test(ask)); });
+  if (pod || /\b(podcast|histoires? (qui (fait|font) peur|d horreur|de fantomes?)|creepypasta|faits? divers)\b/.test(ask)) {
     const q = pod ? pod.q : ask.replace(/\b(le |un |des |du )?(dernier |nouveau )?(episode |podcast )+(de |d )?/g, '').trim();
     const cat = !pod && Src.PODCAST_CATEGORIES.find(c => new RegExp(c.id === 'horreur' ? 'horreur|peur|paranormal' : c.id === 'vraies' ? 'faits? divers|crime|histoire vraie' : c.id === 'humour' ? 'humour|drole|rire' : c.id === 'savoir' ? 'science|histoire' : c.id === 'parcours' ? 'interview|parcours|entrepreneur' : 'infos?|actu').test(ask));
     try {
@@ -1461,8 +1504,26 @@ async function smartCommand(text) {
   }
 
   // --- genres musicaux
+  // titres likés
+  if (/\b(titres? likes?|mes likes|mes favoris|coups? de coeur|sons likes)\b/.test(ask)) {
+    const lk = liked();
+    if (!lk.length) return 'Tu n\'as encore aucun titre liké : dis « j\'aime ce son » pendant l\'écoute.';
+    playIds(lk.map(t => t.id), 0, { context: { label: 'Titres likés', route: '#/liked' } });
+    return `Je lance tes ${plural(lk.length, 'titre')} likés.`;
+  }
+  // playlist existante demandée par son nom (avant les ambiances : « lance la playlist muscu »)
+  if (vm) {
+    const plName = ask.replace(/^(la |ma |mes )?playlists? /, '').trim();
+    const pl = [...S.playlists.values()].find(x => norm(x.name).replace(/[^a-z0-9]+/g, ' ').trim() === plName.replace(/[^a-z0-9]+/g, ' ').trim());
+    if (pl) {
+      if (!pl.trackIds.length) return `Ta playlist « ${pl.name} » est vide : dis « ajoute ce son à ${pl.name} » pendant l'écoute.`;
+      playIds(pl.trackIds.filter(id => S.tracks.has(id)), 0, { context: { label: pl.name, route: '#/playlist/' + pl.id } });
+      return `Je lance ta playlist « ${pl.name} ».`;
+    }
+  }
   const g = GENRES.find(([, re]) => re.test(ask));
-  if (g && (vm || /\b(musique|du|de la|son|sons|playlist|radio)\b/.test(n) || words <= 3)) {
+  if (g && /\b(pas|sans|sauf|plus) (de |du |d |la |le )?/.test(ask)) return 'D\'accord, j\'évite ce style. Tu veux quoi à la place ?';
+  if (g && (vm || /\b(musique|du|de la|de l|des|un peu de|son|sons|playlist|radio)\b/.test(n) || words <= 4)) {
     const [label, , tag, ytq] = g;
     const lib = allTracks().filter(t => t.genre && norm(t.genre).includes(norm(label).split(' ')[0]));
     if (lib.length >= 5 && !/radio/.test(ask)) { playIds(lib.map(t => t.id), 0, { context: { label: label }, shuffle: true }); return `Je lance ${plural(lib.length, 'titre')} ${label} de ta bibliothèque.`; }
@@ -1480,9 +1541,15 @@ async function smartCommand(text) {
     return `Je n'ai rien trouvé en ${label} pour l'instant.`;
   }
 
+  // --- demandes vagues : « mets un son », « un truc », « n'importe quoi »
+  if (/^(un truc|un son|quelque chose|n importe quoi|ce que tu veux|de la musique|du son|un truc bien|des sons|une musique|un bon son)$/.test(ask) || /^(jsp|je sais pas)( mets un truc)?$/.test(n)) {
+    if (allTracks().length >= 8) { const m2 = getMix('moment'); playIds(m2.tracks.map(t => t.id), 0, { context: { label: m2.name, route: '#/mix/moment' } }); return `Je te mets « ${m2.name} ».`; }
+    return await playYtQuery('hits du moment france', 'les hits du moment') || await playRadioByName('Skyrock') || null;
+  }
+
   // --- ambiances quand la bibliothèque est petite : on passe par la radio / YouTube
   if (allTracks().length < 8) {
-    const mood = [['ecole', /ecole|cours|devoir|revis|travail|bosser|focus|concentr|etud/], ['sport', /sport|muscu|salle|courir|running|cardio|motiv/], ['nuit', /dormir|dodo|sommeil|nuit/], ['chill', /chill|calme|detente|relax|tranquille|pluie/], ['soiree', /soiree|fete|danser|ambiance|apero/], ['matin', /matin|reveil/], ['trajet', /trajet|voiture|route/]].find(([, re]) => re.test(ask));
+    const mood = [['ecole', /ecole|cours|devoir|revis|travail|bosser|focus|concentr|etud/], ['sport', /sport|muscu|salle|courir|running|cardio|motiv/], ['nuit', /dormir|dodo|sommeil|nuit/], ['chill', /chill|calme|detente|relax|tranquille|pluie|triste|deprim|seum|chagrin|melancol|coup de mou/], ['soiree', /soiree|fete|danser|ambiance|apero/], ['matin', /matin|reveil/], ['trajet', /trajet|voiture|route/]].find(([, re]) => re.test(ask));
     if (mood) {
       const [tag, ytq] = MOOD_RADIO[mood[0]];
       if (S.settings.ytKey) {
@@ -1499,7 +1566,9 @@ async function smartCommand(text) {
     if (local) return local;
     if (S.settings.ytKey) {
       try {
-        const res = await Src.ytSearch(S.settings.ytKey, text.replace(/^.*?\b(mets?|mais|lance|joue|ecoute|passe|play|trouve|cherche)\s+(moi\s+)?/i, ''), 12);
+        const ytq = ask.replace(/^(?:moi )?(?:du |de la |de l |des |de |d )/, '').replace(/\b(la nouvelle|le nouveau|le dernier son) (de |d )?/, '$1 ').trim();
+        S.lastYtQuery = ytq;
+        const res = await Src.ytSearch(S.settings.ytKey, ytq, 12);
         if (res.length) { const ts = res.map(x => remoteTrack(x, 'yt')); playIds(ts.map(t => t.id), 0, { context: { label: 'YouTube' } }); return `Je lance « ${ts[0].title} »${ts[0].artist ? ' de ' + ts[0].artist : ''} sur YouTube.`; }
       } catch { /* suite */ }
     }
@@ -1616,12 +1685,31 @@ function targetPlaylist(n) {
 async function manageCommand(n) {
   const cur = player.current;
   // annuler la dernière suppression
-  if (/^(annule|annuler|reviens en arriere|remets la|recupere la)\b/.test(n) && S.deletedPlaylist) {
+  if (/^(?:non |oups |attends |ah |mince |zut )*(annule|annuler|reviens en arriere|remets la|recupere la)\b/.test(n) && S.deletedPlaylist) {
     const p = S.deletedPlaylist; S.deletedPlaylist = null;
     S.playlists.set(p.id, p); await db.put('playlists', p); bump(); render(true);
     return `C'est annulé, la playlist « ${p.name} » est de retour.`;
   }
   const del = /\b(supprime|supprimer|efface|effacer|retire|enleve|vire|degage|jette|delete)\b/.test(n);
+  // tout supprimer : on demande confirmation
+  if (del && /\b(toutes|tous)\b/.test(n) && /playlists?/.test(n)) { if (!S.playlists.size) return 'Tu n\'as aucune playlist.'; S.confirmDeleteAll = Date.now(); return `Tu veux vraiment supprimer tes ${plural(S.playlists.size, 'playlist')} ? Dis « oui » pour confirmer.`; }
+  if (S.confirmDeleteAll && Date.now() - S.confirmDeleteAll < 60000 && /^(oui|ouais|vas y|confirme|c est bon)\b/.test(n)) {
+    S.confirmDeleteAll = 0; const k = S.playlists.size;
+    for (const p of [...S.playlists.values()]) await db.del('playlists', p.id);
+    S.playlists.clear(); S.lastPlaylistId = null; bump(); render(true);
+    return `C'est fait, ${plural(k, 'playlist')} supprimée${k > 1 ? 's' : ''}.`;
+  }
+  // ajouter un son (par son nom) à la file : « mets jul après », « ajoute damso à la file »
+  let mq = n.match(/^(?:re|r)?(?:ajoute|mets?) (.+?) (?:a la file|dans la file|en file|a la suite|apres|ensuite|juste apres|en prochain)$/);
+  if (mq && !/^(ce son|ca|ce titre|cette musique|ce morceau)$/.test(mq[1])) {
+    const q = mq[1].replace(/^(du |de la |des |de |d )/, '');
+    let t = allTracks().find(x => norm(`${x.title} ${x.artist}`).includes(q));
+    if (!t && S.settings.ytKey) { try { const r = await Src.ytSearch(S.settings.ytKey, q, 3); if (r[0]) t = remoteTrack(r[0], 'yt'); } catch { /* rien */ } }
+    if (!t) return `Je n'ai pas trouvé « ${q} ».`;
+    const nextUp = /apres|ensuite|en prochain|juste/.test(n);
+    nextUp ? player.addNext(t.id) : player.addToQueue(t.id);
+    return `« ${t.title} » ${nextUp ? 'passera ensuite' : 'est ajouté à la file'}.`;
+  }
   // retirer le son en cours des likes
   if (del && cur && /\b(likes?|favoris|coups? de coeur|titres likes)\b/.test(n)) {
     if (cur.liked) await toggleLike(cur);
@@ -1663,9 +1751,19 @@ async function manageCommand(n) {
     return `« ${old} » s'appelle maintenant « ${p.name} ».`;
   }
   // ajouter le son en cours à une playlist
-  m = n.match(/(?:ajoute|mets|met|range|sauvegarde|garde) (?:ce son|ca|ce titre|cette musique|ce morceau|la musique|le son)(?: (?:dans|a|sur) (?:la |ma )?(?:playlist )?(.+))?$/);
-  if (m && cur) {
-    const name = (m[1] || '').replace(/^(playlist )/, '').trim();
+  m = n.match(/^(?:re|r)?(?:ajoute|mets?|range|sauvegarde|garde|enregistre) (?:moi )?(?:ce son|ca|ce titre|cette musique|ce morceau|la musique|le son)(?: (?:dans|a|sur|aux?) (?:la |ma |mes |cette )?(?:playlist ?)?(.*))?$/);
+  const dest = (m?.[1] || '').trim();
+  const bareMets = m && /^(re)?mets?\b/.test(n) && !dest; // « remets la musique » = reprendre, pas ajouter
+  if (m && cur && !bareMets && !/^\d/.test(dest)) {
+    if (!dest && /playlist/.test(n)) {
+      const tp = targetPlaylist(n);
+      if (!tp) return 'Dans quelle playlist ? Dis-moi son nom.';
+      if (!tp.trackIds.includes(cur.id)) tp.trackIds.push(cur.id);
+      if (cur.source && !cur.saved) { cur.saved = true; await db.put('tracks', cur); }
+      tp.updatedAt = Date.now(); await db.put('playlists', tp); bump(); render(true);
+      return `« ${cur.title} » ajouté à « ${tp.name} ».`;
+    }
+    const name = dest.replace(/^(playlist )/, '').trim();
     if (!name || /^(mes )?(likes?|favoris)$/.test(name)) { if (!cur.liked) await toggleLike(cur); return `« ${cur.title} » ajouté à tes titres likés.`; }
     if (/^(la )?file/.test(name)) { player.addToQueue(cur.id); return 'Ajouté à la file.'; }
     let p = [...S.playlists.values()].find(x => norm(x.name) === name) || [...S.playlists.values()].find(x => norm(x.name).includes(name));
@@ -1676,7 +1774,7 @@ async function manageCommand(n) {
     return `« ${cur.title} » ajouté à « ${p.name} ».`;
   }
   // créer une playlist vide nommée
-  m = n.match(/^(?:cree|creer|fais|nouvelle) (?:moi )?(?:une )?(?:nouvelle )?playlist (?:nommee|appelee|qui s appelle) (.+)$/);
+  m = n.match(/^(?:cree|creer|fais|nouvelle) (?:moi )?(?:une )?(?:nouvelle )?playlist (?:vide )?(?:nommee|appelee|qui s appelle|du nom de|intitulee)\s+(.+)$/);
   if (m) {
     const p = { id: uid(), name: m[1].charAt(0).toUpperCase() + m[1].slice(1), trackIds: [], createdAt: Date.now(), updatedAt: Date.now() };
     S.playlists.set(p.id, p); S.lastPlaylistId = p.id; await db.put('playlists', p); bump(); render(true);
