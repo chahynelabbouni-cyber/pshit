@@ -1,10 +1,10 @@
-import { db } from './db.js?v=6';
-import { readTags } from './tags.js?v=6';
-import { Player, isIOS } from './player.js?v=6';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=6';
-import * as AI from './ai.js?v=6';
-import * as Voice from './voice.js?v=6';
-import * as Src from './sources.js?v=6';
+import { db } from './db.js?v=7';
+import { readTags } from './tags.js?v=7';
+import { Player, isIOS } from './player.js?v=7';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=7';
+import * as AI from './ai.js?v=7';
+import * as Voice from './voice.js?v=7';
+import * as Src from './sources.js?v=7';
 
 const BRAND = 'Maison Chahyn';
 
@@ -75,7 +75,7 @@ function memo(name, fn) {
   S.cache[name] = { v: S.version, val };
   return val;
 }
-const allTracks = () => memo('all', () => [...S.tracks.values()].filter(t => t.source !== 'radio' && (!t.source || t.saved)));
+const allTracks = () => memo('all', () => [...S.tracks.values()].filter(t => t.source !== 'radio' && t.source !== 'podcast' && (!t.source || t.saved)));
 const savedRadios = () => memo('radios', () => [...S.tracks.values()].filter(t => t.source === 'radio' && t.saved).sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0)));
 
 const albums = () => memo('albums', () => {
@@ -239,7 +239,10 @@ player.addEventListener('time', updateTime);
 player.addEventListener('modes', updateModes);
 player.addEventListener('queue', () => { if (S.queueOpen) renderQueue(); });
 player.addEventListener('sleep', updateSleep);
-player.addEventListener('error', () => toast('Impossible de lire ce fichier'));
+player.addEventListener('error', () => {
+  const src = player.current?.source;
+  toast(src === 'radio' ? 'Cette radio ne répond pas, essaie-en une autre' : src === 'podcast' ? 'Épisode indisponible' : src === 'yt' ? 'Vidéo YouTube indisponible ici' : 'Impossible de lire ce fichier');
+});
 
 function playIds(ids, i = 0, opts = {}) {
   player.playList(ids, i, opts);
@@ -613,9 +616,9 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     { id: 'pl', icon: 'list-add', label: 'Ajouter à une playlist' },
     inPlaylist && { id: 'unpl', icon: 'close', label: 'Retirer de cette playlist' },
     t.album && { id: 'album', icon: 'album', label: 'Voir l\'album' },
-    (!t.source || t.saved) && t.source !== 'radio' && { id: 'artist', icon: 'user', label: 'Voir l\'artiste' },
-    t.source !== 'radio' && { id: 'lyrics', icon: 'mic', label: t.lyrics ? 'Voir / modifier les paroles' : 'Ajouter les paroles' },
-    t.source && !t.saved && { id: 'save', icon: 'plus', label: t.source === 'radio' ? 'Ajouter à mes radios' : 'Ajouter à ma bibliothèque' },
+    (!t.source || t.saved) && !['radio', 'podcast'].includes(t.source) && { id: 'artist', icon: 'user', label: 'Voir l\'artiste' },
+    !['radio', 'podcast'].includes(t.source) && { id: 'lyrics', icon: 'mic', label: t.lyrics ? 'Voir / modifier les paroles' : 'Ajouter les paroles' },
+    t.source && !t.saved && { id: 'save', icon: 'plus', label: t.source === 'radio' ? 'Ajouter à mes radios' : t.source === 'podcast' ? 'Garder cet épisode' : 'Ajouter à ma bibliothèque' },
     { id: 'edit', icon: 'edit', label: 'Modifier les infos' },
     t.source && t.saved && { id: 'unsave', icon: 'close', label: t.source === 'radio' ? 'Retirer de mes radios' : 'Retirer de ma bibliothèque', danger: true },
     !t.source && { id: 'del', icon: 'trash', label: 'Supprimer du téléphone', danger: true },
@@ -951,7 +954,7 @@ document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer?
 // ======================================================================
 async function loadLyrics(t) {
   S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 };
-  if (t.source === 'radio') { S.lyr = { id: t.id, parsed: null }; renderLyrics(); return; }
+  if (t.source === 'radio' || t.source === 'podcast') { S.lyr = { id: t.id, parsed: null }; renderLyrics(); return; }
   const stale = !t.lyricsChecked || Date.now() - t.lyricsChecked > 7 * 864e5;
   if (!S.lyr.parsed && S.settings.onlineLyrics && stale && navigator.onLine !== false) {
     S.lyr.loading = true;
@@ -1150,7 +1153,7 @@ async function saveMixAsPlaylist(m) {
 const AI_SUGGEST = ['Une playlist pour l\'école', 'Motivation sport 45 min', 'Un truc chill pour ce soir', 'Mon mix du moment', 'Fais-moi redécouvrir des sons', 'Lance mes incontournables'];
 
 function viewAI() {
-  const has = allTracks().length;
+  const has = true; // le Concierge marche aussi sans bibliothèque (radios, YouTube, commandes)
   return `<div class="ai">
     <header class="ai-head">
       <div class="ai-orb"><i></i><i></i><i></i></div>
@@ -1194,11 +1197,15 @@ function afterAI(view) {
 async function aiSend(text, { navigate = true } = {}) {
   if (S.aiBusy || !text) return null;
   const tracks = allTracks();
-  if (!tracks.length && !S.settings.ytKey && !quickCommand(text)) { toast('Ajoute ta clé YouTube ou importe ta musique'); return { reply: 'Ajoute ta clé YouTube dans les réglages, ou importe ta musique, pour que je puisse t\'aider.' }; }
   if (navigate && S.route?.name !== 'ai') { S.pendingFwd = true; goto('#/ai'); await new Promise(r => setTimeout(r, 60)); }
   S.chat.push({ role: 'user', text });
   // Commandes directes (pause, suivant, « joue … »), puis YouTube si le titre n'est pas dans la bibliothèque
   let quick = quickCommand(text);
+  if (!quick) {
+    const n = norm(text);
+    const st = Src.FR_STATIONS.find(x => n.includes(norm(x)) && /(mets|met|mais|lance|joue|ecoute|radio)/.test(n));
+    if (st) quick = await playRadioByName(st) || null;
+  }
   if (!quick && S.settings.ytKey) {
     const m = norm(text).match(/^(?:joue|jouer|mets|met|mais|lance|ecoute|play)\s+(?:moi\s+)?(.+)$/);
     if (m && !/(pour|ambiance|truc|quelque chose|style|mix|playlist|genre|radio)/.test(m[1])) {
@@ -1212,6 +1219,7 @@ async function aiSend(text, { navigate = true } = {}) {
       } catch { /* on laisse le Concierge répondre */ }
     }
   }
+  if (!quick && !tracks.length) quick = 'Ta bibliothèque est vide pour l\'instant. Demande-moi une radio (« mets Skyrock »), ajoute ta clé YouTube dans les Réglages pour que je trouve n\'importe quel son, ou importe tes fichiers.';
   if (quick) {
     S.chat.push({ role: 'assistant', text: quick });
     saveJSON('onde.chat', S.chat);
@@ -1393,7 +1401,7 @@ window.addEventListener('resize', () => placeYT());
 $('.yt-shield', ytbox).addEventListener('click', () => { if (!S.npOpen) openNP(); else player.toggle(); });
 
 function remoteTrack(item, source) {
-  const id = source === 'yt' ? 'yt-' + item.ytId : 'rd-' + item.radioId;
+  const id = source === 'yt' ? 'yt-' + item.ytId : source === 'podcast' ? 'pc-' + item.podcastId : 'rd-' + item.radioId;
   let t = S.tracks.get(id);
   if (t) return t;
   const coverId = item.thumb ? 'u:' + item.thumb : null;
@@ -1411,7 +1419,7 @@ function onlineRow(t, i, listKey) {
   const live = t.source === 'radio';
   return `<div class="row ${t.id === player.currentId ? 'playing' : ''}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
     ${trackCover(t, live ? 'radio-cv' : 'wide')}
-    <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${live ? '<span class="live-dot">EN DIRECT</span> ' : '<span class="src-yt">YouTube</span> '}${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}</small></div>
+    <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${live ? '<span class="live-dot">EN DIRECT</span> ' : t.source === 'podcast' ? '<span class="src-pc">PODCAST</span> ' : '<span class="src-yt">YouTube</span> '}${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}</small></div>
     <button class="ib sm more" aria-label="Options">${icon('more')}</button>
   </div>`;
 }
@@ -1427,7 +1435,7 @@ async function onlineSearch(q) {
   try {
     if (src === 'radio') {
       if (!q) {
-        show(`${radioFavs()}<h2 class="sec-title">Genres</h2><div class="browse">${Src.RADIO_GENRES.map(([tag, l], i) => `<button class="browse-tile" data-act="radio-tag" data-tag="${esc(tag)}" data-label="${esc(l)}" style="--h:${placeholderHue(tag)};--d:${i * 25}ms"><b>${esc(l)}</b>${icon('radio')}</button>`).join('')}</div>
+        show(`${radioFavs()}<h2 class="sec-title">Radios françaises</h2><div class="fr-radios">${Src.FR_STATIONS.map((n, i) => `<button class="fr-radio" data-act="radio-name" data-name="${esc(n)}" style="--h:${placeholderHue(n)};--d:${i * 20}ms">${esc(n)}</button>`).join('')}</div><h2 class="sec-title">Genres</h2><div class="browse">${Src.RADIO_GENRES.map(([tag, l], i) => `<button class="browse-tile" data-act="radio-tag" data-tag="${esc(tag)}" data-label="${esc(l)}" style="--h:${placeholderHue(tag)};--d:${i * 25}ms"><b>${esc(l)}</b>${icon('radio')}</button>`).join('')}</div>
           <h2 class="sec-title">Les plus écoutées en France</h2><div class="list" id="top-radios"><div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div></div>`);
         const top = await Src.radioTop('FR', 25);
         if (seq !== searchSeq) return;
@@ -1441,6 +1449,14 @@ async function onlineSearch(q) {
       const ts = res.map(x => remoteTrack(x, 'radio'));
       const key = registerList('radios-q', ts.map(t => t.id), 'Radios');
       return show(ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : `<div class="no-res"><b>Aucune radio trouvée</b></div>`);
+    }
+    if (src === 'podcast') {
+      if (!q) {
+        return show(`${podcastFavs()}<h2 class="sec-title">Explorer</h2><div class="browse">${Src.PODCAST_TOPICS.map((x, i) => `<button class="browse-tile" data-act="pc-topic" data-q="${esc(x)}" style="--h:${placeholderHue(x)};--d:${i * 25}ms"><b>${esc(x)}</b>${icon('mic')}</button>`).join('')}</div>`);
+      }
+      show('<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>');
+      const res = await Src.podcastSearch(q);
+      return show(res.length ? `<div class="pc-grid">${res.map((p, i) => `<button class="pc-card" data-act="pc-show" data-id="${p.id}" style="--d:${Math.min(i, 12) * 30}ms"><img src="${esc(p.art)}" alt="" loading="lazy"><b>${esc(p.name)}</b><small>${esc(p.author)}</small></button>`).join('')}</div>` : '<div class="no-res"><b>Aucun podcast trouvé</b></div>');
     }
     // YouTube
     const link = Src.parseYouTubeUrl(q);
@@ -1490,6 +1506,41 @@ function radioFavs() {
   if (!ts.length) return '';
   const key = registerList('radios-fav', ts.map(t => t.id), 'Mes radios');
   return `<h2 class="sec-title">Mes radios</h2><div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>`;
+}
+
+async function playRadioByName(name, btn) {
+  btn?.classList.add('loading');
+  try {
+    const st = await Src.radioByName(name);
+    if (!st) return toast(`${name} introuvable`);
+    const t = remoteTrack(st, 'radio');
+    playIds([t.id], 0, { context: { label: 'Radio' } });
+    toast(`${t.title} en direct`);
+    return `Je lance ${t.title} en direct.`;
+  } catch (e) { toast(e.message || 'Radios indisponibles'); }
+  finally { btn?.classList.remove('loading'); }
+}
+
+function podcastFavs() {
+  const ts = [...S.tracks.values()].filter(t => t.source === 'podcast' && t.saved).sort((a, b) => (b.lastPlayed || b.addedAt) - (a.lastPlayed || a.addedAt));
+  if (!ts.length) return '';
+  const key = registerList('pc-saved', ts.map(t => t.id), 'Mes épisodes');
+  return `<h2 class="sec-title">Mes épisodes</h2><div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>`;
+}
+
+async function showPodcast(id) {
+  const seq = ++searchSeq;
+  $('#results').innerHTML = '<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>';
+  try {
+    const p = await Src.podcastEpisodes(id);
+    if (seq !== searchSeq) return;
+    const ts = p.episodes.map(x => remoteTrack(x, 'podcast'));
+    const key = registerList('pc-' + id, ts.map(t => t.id), p.name);
+    $('#results').innerHTML = `<div class="pc-head">${p.art ? `<img src="${esc(p.art)}" alt="">` : ''}<div><b>${esc(p.name)}</b><small>${esc(p.author)} · ${plural(ts.length, 'épisode')}</small></div></div>` +
+      (ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : '<div class="no-res"><b>Aucun épisode disponible</b></div>');
+  } catch (e) {
+    $('#results').innerHTML = `<div class="no-res"><b>Podcast indisponible</b><p>${esc(e.message)}</p></div>`;
+  }
 }
 
 async function showRadios(tag, label) {
@@ -1608,10 +1659,10 @@ function viewHome() {
 function viewSearch(params) {
   if (params?.get('src')) S.settings.searchSrc = params.get('src');
   const src = S.settings.searchSrc || 'yt';
-  const ph = { yt: 'Artiste, titre, ou colle un lien YouTube', radio: 'Nom d\'une radio (Skyrock, NRJ…)', lib: 'Dans ta bibliothèque…' }[src];
+  const ph = { yt: 'Artiste, titre, ou colle un lien YouTube', radio: 'Nom d\'une radio (Skyrock, NRJ…)', podcast: 'Nom d\'un podcast ou d\'un sujet', lib: 'Dans ta bibliothèque…' }[src];
   return `<header class="page-head"><h1>Rechercher</h1></header>
     <div class="search-sticky"><div class="search-box">${icon('search')}<input type="search" id="q" placeholder="${ph}" value="${esc(S.searchQ)}" autocomplete="off" enterkeyhint="search"><button class="ib sm clear-q" aria-label="Effacer" ${S.searchQ ? '' : 'hidden'}>${icon('close')}</button></div>
-    <div class="chips src-chips">${[['yt', 'YouTube'], ['radio', 'Radios'], ['lib', 'Ma bibliothèque']].map(([k, l]) => `<button class="chip ${k === src ? 'on' : ''}" data-act="src" data-src="${k}">${l}</button>`).join('')}</div></div>
+    <div class="chips src-chips">${[['yt', 'YouTube'], ['radio', 'Radios'], ['podcast', 'Podcasts'], ['lib', 'Ma bibliothèque']].map(([k, l]) => `<button class="chip ${k === src ? 'on' : ''}" data-act="src" data-src="${k}">${l}</button>`).join('')}</div></div>
     <div id="results">${src === 'lib' ? searchResults(S.searchQ) : '<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>'}</div>`;
 }
 
@@ -2010,8 +2061,11 @@ document.addEventListener('click', e => {
       case 'mix-save': return saveMixAsPlaylist(S.mixes[act.dataset.key]);
       case 'ai-send': return aiSend(act.dataset.text);
       case 'voice': return startVoice({ navigate: S.route?.name === 'ai' });
-      case 'src': S.settings.searchSrc = act.dataset.src; saveSettings(); return render(true);
+      case 'src': S.settings.searchSrc = act.dataset.src; saveSettings(); if (location.hash.includes('src=')) return goto('#/search', true); return render(true);
       case 'radio-tag': return showRadios(act.dataset.tag, act.dataset.label);
+      case 'radio-name': return playRadioByName(act.dataset.name, act);
+      case 'pc-topic': { const q = $('#q'); if (q) { q.value = act.dataset.q; S.searchQ = act.dataset.q; } return onlineSearch(act.dataset.q); }
+      case 'pc-show': return showPodcast(act.dataset.id);
       case 'yt-key': S.pendingFwd = true; return goto('#/settings');
       case 'ai-clear': S.chat = []; saveJSON('onde.chat', S.chat); return render(true);
       case 'ai-play': { const m = S.mixes[act.dataset.key]; if (m?.tracks.length) playIds(m.tracks.map(t => t.id), 0, { context: { label: m.name, route: '#/mix/' + m.key } }); return; }

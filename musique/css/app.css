@@ -622,3 +622,21 @@ body.has-mini .ai-foot { bottom: calc(var(--tabs-h) + var(--mini-h) + var(--safe
 .np.live .np-seek { height: 8px; overflow: hidden; }
 
 .np.live .np-lyr-btn { visibility: hidden; }
+
+/* Radios françaises & podcasts */
+.fr-radios { display: flex; flex-wrap: wrap; gap: 8px; }
+.fr-radio { padding: 10px 14px; border-radius: 12px; font-weight: 700; font-size: 14px; color: var(--text); background: linear-gradient(135deg, hsl(var(--h) 35% 24%), hsl(calc(var(--h) + 25) 30% 12%)); box-shadow: inset 0 0 0 1px rgba(217,178,106,.18); animation: pop .4s var(--ease) both; animation-delay: var(--d); transition: transform .2s var(--spring); }
+.fr-radio:active { transform: scale(.94); }
+.fr-radio.loading { opacity: .5; }
+.src-pc { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .04em; color: #b38bff; margin-right: 2px; }
+.pc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.pc-card { text-align: left; color: var(--text); animation: rise .4s var(--ease) both; animation-delay: var(--d); transition: transform .2s var(--spring); }
+.pc-card:active { transform: scale(.96); }
+.pc-card img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; box-shadow: 0 10px 24px -10px rgba(0,0,0,.8); margin-bottom: 8px; background: var(--bg3); }
+.pc-card b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; }
+.pc-card small { color: var(--muted); font-size: 12px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-head { display: flex; gap: 14px; align-items: center; margin: 16px 0 10px; }
+.pc-head img { width: 96px; height: 96px; border-radius: 10px; object-fit: cover; }
+.pc-head b { font-family: var(--serif); font-size: 22px; font-weight: 500; display: block; }
+.pc-head small { color: var(--muted); }
+@media (min-width: 700px) { .pc-grid { grid-template-columns: repeat(4, 1fr); } }
