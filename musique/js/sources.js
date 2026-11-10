@@ -201,29 +201,83 @@ async function rb(path) {
 }
 
 function mapStation(s) {
+  // L'app est en https : un flux « http:// » serait bloqué par le navigateur.
+  // La plupart des serveurs de radio acceptent aussi https, on bascule donc automatiquement.
+  const raw = s.url_resolved || s.url || '';
   return {
     radioId: s.stationuuid, title: s.name.trim(), artist: [s.country, (s.tags || '').split(',').slice(0, 2).join(', ')].filter(Boolean).join(' · '),
-    url: s.url_resolved || s.url, thumb: s.favicon && s.favicon.startsWith('https') ? s.favicon : '',
+    url: raw.replace(/^http:\/\//i, 'https://'), thumb: s.favicon && s.favicon.startsWith('https') ? s.favicon : '',
+    secure: raw.startsWith('https'),
   };
 }
+// Les flux déjà en https passent en premier
+const bySecure = (a, b) => (b.secure ? 1 : 0) - (a.secure ? 1 : 0);
 
 export async function radioByTag(tag, limit = 40) {
-  const p = new URLSearchParams({ tag, order: 'clickcount', reverse: 'true', hidebroken: 'true', limit: limit * 2, is_https: 'true' });
+  const p = new URLSearchParams({ tag, order: 'clickcount', reverse: 'true', hidebroken: 'true', limit: limit * 2 });
   const list = await rb(`/json/stations/search?${p}`);
-  return dedupe(list.filter(s => (s.url_resolved || s.url || '').startsWith('https')).map(mapStation)).slice(0, limit);
+  return dedupe(list.map(mapStation)).slice(0, limit);
 }
 
 export async function radioSearch(name, limit = 30) {
-  const p = new URLSearchParams({ name, order: 'clickcount', reverse: 'true', hidebroken: 'true', limit: limit * 2 });
+  const p = new URLSearchParams({ name, order: 'votes', reverse: 'true', hidebroken: 'true', limit: limit * 2 });
   const list = await rb(`/json/stations/search?${p}`);
-  return dedupe(list.filter(s => (s.url_resolved || s.url || '').startsWith('https')).map(mapStation)).slice(0, limit);
+  return dedupe(list.map(mapStation).sort(bySecure)).slice(0, limit);
 }
 
 export async function radioTop(country = 'FR', limit = 30) {
-  const p = new URLSearchParams({ countrycode: country, order: 'clickcount', reverse: 'true', hidebroken: 'true', limit: limit * 2 });
+  const p = new URLSearchParams({ countrycode: country, order: 'votes', reverse: 'true', hidebroken: 'true', limit: limit * 2 });
   const list = await rb(`/json/stations/search?${p}`);
-  return dedupe(list.filter(s => (s.url_resolved || s.url || '').startsWith('https')).map(mapStation)).slice(0, limit);
+  return dedupe(list.map(mapStation)).slice(0, limit);
 }
+
+// Grandes radios françaises : on récupère leur flux à jour dans l'annuaire
+export const FR_STATIONS = ['Skyrock', 'NRJ', 'Fun Radio', 'Mouv', 'Générations', 'Radio FG', 'RTL2', 'Virgin Radio', 'Europe 2', 'Chérie FM', 'Nostalgie', 'RFM', 'Rire et Chansons', 'Nova', 'FIP', 'France Inter', 'franceinfo', 'RTL', 'Europe 1', 'RMC', 'Contact FM', 'Hit West', 'Voltage', 'OKLM'];
+export async function radioByName(name) {
+  const p = new URLSearchParams({ name, countrycode: 'FR', order: 'votes', reverse: 'true', hidebroken: 'true', limit: 8 });
+  let list = await rb(`/json/stations/search?${p}`);
+  if (!list.length) list = await rb(`/json/stations/search?${new URLSearchParams({ name, order: 'votes', reverse: 'true', hidebroken: 'true', limit: 8 })}`);
+  const n = name.toLowerCase();
+  list.sort((a, b) => (a.name.toLowerCase().startsWith(n) ? 0 : 1) - (b.name.toLowerCase().startsWith(n) ? 0 : 1));
+  return list.length ? mapStation(list[0]) : null;
+}
+
+// ---------------------------------------------------------------------
+// Podcasts (annuaire Apple Podcasts, public et sans clé)
+// ---------------------------------------------------------------------
+function jsonp(url) {
+  return new Promise((resolve, reject) => {
+    const cb = '__pc' + Math.random().toString(36).slice(2);
+    const sc = document.createElement('script');
+    const done = () => { delete window[cb]; sc.remove(); clearTimeout(to); };
+    const to = setTimeout(() => { done(); reject(new Error('Podcasts indisponibles (connexion ?)')); }, 12000);
+    window[cb] = data => { done(); resolve(data); };
+    sc.onerror = () => { done(); reject(new Error('Podcasts indisponibles (connexion ?)')); };
+    sc.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cb;
+    document.head.appendChild(sc);
+  });
+}
+
+export async function podcastSearch(term, limit = 25) {
+  const p = new URLSearchParams({ term, media: 'podcast', entity: 'podcast', country: 'FR', limit });
+  const j = await jsonp(`https://itunes.apple.com/search?${p}`);
+  return (j.results || []).map(r => ({ id: r.collectionId, name: r.collectionName, author: r.artistName, art: r.artworkUrl600 || r.artworkUrl100, genre: r.primaryGenreName }));
+}
+
+export async function podcastEpisodes(id, limit = 60) {
+  const p = new URLSearchParams({ id, entity: 'podcastEpisode', country: 'FR', limit });
+  const j = await jsonp(`https://itunes.apple.com/lookup?${p}`);
+  const res = j.results || [];
+  const show = res.find(r => r.kind === 'podcast' || r.wrapperType === 'track' && !r.episodeUrl) || {};
+  const eps = res.filter(r => r.episodeUrl).map(r => ({
+    podcastId: r.trackId, title: r.trackName, artist: show.collectionName || r.collectionName || '',
+    url: r.episodeUrl.replace(/^http:\/\//i, 'https://'), duration: Math.round((r.trackTimeMillis || 0) / 1000),
+    thumb: r.artworkUrl600 || r.artworkUrl160 || show.artworkUrl600 || '', date: r.releaseDate,
+  }));
+  return { name: show.collectionName || 'Podcast', author: show.artistName || '', art: show.artworkUrl600 || '', episodes: eps };
+}
+
+export const PODCAST_TOPICS = ['Rap', 'Football', 'Actualité', 'Humour', 'Histoire', 'Business', 'Faits divers', 'Cinéma', 'Sciences', 'Développement personnel', 'Jeux vidéo', 'Mangas'];
 
 function dedupe(a) {
   const seen = new Set();

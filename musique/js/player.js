@@ -1,7 +1,7 @@
 // Moteur de lecture : deux lecteurs audio pour les fondus enchaînés entre morceaux,
 // file d'attente, aléatoire, répétition, écran de verrouillage (Media Session).
-import { db } from './db.js?v=6';
-import { YouTubeElement } from './sources.js?v=6';
+import { db } from './db.js?v=7';
+import { YouTubeElement } from './sources.js?v=7';
 
 export const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -60,7 +60,7 @@ export class Player extends EventTarget {
   pauseOthers() { this.els.forEach((e, i) => { if (i !== this.cur && !e.paused) e.pause(); }); }
   slotFor(t) {
     if (t?.source === 'yt') return 2;
-    if (t?.source === 'radio') return 3;
+    if (t?.source === 'radio' || t?.source === 'podcast') return 3;
     return this.cur < 2 ? this.cur : 0;
   }
   get currentId() { return this.queue[this.index] ?? null; }
