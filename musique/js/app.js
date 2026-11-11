@@ -1,14 +1,45 @@
-import { db } from './db.js?v=19';
-import { readTags } from './tags.js?v=19';
-import { Player, isIOS } from './player.js?v=19';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=19';
-import * as AI from './ai.js?v=19';
-import * as Voice from './voice.js?v=19';
-import * as Src from './sources.js?v=19';
+import { db } from './db.js?v=20';
+import { readTags } from './tags.js?v=20';
+import { Player, isIOS } from './player.js?v=20';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=20';
+import * as AI from './ai.js?v=20';
+import * as Voice from './voice.js?v=20';
+import * as Src from './sources.js?v=20';
+
+// ======================================================================
+// SOMMAIRE de l'application (chaque chapitre est repéré par « Chapitre N »)
+//   1. État
+//   2. Bibliothèque : albums, artistes, etc.
+//   3. Pochettes & couleurs
+//   4. Lecteur
+//   5. Mini-lecteur & lecteur plein écran
+//   6. Feuilles d'actions (bottom sheets) & toasts
+//   7. Actions sur les morceaux / playlists
+//   8. Sauvegarde, restauration et partage (fichier .maison.json)
+//   9. Import des fichiers
+//  10. Paroles synchronisées
+//  11. Analyse audio en arrière-plan (pour le Concierge)
+//  12. Mixes personnalisés
+//  13. Le Concierge (chat IA)
+//  14. Compréhension des demandes (texte et voix)
+//  15. Réglages, personnalisation et navigation à la voix
+//  16. Outils du Concierge-agent (Claude)
+//  17. Commandes directes (texte ou voix)
+//  18. Mode vocal
+//  19. Anti-pub : YouTube (SponsorBlock) et podcasts (début / fin appris)
+//  20. Son : volume et égaliseur
+//  21. Sources en ligne : YouTube (lecteur officiel) & radios
+//  22. Personnalisation : prénom, nom de l'app, couleurs, style, goûts
+//  23. Bibliothèque utile : récap, historique, playlists, radios, épisodes
+//  24. Vues
+//  25. Routeur avec transitions
+//  26. Clics globaux (délégation)
+//  27. Démarrage
+// ======================================================================
 
 
 // ======================================================================
-// État
+// Chapitre 1 · État
 // ======================================================================
 const S = {
   tracks: new Map(),
@@ -72,7 +103,7 @@ function fmtSize(b) {
 const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // ======================================================================
-// Bibliothèque : albums, artistes, etc.
+// Chapitre 2 · Bibliothèque : albums, artistes, etc.
 // ======================================================================
 const albumKey = t => t.album ? norm(t.albumArtist || t.artist || '') + '|' + norm(t.album) : null;
 const artistOf = t => t.artist || 'Artiste inconnu';
@@ -127,7 +158,7 @@ const liked = () => memo('liked', () => allTracks().filter(t => t.liked).sort((a
 function bump() { S.version++; }
 
 // ======================================================================
-// Pochettes & couleurs
+// Chapitre 3 · Pochettes & couleurs
 // ======================================================================
 // Seules les adresses blob:, data:image et https sont acceptées, et toujours échappées (protection contre l'injection de code)
 function safeUrl(u) {
@@ -222,7 +253,7 @@ async function tint(el, coverId, seed, prop = '--tint') {
 }
 
 // ======================================================================
-// Lecteur
+// Chapitre 4 · Lecteur
 // ======================================================================
 const player = new Player(id => S.tracks.get(id), async t => rawCoverURL(t.coverId), $('#ytbox .yt-host'));
 player.crossfade = S.settings.crossfade;
@@ -332,7 +363,7 @@ async function ytMix(name, tracks, n) {
 }
 
 // ======================================================================
-// Mini-lecteur & lecteur plein écran
+// Chapitre 5 · Mini-lecteur & lecteur plein écran
 // ======================================================================
 const mini = $('#mini');
 const np = $('#np');
@@ -641,7 +672,7 @@ function stopViz() {
 }
 
 // ======================================================================
-// Feuilles d'actions (bottom sheets) & toasts
+// Chapitre 6 · Feuilles d'actions (bottom sheets) & toasts
 // ======================================================================
 const sheet = $('#sheet');
 let sheetHandlers = {};
@@ -718,7 +749,7 @@ function toast(msg) {
 }
 
 // ======================================================================
-// Actions sur les morceaux / playlists
+// Chapitre 7 · Actions sur les morceaux / playlists
 // ======================================================================
 async function toggleLike(t) {
   if (!t) return;
@@ -959,7 +990,7 @@ function playlistSheet(p) {
 }
 
 // ======================================================================
-// Sauvegarde, restauration et partage (fichier .maison.json)
+// Chapitre 8 · Sauvegarde, restauration et partage (fichier .maison.json)
 // ======================================================================
 const SHARE_FIELDS = ['id', 'source', 'title', 'artist', 'album', 'duration', 'thumb', 'ytId', 'url', 'genre', 'liked', 'saved', 'addedAt'];
 const slimTrack = t => Object.fromEntries(SHARE_FIELDS.filter(k => t[k] !== undefined && t[k] !== '').map(k => [k, t[k]]));
@@ -1090,7 +1121,7 @@ async function deleteTracks(ids) {
 const allTracksRaw = () => [...S.tracks.values()];
 
 // ======================================================================
-// Import des fichiers
+// Chapitre 9 · Import des fichiers
 // ======================================================================
 const AUDIO_EXT = /\.(mp3|m4a|aac|mp4|flac|ogg|oga|opus|wav|weba|webm|alac|aiff?)$/i;
 
@@ -1202,7 +1233,7 @@ document.addEventListener('dragover', e => e.preventDefault());
 document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer?.files?.length) importFiles(e.dataTransfer.files); });
 
 // ======================================================================
-// Paroles synchronisées
+// Chapitre 10 · Paroles synchronisées
 // ======================================================================
 async function loadLyrics(t) {
   S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 };
@@ -1334,7 +1365,7 @@ async function attachLyricsFiles(files) {
 }
 
 // ======================================================================
-// Analyse audio en arrière-plan (pour le Concierge)
+// Chapitre 11 · Analyse audio en arrière-plan (pour le Concierge)
 // ======================================================================
 const anaQ = [];
 let analyzing = false;
@@ -1363,7 +1394,7 @@ async function runAnalysis() {
 }
 
 // ======================================================================
-// Mixes personnalisés
+// Chapitre 12 · Mixes personnalisés
 // ======================================================================
 const HOME_MIXES = ['moment', 'ecole', 'sport', 'chill', 'soiree', 'favoris', 'decouverte', 'nuit'];
 function getMix(key) {
@@ -1405,7 +1436,7 @@ async function saveMixAsPlaylist(m) {
 }
 
 // ======================================================================
-// Le Concierge (chat IA)
+// Chapitre 13 · Le Concierge (chat IA)
 // ======================================================================
 const AI_SUGGEST = ['Mets du rap', 'Mets Skyrock', 'Mets les infos', 'Mets de la musique classique', 'Lance LEGEND', 'Une playlist pour l\'école', 'Motivation sport 45 min', 'Un truc chill pour ce soir', 'Mon mix du moment', 'Fais-moi redécouvrir des sons', 'Lance mes incontournables'];
 
@@ -1533,7 +1564,7 @@ async function aiSendInner(text, navigate) {
 
 
 // ======================================================================
-// Compréhension des demandes (texte et voix)
+// Chapitre 14 · Compréhension des demandes (texte et voix)
 // ======================================================================
 const GENRES = [
   ['classique', /\b(classique|classical|mozart|beethoven|chopin|bach|piano classique|orchestre|symphonie|opera)\b/, 'classical', 'musique classique'],
@@ -1603,7 +1634,7 @@ function clearChat() {
 }
 
 // ======================================================================
-// Réglages, personnalisation et navigation à la voix
+// Chapitre 15 · Réglages, personnalisation et navigation à la voix
 // ======================================================================
 const COLOR_WORDS = { rubis: /rouge|rubis|bordeaux/, saphir: /bleu|saphir/, emeraude: /vert|emeraude/, amethyste: /violet|mauve|amethyste/, rose: /\brose\b/, argent: /gris|argent|blanc|silver/, corail: /orange|corail/, or: /\bor\b|dore|jaune|gold/ };
 const OFF_WORDS = /\b(enleve|retire|desactive|arrete|coupe|enlever|sans|plus de|stop|eteins|vire|supprime)\b/;
@@ -1935,7 +1966,7 @@ async function smartCommand(text) {
 }
 
 // ======================================================================
-// Outils du Concierge-agent (Claude)
+// Chapitre 16 · Outils du Concierge-agent (Claude)
 // ======================================================================
 function agentContext() {
   const t = player.current;
@@ -2140,7 +2171,7 @@ async function manageCommand(n) {
   return null;
 }
 // ======================================================================
-// Commandes directes (texte ou voix)
+// Chapitre 17 · Commandes directes (texte ou voix)
 // ======================================================================
 function quickCommand(text) {
   const n = norm(text).replace(/[.!?,]/g, ' ').replace(/'/g, ' ').replace(/\s+/g, ' ').trim();
@@ -2186,7 +2217,7 @@ function quickCommand(text) {
 }
 
 // ======================================================================
-// Mode vocal
+// Chapitre 18 · Mode vocal
 // ======================================================================
 const vbox = $('#voice');
 async function startVoice({ navigate = false } = {}) {
@@ -2254,7 +2285,7 @@ $('.v-orb', vbox).addEventListener('click', () => Voice.stopListening());
 
 
 // ======================================================================
-// Anti-pub : YouTube (SponsorBlock) et podcasts (début / fin appris)
+// Chapitre 19 · Anti-pub : YouTube (SponsorBlock) et podcasts (début / fin appris)
 // ======================================================================
 const podPrefs = loadJSON('onde.podprefs', {});
 const savePodPrefs = () => saveJSON('onde.podprefs', podPrefs);
@@ -2341,7 +2372,7 @@ player.addEventListener('queue', () => {
 player.addEventListener('time', () => { if (player.current?.source === 'podcast') { S._lastPodPos = player.time; S._lastPodDur = player.duration; } });
 
 // ======================================================================
-// Son : volume et égaliseur
+// Chapitre 20 · Son : volume et égaliseur
 // ======================================================================
 const EQ_PRESETS = { normal: [0, 0, 0], basses: [6, 0, 1], basses2: [10, -1, 2], voix: [-3, 4, 2], aigus: [-1, 0, 5], soiree: [6, -2, 4], douce: [2, -1, -4] };
 const EQ_NAMES = { normal: 'Normal', basses: 'Basses +', basses2: 'Basses ++', voix: 'Voix (podcasts)', aigus: 'Aigus +', soiree: 'Soirée', douce: 'Douce' };
@@ -2369,7 +2400,7 @@ function soundSheet() {
   });
 }
 // ======================================================================
-// Sources en ligne : YouTube (lecteur officiel) & radios
+// Chapitre 21 · Sources en ligne : YouTube (lecteur officiel) & radios
 // ======================================================================
 const ytbox = $('#ytbox');
 // La vidéo YouTube prend exactement la place de la pochette : dans le lecteur, dans les paroles ou dans le mini-lecteur
@@ -2623,7 +2654,7 @@ async function showRadios(tag, label) {
 }
 
 // ======================================================================
-// Personnalisation : prénom, nom de l'app, couleurs, style, goûts
+// Chapitre 22 · Personnalisation : prénom, nom de l'app, couleurs, style, goûts
 // ======================================================================
 const THEMES = {
   or: { label: 'Or', a: '#d9b26a', a2: '#f1d9a3', g: ['#f6e3b4', '#d4a955', '#a77c37'], on: '#140f06' },
@@ -2852,7 +2883,7 @@ async function playTaste(key) {
 }
 
 // ======================================================================
-// Bibliothèque utile : récap, historique, playlists, radios, épisodes
+// Chapitre 23 · Bibliothèque utile : récap, historique, playlists, radios, épisodes
 // ======================================================================
 function viewLibrary(params) {
   if (params.get('f')) return viewLibraryList(params);
@@ -2945,7 +2976,7 @@ function homeHero() {
   </button>`;
 }
 // ======================================================================
-// Vues
+// Chapitre 24 · Vues
 // ======================================================================
 function registerList(key, ids, label, extra = {}) {
   S.lists[key] = { ids, label, ...extra };
@@ -3382,7 +3413,7 @@ function notFound() {
 }
 
 // ======================================================================
-// Routeur avec transitions
+// Chapitre 25 · Routeur avec transitions
 // ======================================================================
 const main = $('#main');
 const TAB_ROUTES = ['home', 'search', 'ai', 'library'];
@@ -3538,7 +3569,7 @@ let scrollRaf = 0;
 main.addEventListener('scroll', () => { if (!scrollRaf) scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; onScroll(); }); }, { passive: true });
 
 // ======================================================================
-// Clics globaux (délégation)
+// Chapitre 26 · Clics globaux (délégation)
 // ======================================================================
 document.addEventListener('click', e => {
   if (S.lpFired) { S.lpFired = false; e.preventDefault(); e.stopPropagation(); return; }
@@ -3668,7 +3699,7 @@ document.addEventListener('keydown', e => {
 });
 
 // ======================================================================
-// Démarrage
+// Chapitre 27 · Démarrage
 // ======================================================================
 async function loadCovers() {
   const d = await new Promise((res, rej) => { const r = indexedDB.open('onde'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });

@@ -1,6 +1,6 @@
 // Service worker : l'application fonctionne entièrement hors connexion.
-const CACHE = 'maison-chahyn-v19';
-const V = '?v=19';
+const CACHE = 'maison-chahyn-v20';
+const V = '?v=20';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css' + V,
   ...['app', 'db', 'tags', 'player', 'lyrics', 'ai', 'voice', 'sources'].map(f => `js/${f}.js${V}`),
@@ -37,13 +37,20 @@ self.addEventListener('fetch', e => {
   const u = new URL(req.url);
   if (u.origin === location.origin && u.pathname.endsWith('manifest.webmanifest') && u.searchParams.has('name')) { e.respondWith(personalManifest(u)); return; }
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
-  e.respondWith(
-    // « no-cache » : on revérifie toujours auprès du serveur, pour recevoir les mises à jour tout de suite
-    fetch(req, { cache: 'no-cache' })
-      .then(res => {
-        if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
-        return res;
-      })
-      .catch(() => caches.match(req).then(r => r || caches.match('index.html')))
-  );
+  // Fichiers versionnés (?v=…) : déjà en cache = affichage immédiat, sans attendre le réseau
+  if (u.searchParams.has('v')) {
+    e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
+      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
+      return res;
+    })));
+    return;
+  }
+  // Le reste (page, manifest) : réseau d'abord pour recevoir les mises à jour,
+  // mais au bout de 4 s de réseau trop lent, on sert la copie enregistrée
+  const net = fetch(req, { cache: 'no-cache' }).then(res => {
+    if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
+    return res;
+  });
+  const slow = new Promise(r => setTimeout(r, 4000)).then(() => caches.match(req)).then(hit => hit || net);
+  e.respondWith(Promise.race([net, slow]).catch(() => caches.match(req).then(r => r || caches.match('index.html'))));
 });
