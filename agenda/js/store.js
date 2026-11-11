@@ -148,11 +148,18 @@ function load() {
 }
 
 let saveTimer = null;
+function writeNow() {
+  clearTimeout(saveTimer); saveTimer = null;
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { console.warn('save', e); }
+}
+// on enregistre aussi tout de suite si l'appli est fermée ou mise en arrière-plan
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => saveTimer && writeNow());
+  document.addEventListener('visibilitychange', () => { if (document.hidden && saveTimer) writeNow(); });
+}
 export function save() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { console.warn('save', e); }
-  }, 60);
+  saveTimer = setTimeout(writeNow, 60);
   listeners.forEach(fn => fn());
 }
 

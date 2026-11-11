@@ -441,6 +441,7 @@ function renderCal() {
       <div><b>${cap(['aujourd\'hui', 'demain', 'hier'].includes(rel) ? rel : fmtDay(selDay).split(' ')[0])}</b><span>${fmtDay(selDay)}</span></div>
       <span class="day-load" style="--l:${L.c}">${list.filter(e => !e.allDay).length ? `${list.length} · ${fmtDuration(L.minutes * MIN)}` : list.length ? list.length : 'Libre'}</span>
     </div>
+    ${S().events.length ? '' : `<div class="insight" style="--c:var(--danger)"><div class="ic">⚠️</div><div class="grow"><p><b>Ton agenda est vide sur ce téléphone.</b> Ouvre le lien d'import que tu as reçu (dans Chrome) pour récupérer tous tes événements.</p></div></div>`}
     <div class="tl day-list">${timeline(list, { gaps: true, empty: 'Rien de prévu ce jour-là 🌿<br><small>Touche + pour ajouter quelque chose</small>' })}</div>`;
 }
 
@@ -1808,5 +1809,8 @@ setInterval(() => {
 }, 30000);
 setTimeout(checkReminders, 1500);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { focusTick(); render(); checkReminders(); } });
+
+// Demande au téléphone de ne jamais effacer les données de l'agenda
+navigator.storage?.persist?.().catch(() => {});
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
