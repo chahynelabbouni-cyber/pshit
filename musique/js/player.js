@@ -1,7 +1,7 @@
 // Moteur de lecture : deux lecteurs audio pour les fondus enchaînés entre morceaux,
 // file d'attente, aléatoire, répétition, écran de verrouillage (Media Session).
-import { db } from './db.js?v=20';
-import { YouTubeElement } from './sources.js?v=20';
+import { db } from './db.js?v=21';
+import { YouTubeElement } from './sources.js?v=21';
 
 export const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -211,7 +211,14 @@ export class Player extends EventTarget {
       this.eq.bass.frequency.value = 120; this.eq.mid.frequency.value = 1500; this.eq.mid.Q.value = 0.9; this.eq.treble.frequency.value = 6000;
       this.els.slice(0, 2).forEach(el => this.ctx.createMediaElementSource(el).connect(this.pre));
       this.pre.connect(this.eq.bass);
-      this.eq.bass.connect(this.eq.mid); this.eq.mid.connect(this.eq.treble); this.eq.treble.connect(this.analyser);
+      // Booster : on amplifie, puis un limiteur évite que ça sature (pas de grésillement)
+      this.boostGain = this.ctx.createGain();
+      this.limiter = Object.assign(this.ctx.createDynamicsCompressor(), {});
+      this.limiter.threshold.value = -2; this.limiter.knee.value = 0; this.limiter.ratio.value = 20;
+      this.limiter.attack.value = 0.003; this.limiter.release.value = 0.25;
+      this.eq.bass.connect(this.eq.mid); this.eq.mid.connect(this.eq.treble); this.eq.treble.connect(this.boostGain);
+      this.boostGain.connect(this.limiter); this.limiter.connect(this.analyser);
+      this.setBoost(this.boost || 0);
       this.analyser.connect(this.ctx.destination);
       if (this.eqGains) this.setEQ(this.eqGains);
       // Si le système suspend le moteur audio (écran éteint), on le relance pour ne pas couper la musique
@@ -224,6 +231,14 @@ export class Player extends EventTarget {
     }
   }
 
+  // Booster de son : 0 = coupé, 1 = léger, 2 = fort, 3 = max (fichiers importés)
+  setBoost(level) {
+    this.boost = Math.max(0, Math.min(3, level | 0));
+    if (this.boost && this.kind === 'local') this.ensureAudioGraph();
+    if (this.boostGain) this.boostGain.gain.setTargetAtTime([1, 1.6, 2.3, 3.2][this.boost], this.ctx.currentTime, 0.05);
+    return this.boost;
+  }
+
   setEQ(g) {
     this.eqGains = g;
     if (!this.eq) return;
@@ -233,7 +248,7 @@ export class Player extends EventTarget {
 
   async play() {
     if (!this.currentId) return;
-    if (this.visualizer || (this.eqGains && this.eqGains.some(Boolean))) this.ensureAudioGraph();
+    if (this.visualizer || this.boost || (this.eqGains && this.eqGains.some(Boolean))) this.ensureAudioGraph();
     if (this.ctx && this.ctx.state !== 'running') this.ctx.resume().catch(() => {});
     clearInterval(this._sleepFade);
     if (this._sleepFade) { this._sleepFade = 0; if (!isIOS) this.el.volume = this.gain; }
