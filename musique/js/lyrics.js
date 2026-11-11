@@ -51,11 +51,11 @@ export async function fetchOnline(t) {
       const q = new URLSearchParams({ track_name: t.title, artist_name: artist });
       if (t.album) q.set('album_name', t.album);
       if (t.duration) q.set('duration', Math.round(t.duration));
-      const r = await fetch(`${API}/get?${q}`);
+      const r = await fetch(`${API}/get?${q}`, { signal: AbortSignal.timeout?.(8000) });
       if (r.ok) { const v = pick(await r.json()); if (v) return v; }
     }
     const q2 = new URLSearchParams({ q: `${artist} ${t.title}`.trim() });
-    const r2 = await fetch(`${API}/search?${q2}`);
+    const r2 = await fetch(`${API}/search?${q2}`, { signal: AbortSignal.timeout?.(8000) });
     if (!r2.ok) return null;
     const list = await r2.json();
     if (!Array.isArray(list) || !list.length) return null;

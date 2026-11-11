@@ -1,21 +1,52 @@
-import { db } from './db.js?v=19';
-import { readTags } from './tags.js?v=19';
-import { Player, isIOS } from './player.js?v=19';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=19';
-import * as AI from './ai.js?v=19';
-import * as Voice from './voice.js?v=19';
-import * as Src from './sources.js?v=19';
+import { db } from './db.js?v=20';
+import { readTags } from './tags.js?v=20';
+import { Player, isIOS } from './player.js?v=20';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=20';
+import * as AI from './ai.js?v=20';
+import * as Voice from './voice.js?v=20';
+import * as Src from './sources.js?v=20';
+
+// ======================================================================
+// SOMMAIRE de l'application (chaque chapitre est repéré par « Chapitre N »)
+//   1. État
+//   2. Bibliothèque : albums, artistes, etc.
+//   3. Pochettes & couleurs
+//   4. Lecteur
+//   5. Mini-lecteur & lecteur plein écran
+//   6. Feuilles d'actions (bottom sheets) & toasts
+//   7. Actions sur les morceaux / playlists
+//   8. Sauvegarde, restauration et partage (fichier .maison.json)
+//   9. Import des fichiers
+//  10. Paroles synchronisées
+//  11. Analyse audio en arrière-plan (pour le Concierge)
+//  12. Mixes personnalisés
+//  13. Le Concierge (chat IA)
+//  14. Compréhension des demandes (texte et voix)
+//  15. Réglages, personnalisation et navigation à la voix
+//  16. Outils du Concierge-agent (Claude)
+//  17. Commandes directes (texte ou voix)
+//  18. Mode vocal
+//  19. Anti-pub : YouTube (SponsorBlock) et podcasts (début / fin appris)
+//  20. Son : volume et égaliseur
+//  21. Sources en ligne : YouTube (lecteur officiel) & radios
+//  22. Personnalisation : prénom, nom de l'app, couleurs, style, goûts
+//  23. Bibliothèque utile : récap, historique, playlists, radios, épisodes
+//  24. Vues
+//  25. Routeur avec transitions
+//  26. Clics globaux (délégation)
+//  27. Démarrage
+// ======================================================================
 
 
 // ======================================================================
-// État
+// Chapitre 1 · État
 // ======================================================================
 const S = {
   tracks: new Map(),
   playlists: new Map(),
   covers: new Map(),       // coverId -> objectURL
   colors: loadJSON('onde.colors', {}),
-  settings: Object.assign({ name: '', lastName: '', appName: '', theme: 'or', style: 'maison', tastes: [], onboarded: false, homeFilter: 'all', customColor: '#d9b26a', bgTheme: 'noir', font: 'auto', textSize: 'normal', corners: 'arrondis', motion: 'normal', coverShape: 'carree', vinyl: false, npBg: 'pochette', avatar: '', greet: '', botName: 'Concierge', botTone: 'complice', startTab: 'home', homeSections: { hero: true, quick: true, mixes: true, recent: true, radios: true, tastes: true }, crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
+  settings: Object.assign({ name: '', lastName: '', appName: '', theme: 'or', style: 'maison', tastes: [], onboarded: false, homeFilter: 'all', customColor: '#d9b26a', bgTheme: 'noir', font: 'auto', textSize: 'normal', corners: 'arrondis', motion: 'normal', coverShape: 'carree', vinyl: false, npBg: 'pochette', avatar: '', greet: '', botName: 'Concierge', botTone: 'complice', startTab: 'home', homeSections: { hero: true, quick: true, mixes: true, recent: true, radios: true, tastes: true }, crossfade: 4, visualizer: false, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, autoplay: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
   mixes: {},
   chat: loadJSON('onde.chat', []),
   version: 0,
@@ -28,7 +59,17 @@ const S = {
 };
 
 function loadJSON(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }
-function saveJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* plein */ } }
+const EVICT = ['onde.colors', 'onde.ctxHist', 'onde.history', 'onde.chat'];
+function saveJSON(k, v) {
+  const s = JSON.stringify(v);
+  for (let i = 0; i <= EVICT.length; i++) {
+    try { localStorage.setItem(k, s); return true; } catch {
+      const ev = EVICT[i]; if (!ev) break; if (ev !== k) localStorage.removeItem(ev);
+    }
+  }
+  try { toast('Stockage du téléphone plein : réglage non enregistré'); } catch { /* ignore */ }
+  return false;
+}
 const saveSettings = () => saveJSON('onde.settings', S.settings);
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -62,7 +103,7 @@ function fmtSize(b) {
 const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // ======================================================================
-// Bibliothèque : albums, artistes, etc.
+// Chapitre 2 · Bibliothèque : albums, artistes, etc.
 // ======================================================================
 const albumKey = t => t.album ? norm(t.albumArtist || t.artist || '') + '|' + norm(t.album) : null;
 const artistOf = t => t.artist || 'Artiste inconnu';
@@ -117,9 +158,16 @@ const liked = () => memo('liked', () => allTracks().filter(t => t.liked).sort((a
 function bump() { S.version++; }
 
 // ======================================================================
-// Pochettes & couleurs
+// Chapitre 3 · Pochettes & couleurs
 // ======================================================================
-function coverURL(coverId) { return coverId ? S.covers.get(coverId) : null; }
+// Seules les adresses blob:, data:image et https sont acceptées, et toujours échappées (protection contre l'injection de code)
+function safeUrl(u) {
+  if (!u || typeof u !== 'string') return '';
+  if (u.startsWith('blob:') || u.startsWith('data:image/')) return u;
+  try { const x = new URL(u); return x.protocol === 'https:' ? x.href : ''; } catch { return ''; }
+}
+const rawCoverURL = id => (id ? safeUrl(S.covers.get(id)) || null : null);
+function coverURL(coverId) { const u = coverId ? S.covers.get(coverId) : null; return u ? esc(safeUrl(u)) || null : null; }
 
 function placeholderHue(seed) { return hash(seed || 'x') % 360; }
 
@@ -154,7 +202,7 @@ function colorFor(coverId, seed) {
 
 async function computeColor(coverId) {
   if (!coverId || S.colors[coverId]) return S.colors[coverId];
-  const url = coverURL(coverId);
+  const url = rawCoverURL(coverId);
   if (!url) return null;
   try {
     const img = new Image();
@@ -205,9 +253,9 @@ async function tint(el, coverId, seed, prop = '--tint') {
 }
 
 // ======================================================================
-// Lecteur
+// Chapitre 4 · Lecteur
 // ======================================================================
-const player = new Player(id => S.tracks.get(id), async t => coverURL(t.coverId), $('#ytbox .yt-host'));
+const player = new Player(id => S.tracks.get(id), async t => rawCoverURL(t.coverId), $('#ytbox .yt-host'));
 player.crossfade = S.settings.crossfade;
 setTimeout(() => {
   player.setEQ(EQ_PRESETS[S.settings.eq] || EQ_PRESETS.normal);
@@ -216,12 +264,13 @@ setTimeout(() => {
 });
 player.visualizer = S.settings.visualizer;
 
+const saveTrack = t => (t && S.tracks.has(t.id) ? db.put('tracks', t) : Promise.resolve());
 player.addEventListener('played', async e => {
   const t = e.detail;
   t.plays = (t.plays || 0) + 1;
   t.lastPlayed = Date.now();
   bump();
-  await db.put('tracks', t);
+  await saveTrack(t);
 });
 let listen = { id: null, max: 0 };
 player.addEventListener('track', () => { setTimeout(placeYT, 30); setTimeout(placeYT, 520);
@@ -250,15 +299,52 @@ player.addEventListener('time', updateTime);
 player.addEventListener('modes', updateModes);
 player.addEventListener('queue', () => { if (S.queueOpen) renderQueue(); });
 player.addEventListener('sleep', updateSleep);
-player.addEventListener('error', () => {
-  const src = player.current?.source;
-  toast(src === 'radio' ? 'Cette radio ne répond pas, essaie-en une autre' : src === 'podcast' ? 'Épisode indisponible' : src === 'yt' ? 'Vidéo YouTube indisponible ici' : 'Impossible de lire ce fichier');
+// Un son qui ne marche pas : on prévient et on passe au suivant (au plus 5 d'affilée)
+let errStreak = 0;
+player.addEventListener('error', e => {
+  const t = player.current, src = t?.source, code = e.detail?.code;
+  const msg = src === 'radio' ? 'Cette radio ne répond pas, essaie-en une autre' : src === 'podcast' ? 'Épisode indisponible' : src === 'yt' ? ([101, 150].includes(code) ? 'Cette vidéo ne peut pas être lue dans une autre app' : 'Vidéo YouTube indisponible') : 'Impossible de lire ce fichier';
+  if (src === 'yt' && [101, 150].includes(code) && t) { t.unplayable = true; saveTrack(t).catch(() => {}); }
+  const canSkip = src !== 'radio' && player.nextIndex() >= 0 && ++errStreak < 5;
+  toast(canSkip ? msg + ' · son suivant' : msg);
+  if (canSkip) setTimeout(() => player.next(), 700);
+});
+player.addEventListener('time', () => { if (player.time > 5) errStreak = 0; });
+player.addEventListener('loop', () => { if (sbSegs) sbSegs.forEach(sg => { sg.done = false; }); });
+
+// Fin de la file : enchaîne sur des sons du même style (comme la lecture automatique de Spotify)
+player.addEventListener('queueend', async e => {
+  if (!S.settings.autoplay || S.autoplayBusy) return;
+  const last = player.current;
+  if (!last || last.source === 'radio' || last.source === 'podcast') return;
+  S.autoplayBusy = true;
+  try {
+    const inQueue = new Set(player.queue);
+    let add = [];
+    if (last.source === 'yt' && S.settings.ytKey && !Src.ytQuotaOver()) {
+      const q = (last.artist || last.title) + (last.genre ? ' ' + last.genre : '');
+      const res = await Src.ytSearch(S.settings.ytKey, q, 15).catch(() => []);
+      add = res.map(x => remoteTrack(x, 'yt')).filter(t => !inQueue.has(t.id) && !t.unplayable && norm(t.artist) !== '' ).slice(0, 10);
+    } else {
+      add = (getMix('moment')?.tracks || []).filter(t => !inQueue.has(t.id)).slice(0, 15);
+    }
+    if (!add.length) return;
+    add.forEach(t => player.addToQueue(t.id));
+    toast(e.detail?.manual ? 'Lecture automatique : sons du même style' : 'La suite : des sons du même style');
+    player.next();
+  } finally { S.autoplayBusy = false; }
 });
 
 function playIds(ids, i = 0, opts = {}) {
+  const want = ids[i];
+  ids = ids.filter(id => S.tracks.has(id));
+  i = Math.max(0, ids.indexOf(want));
+  if (!ids.length) { toast('Ces titres ne sont plus disponibles'); return; }
   if (S.miniGone) { S.miniGone = false; mini.classList.remove('gone'); }
   try { pushCtxHist(ids, i, opts); } catch { /* ignore */ }
-  player.playList(ids, i, opts);
+  // les épisodes de podcast et les radios se lisent toujours dans l'ordre
+  const ordered = ids.every(id => ['podcast', 'radio'].includes(S.tracks.get(id)?.source));
+  player.playList(ids, i, { ...opts, ordered });
   setTimeout(() => { updateNowPlaying(); placeYT(); }, 60);
 }
 
@@ -277,7 +363,7 @@ async function ytMix(name, tracks, n) {
 }
 
 // ======================================================================
-// Mini-lecteur & lecteur plein écran
+// Chapitre 5 · Mini-lecteur & lecteur plein écran
 // ======================================================================
 const mini = $('#mini');
 const np = $('#np');
@@ -340,8 +426,8 @@ function updateNowPlaying() {
   $('.np-ctx b', np).textContent = player.context?.label || t.album || 'Ta bibliothèque';
   tint(np, t.coverId, seed);
   const bgi = $('.np-bg-img', np);
-  const cu = coverURL(t.coverId);
-  bgi.style.backgroundImage = cu ? `url("${cu}")` : 'none';
+  const cu = rawCoverURL(t.coverId);
+  bgi.style.backgroundImage = cu ? `url("${cu.replace(/["\\]/g, '')}")` : 'none';
   bgi.classList.remove('fade'); void bgi.offsetWidth; bgi.classList.add('fade');
   $('.lyr-head', np).innerHTML = `${trackCover(t, 'xs2')}<div><b>${esc(t.title)}</b><small>${esc(artistOf(t))}</small></div>`;
   updateLike();
@@ -477,8 +563,7 @@ gesture($('.np-art', np), {
   move: (dx, dy) => {
     const tr = $('.np-cover-track');
     if (Math.abs(dx) > Math.abs(dy)) { tr.style.transition = 'none'; tr.style.transform = `translateX(${dx}px) rotate(${dx / 40}deg)`; np.style.transform = ''; ytbox.classList.add('moving'); }
-    else if (dy > 0) ytbox.classList.add('moving');
-    else if (dy > 0) { np.style.transition = 'none'; np.style.transform = `translateY(${dy}px)`; }
+    else if (dy > 0) { ytbox.classList.add('moving'); np.style.transition = 'none'; np.style.transform = `translateY(${dy}px)`; }
   },
   end: (dx, dy) => {
     const tr = $('.np-cover-track');
@@ -587,7 +672,7 @@ function stopViz() {
 }
 
 // ======================================================================
-// Feuilles d'actions (bottom sheets) & toasts
+// Chapitre 6 · Feuilles d'actions (bottom sheets) & toasts
 // ======================================================================
 const sheet = $('#sheet');
 let sheetHandlers = {};
@@ -627,8 +712,36 @@ function sheetItems(items) {
 }
 
 let toastT;
+// Recherches récentes (10 dernières), affichées quand la barre est vide
+function rememberSearch(q) {
+  q = q.trim(); if (q.length < 2) return;
+  const h = loadJSON('onde.searchHist', []).filter(x => norm(x) !== norm(q));
+  h.unshift(q); saveJSON('onde.searchHist', h.slice(0, 10));
+}
+function recentSearches() {
+  const h = loadJSON('onde.searchHist', []);
+  if (!h.length) return '';
+  return `<div class="shelf-head"><h2>Recherches récentes</h2><button class="link" data-act="search-hist-clear">Effacer</button></div>
+    <div class="chips wrap recent-q">${h.map(x => `<button class="chip" data-act="search-again" data-q="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
+}
+// Message d'erreur réseau clair, avec « Réessayer »
+function netErr(title, e, src) {
+  const off = navigator.onLine === false;
+  const msg = off ? 'Pas de connexion internet. Tes fichiers et tes titres enregistrés marchent toujours.' : (e?.message && !/fetch|network|Load failed/i.test(e.message) ? e.message : 'Le service ne répond pas pour le moment.');
+  return `<div class="net-err"><b>${esc(title)}</b><p>${esc(msg)}</p>${src ? `<button class="btn ghost sm" data-act="src" data-src="${esc(src)}">${icon('refresh')} Réessayer</button>` : ''}</div>`;
+}
+// Message avec bouton « Annuler » (5 s) pour les actions qu'on peut regretter
+function undoToast(msg, undo) {
+  const t = $('#toast');
+  t.innerHTML = `<span>${esc(msg)}</span><button class="undo-btn">Annuler</button>`;
+  t.classList.add('show', 'undo');
+  t.querySelector('.undo-btn').onclick = () => { t.classList.remove('show', 'undo'); clearTimeout(toastT); undo(); };
+  clearTimeout(toastT);
+  toastT = setTimeout(() => t.classList.remove('show', 'undo'), 5000);
+}
 function toast(msg) {
   const t = $('#toast');
+  t.classList.remove('undo');
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastT);
@@ -636,7 +749,7 @@ function toast(msg) {
 }
 
 // ======================================================================
-// Actions sur les morceaux / playlists
+// Chapitre 7 · Actions sur les morceaux / playlists
 // ======================================================================
 async function toggleLike(t) {
   if (!t) return;
@@ -686,7 +799,8 @@ function trackSheet(t, { listKey, fromNP } = {}) {
       const i = p.trackIds.indexOf(t.id);
       if (i >= 0) p.trackIds.splice(i, 1);
       await db.put('playlists', p); bump();
-      await closeSheet(); render(true); toast('Retiré de la playlist');
+      await closeSheet(); render(true);
+      undoToast('Retiré de la playlist', async () => { if (i >= 0) { p.trackIds.splice(i, 0, t.id); await db.put('playlists', p); bump(); render(true); } });
     },
     album: async () => { await closeAllOverlays(); goto('#/album/' + encodeURIComponent(albumKey(t))); },
     artist: async () => { await closeAllOverlays(); goto('#/artist/' + encodeURIComponent(artistOf(t))); },
@@ -818,7 +932,11 @@ function queueSheet() {
   openSheet('<div class="queue"></div>', {
     jump: b => player.jump(+b.dataset.i),
     rm: (b, e) => { e.stopPropagation(); player.removeAt(+b.dataset.i); },
-    clear: () => { player.queue.splice(player.index + 1); player.emit('queue'); },
+    clear: () => {
+      const q = player.queue.slice(), o = player.original?.slice() || null, idx = player.index;
+      player.clearUpcoming();
+      undoToast('File d\'attente vidée', () => { const cur = player.currentId; player.queue = q; player.original = o; player.index = Math.max(0, q.indexOf(cur)); player.emit('queue'); });
+    },
   });
   renderQueue();
 }
@@ -855,9 +973,11 @@ function playlistSheet(p) {
     { id: 'add', icon: 'plus', label: 'Ajouter des titres' },
     { id: 'queue', icon: 'queue', label: 'Ajouter à la file d\'attente' },
     { id: 'ren', icon: 'edit', label: 'Renommer' },
+    { id: 'share', icon: 'send', label: 'Partager (envoyer à quelqu\'un)' },
     { id: 'del', icon: 'trash', label: 'Supprimer la playlist', danger: true },
   ]), {
     add: () => addTracksSheet(p),
+    share: async () => { await closeSheet(); exportPlaylist(p); },
     queue: () => { p.trackIds.forEach(id => player.addToQueue(id)); closeSheet(); toast('Ajouté à la file d\'attente'); },
     ren: () => newPlaylistSheet([], p),
     del: () => confirmSheet(`Supprimer « ${p.name} » ?`, 'Les titres resteront dans ta bibliothèque.', 'Supprimer', async () => {
@@ -869,8 +989,111 @@ function playlistSheet(p) {
   });
 }
 
+// ======================================================================
+// Chapitre 8 · Sauvegarde, restauration et partage (fichier .maison.json)
+// ======================================================================
+const SHARE_FIELDS = ['id', 'source', 'title', 'artist', 'album', 'duration', 'thumb', 'ytId', 'url', 'genre', 'liked', 'saved', 'addedAt'];
+const slimTrack = t => Object.fromEntries(SHARE_FIELDS.filter(k => t[k] !== undefined && t[k] !== '').map(k => [k, t[k]]));
+const localRef = t => ({ local: true, title: t.title, artist: t.artist, duration: t.duration });
+
+async function downloadJSON(name, data, title) {
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+  const file = new File([blob], name, { type: 'application/json' });
+  // Sur Android : le menu Partager (WhatsApp, Drive, Bluetooth…) ; sinon un simple téléchargement
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function exportPlaylist(p) {
+  const tracks = p.trackIds.map(id => S.tracks.get(id)).filter(Boolean).map(t => (t.source ? slimTrack(t) : localRef(t)));
+  const from = S.settings.name || '';
+  return downloadJSON(`${(p.name || 'playlist').replace(/[^\p{L}\p{N} _-]/gu, '').trim() || 'playlist'}.maison.json`,
+    { type: 'maison-playlist', v: 1, from, name: p.name, tracks }, `Playlist « ${p.name} »`);
+}
+
+function exportBackup() {
+  const tracks = [...S.tracks.values()];
+  const keep = tracks.filter(t => t.source && (t.saved || t.liked || [...S.playlists.values()].some(p => p.trackIds.includes(t.id))));
+  const { apiKey, ytKey, ...settings } = S.settings; // les clés ne sont jamais exportées
+  const playlists = [...S.playlists.values()].map(p => ({ ...p, tracks: p.trackIds.map(id => S.tracks.get(id)).filter(Boolean).map(t => (t.source ? { id: t.id } : localRef(t))) }));
+  const likedLocal = tracks.filter(t => !t.source && t.liked).map(localRef);
+  const day = new Date().toISOString().slice(0, 10);
+  return downloadJSON(`maison-sauvegarde-${day}.maison.json`, {
+    type: 'maison-backup', v: 1, at: Date.now(), settings, tracks: keep.map(slimTrack), playlists, likedLocal,
+    history: loadJSON('onde.history', []).slice(-1500), ctxHist: loadJSON('onde.ctxHist', []),
+  }, 'Sauvegarde Maison');
+}
+
+// Retrouve un titre importé (fichier du téléphone) par son titre et son artiste
+function findLocal(ref) {
+  const k = norm(ref.title + ' ' + (ref.artist || ''));
+  for (const t of S.tracks.values()) if (!t.source && norm(t.title + ' ' + (t.artist || '')) === k) return t;
+  return null;
+}
+async function adoptTrack(x) {
+  if (!x || x.local) return x?.local ? findLocal(x) : null;
+  if (!['yt', 'radio', 'podcast'].includes(x.source)) return null;
+  let t = S.tracks.get(x.id);
+  if (!t) {
+    const thumb = safeUrl(x.thumb || '');
+    t = { ...x, thumb, coverId: thumb ? 'u:' + thumb : null, plays: 0, lastPlayed: 0, lyrics: '', addedAt: x.addedAt || Date.now() };
+    if (t.url) t.url = safeUrl(t.url);
+    if (thumb) S.covers.set(t.coverId, thumb);
+    S.tracks.set(t.id, t);
+  }
+  if (x.saved || x.liked) { t.saved = true; if (x.liked) t.liked = true; }
+  await db.put('tracks', t);
+  return t;
+}
+
+async function importDataFile(file) {
+  let d;
+  try { d = JSON.parse(await file.text()); } catch { return toast('Fichier illisible'); }
+  if (d?.type === 'maison-playlist') {
+    const ts = [];
+    for (const x of d.tracks || []) { const t = await adoptTrack({ ...x, saved: true }); if (t) ts.push(t); }
+    const miss = (d.tracks || []).length - ts.length;
+    const p = { id: uid(), name: String(d.name || 'Playlist partagée').slice(0, 80), trackIds: ts.map(t => t.id), createdAt: Date.now(), updatedAt: Date.now() };
+    S.playlists.set(p.id, p); await db.put('playlists', p); bump();
+    toast(`Playlist « ${p.name} » ajoutée${d.from ? ` (de ${String(d.from).slice(0, 30)})` : ''}${miss ? ` · ${miss} titre${miss > 1 ? 's' : ''} absent${miss > 1 ? 's' : ''} (fichiers de son téléphone)` : ''}`);
+    return goto('#/playlist/' + p.id);
+  }
+  if (d?.type === 'maison-backup') {
+    return confirmSheet('Restaurer cette sauvegarde ?', 'Tes réglages, playlists, titres likés et radios seront ajoutés à ceux de ce téléphone. Rien n\'est supprimé.', 'Restaurer', async () => {
+      for (const x of d.tracks || []) await adoptTrack(x);
+      for (const p of d.playlists || []) {
+        const ids = [];
+        for (const r of p.tracks || []) { const t = r.local ? findLocal(r) : S.tracks.get(r.id); if (t) ids.push(t.id); }
+        const np = { id: S.playlists.has(p.id) ? uid() : p.id, name: String(p.name || 'Playlist').slice(0, 80), trackIds: ids, createdAt: p.createdAt || Date.now(), updatedAt: Date.now() };
+        S.playlists.set(np.id, np); await db.put('playlists', np);
+      }
+      for (const r of d.likedLocal || []) { const t = findLocal(r); if (t) { t.liked = true; await db.put('tracks', t); } }
+      if (d.settings && typeof d.settings === 'object') {
+        const { apiKey, ytKey, ...rest } = d.settings;
+        Object.assign(S.settings, rest); saveSettings(); applyTheme();
+      }
+      if (Array.isArray(d.history) && !AI.historySize()) saveJSON('onde.history', d.history);
+      bump(); render(true);
+      toast('Sauvegarde restaurée');
+    });
+  }
+  toast('Ce fichier ne vient pas de l\'application');
+}
+function pickDataFile() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.json,application/json';
+  inp.addEventListener('change', () => { if (inp.files[0]) importDataFile(inp.files[0]); });
+  inp.click();
+}
+
 async function deleteTracks(ids) {
   const set = new Set(ids);
+  S.mixes = {};
   const coverIds = new Set();
   for (const id of ids) {
     const t = S.tracks.get(id);
@@ -898,7 +1121,7 @@ async function deleteTracks(ids) {
 const allTracksRaw = () => [...S.tracks.values()];
 
 // ======================================================================
-// Import des fichiers
+// Chapitre 9 · Import des fichiers
 // ======================================================================
 const AUDIO_EXT = /\.(mp3|m4a|aac|mp4|flac|ogg|oga|opus|wav|weba|webm|alac|aiff?)$/i;
 
@@ -916,6 +1139,10 @@ function audioDuration(file) {
 }
 
 async function importFiles(fileList) {
+  S.importing = true;
+  try { return await importFilesInner(fileList); } finally { S.importing = false; }
+}
+async function importFilesInner(fileList) {
   const lrcs = [...fileList].filter(f => /\.(lrc|txt)$/i.test(f.name));
   const files = [...fileList].filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
   if (!files.length && lrcs.length) { const n = await attachLyricsFiles(lrcs); toast(n ? `Paroles ajoutées à ${plural(n, 'titre')}` : 'Aucun titre correspondant à ces paroles'); return; }
@@ -1006,7 +1233,7 @@ document.addEventListener('dragover', e => e.preventDefault());
 document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer?.files?.length) importFiles(e.dataTransfer.files); });
 
 // ======================================================================
-// Paroles synchronisées
+// Chapitre 10 · Paroles synchronisées
 // ======================================================================
 async function loadLyrics(t) {
   S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 };
@@ -1015,10 +1242,13 @@ async function loadLyrics(t) {
   if (!S.lyr.parsed && S.settings.onlineLyrics && stale && navigator.onLine !== false) {
     S.lyr.loading = true;
     renderLyrics();
+    // on attend un peu : si on zappe vite, pas de requête inutile
+    if (!S.lyrOpen) await new Promise(r => setTimeout(r, 1500));
+    if (player.currentId !== t.id) return;
     const txt = await fetchOnline(t);
     t.lyricsChecked = Date.now();
     if (txt) { t.lyrics = txt; t.lyricsSource = 'LRCLIB'; }
-    await db.put('tracks', t);
+    await saveTrack(t);
     if (player.currentId !== t.id) return;
     S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 };
   }
@@ -1110,7 +1340,7 @@ function lyricsSheet(t) {
       t.lyrics = e.target.lyr.value.trim();
       t.lyricsSource = t.lyrics ? 'ajoutées par toi' : '';
       t.lyricsChecked = Date.now();
-      await db.put('tracks', t);
+      await saveTrack(t);
       await closeSheet();
       if (t.id === player.currentId) loadLyrics(t);
       toast(t.lyrics ? 'Paroles enregistrées' : 'Paroles supprimées');
@@ -1127,7 +1357,7 @@ async function attachLyricsFiles(files) {
     if (!t) continue;
     t.lyrics = (await f.text()).trim();
     t.lyricsSource = 'fichier .lrc';
-    await db.put('tracks', t);
+    await saveTrack(t);
     n++;
     if (t.id === player.currentId) loadLyrics(t);
   }
@@ -1135,7 +1365,7 @@ async function attachLyricsFiles(files) {
 }
 
 // ======================================================================
-// Analyse audio en arrière-plan (pour le Concierge)
+// Chapitre 11 · Analyse audio en arrière-plan (pour le Concierge)
 // ======================================================================
 const anaQ = [];
 let analyzing = false;
@@ -1164,7 +1394,7 @@ async function runAnalysis() {
 }
 
 // ======================================================================
-// Mixes personnalisés
+// Chapitre 12 · Mixes personnalisés
 // ======================================================================
 const HOME_MIXES = ['moment', 'ecole', 'sport', 'chill', 'soiree', 'favoris', 'decouverte', 'nuit'];
 function getMix(key) {
@@ -1206,7 +1436,7 @@ async function saveMixAsPlaylist(m) {
 }
 
 // ======================================================================
-// Le Concierge (chat IA)
+// Chapitre 13 · Le Concierge (chat IA)
 // ======================================================================
 const AI_SUGGEST = ['Mets du rap', 'Mets Skyrock', 'Mets les infos', 'Mets de la musique classique', 'Lance LEGEND', 'Une playlist pour l\'école', 'Motivation sport 45 min', 'Un truc chill pour ce soir', 'Mon mix du moment', 'Fais-moi redécouvrir des sons', 'Lance mes incontournables'];
 
@@ -1221,7 +1451,7 @@ function viewAI() {
     <div class="ai-log" id="ai-log">${renderChat()}</div>
     <div class="ai-foot">
     ${has ? `<div class="ai-suggest">${AI_SUGGEST.map(x => `<button class="chip" data-act="ai-send" data-text="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : ''}
-    <form class="ai-input" id="ai-form"><input id="ai-q" placeholder="${has ? 'Écris ou parle au Concierge…' : 'Importe ta musique pour commencer'}" autocomplete="off" enterkeyhint="send" ${has ? '' : 'disabled'}>${has ? `<button type="button" class="ai-mic" data-act="voice" aria-label="Parler au Concierge">${icon('mic')}</button>` : ''}<button class="ai-send" aria-label="Envoyer">${icon('send')}</button></form>
+    <form class="ai-input" id="ai-form"><input id="ai-q" aria-label="Message pour l'assistant" placeholder="${has ? 'Écris ou parle au Concierge…' : 'Importe ta musique pour commencer'}" autocomplete="off" enterkeyhint="send" ${has ? '' : 'disabled'}>${has ? `<button type="button" class="ai-mic" data-act="voice" aria-label="Parler au Concierge">${icon('mic')}</button>` : ''}<button class="ai-send" aria-label="Envoyer">${icon('send')}</button></form>
     </div>
   </div>`;
 }
@@ -1233,7 +1463,7 @@ function renderChat() {
     if (m.role === 'user') return `<div class="msg me"><p>${esc(m.text)}</p></div>`;
     let mixHtml = '';
     if (m.mix) {
-      const key = 'chat-' + i;
+      const key = 'chat-' + (m.id || i);
       if (!S.mixes[key]) S.mixes[key] = { key, name: m.mix.name, desc: m.mix.desc, emoji: '✦', tracks: m.mix.ids.map(id => S.tracks.get(id)).filter(Boolean) };
       const mx = S.mixes[key];
       const dur = mx.tracks.reduce((s, t) => s + t.duration, 0);
@@ -1252,55 +1482,54 @@ function afterAI(view) {
   return log;
 }
 
+function pushChat(m) {
+  m.id ||= uid();
+  S.chat.push(m);
+  S.chat = S.chat.slice(-40);
+  saveJSON('onde.chat', S.chat);
+  return m;
+}
+
 async function aiSend(text, { navigate = true } = {}) {
   if (S.aiBusy || !text) return null;
+  // Verrou pour toute la demande : un double appui ou la voix ne lancent pas deux fois la même chose
+  S.aiBusy = true; document.body.classList.add('ai-busy');
+  try { return await aiSendInner(text, navigate); }
+  catch (e) { console.warn(e); return null; }
+  finally { S.aiBusy = false; document.body.classList.remove('ai-busy'); }
+}
+
+async function aiSendInner(text, navigate) {
   const tracks = allTracks();
   if (navigate && S.route?.name !== 'ai') { S.pendingFwd = true; goto('#/ai'); await new Promise(r => setTimeout(r, 60)); }
-  S.chat.push({ role: 'user', text });
-  // Avec une clé Claude : le Concierge-agent pilote toute l'app. Sinon : compréhension locale.
+  pushChat({ role: 'user', text });
+  // retour immédiat : la bulle et les points d'attente s'affichent tout de suite
+  $('#ai-log')?.insertAdjacentHTML('beforeend', `<div class="msg me"><p>${esc(text)}</p></div><div class="msg bot typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
+  main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+  S.lastMix = null;
+  // 1) Compréhension locale d'abord : instantanée pour « pause », « suivant », « mets Skyrock »…
   let quick = null;
-  if (S.settings.apiKey) {
-    S.aiBusy = true; document.body.classList.add('ai-busy');
-    $('#ai-log')?.insertAdjacentHTML('beforeend', `<div class="msg me"><p>${esc(text)}</p></div><div class="msg bot typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
-    main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+  try { quick = await multiCommand(text) || await smartCommand(text); } catch (e) { console.warn(e); }
+  // 2) Sinon, avec une clé Claude, l'agent prend la main sur toute l'app
+  if (!quick && S.settings.apiKey) {
     try {
       const hist = S.chat.slice(0, -1).slice(-8).map(m => ({ role: m.role, content: m.text || '…' }));
       quick = await AI.runAgent(S.settings.apiKey, text, { tracks, chat: hist, context: agentContext(), exec: agentExec });
     } catch (e) {
       console.warn(e);
-      toast('Claude indisponible, je passe en mode local');
+      toast(navigator.onLine === false ? 'Hors connexion : je reste en mode local' : 'Claude indisponible, je passe en mode local');
     }
-    S.aiBusy = false; document.body.classList.remove('ai-busy');
   }
-  if (!quick) { try { quick = await smartCommand(text); } catch (e) { console.warn(e); } }
   if (!quick && !tracks.length) quick = S.settings.ytKey ? 'Je n\'ai pas compris. Essaie « mets Ninho », « mets Skyrock », « mets les infos », « pause » ou « suivant ».' : 'Je n\'ai pas compris. Essaie « mets Skyrock » ou « mets les infos ». Ajoute ta clé YouTube dans les Réglages pour que je trouve n\'importe quel son.';
   if (quick) {
     const lm = S.lastMix; S.lastMix = null;
-    S.chat.push({ role: 'assistant', text: quick, mix: lm ? { name: lm.name, desc: lm.desc, ids: lm.tracks.map(t => t.id) } : null });
-    saveJSON('onde.chat', S.chat);
+    pushChat({ role: 'assistant', text: quick, mix: lm ? { name: lm.name, desc: lm.desc, ids: lm.tracks.map(t => t.id) } : null });
     if (S.route?.name === 'ai') { $('#ai-log').innerHTML = renderChat(); main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' }); }
     return { reply: quick };
   }
-  S.aiBusy = true;
-  document.body.classList.add('ai-busy');
-  const log = $('#ai-log');
-  log?.insertAdjacentHTML('beforeend', `<div class="msg me"><p>${esc(text)}</p></div><div class="msg bot typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
-  main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
-  let res;
-  const t0 = Date.now();
-  try {
-    if (S.settings.apiKey) {
-      const hist = S.chat.slice(0, -1).map(m => ({ role: m.role, content: m.role === 'assistant' && m.mix ? `${m.text} [playlist « ${m.mix.name} », ${m.mix.ids.length} titres]` : m.text }));
-      res = await AI.askClaude(S.settings.apiKey, text, tracks, hist);
-    }
-  } catch (e) {
-    console.warn(e);
-    toast('Claude indisponible, je passe en mode hors ligne');
-  }
-  if (!res) {
-    if (!AI.hasIntent(text, tracks)) {
-      res = { reply: 'Je n\'ai pas compris. Tu peux me dire par exemple : « mets du rap », « fais-moi une playlist pour la salle », « supprime cette playlist », « pause », « mets Skyrock ».' };
-    }
+  let res = null;
+  if (!AI.hasIntent(text, tracks)) {
+    res = { reply: 'Je n\'ai pas compris. Tu peux me dire par exemple : « mets du rap », « fais-moi une playlist pour la salle », « supprime cette playlist », « pause », « mets Skyrock ».' };
   }
   if (!res) {
     const u = AI.understand(text, tracks);
@@ -1320,18 +1549,13 @@ async function aiSend(text, { navigate = true } = {}) {
     };
     res = { reply: m.tracks.length ? `« ${m.name} » : ${plural(m.tracks.length, 'titre')}, ${fmtTotal(dur)}. ${lines[u.mood] || ''}` : 'Je n\'ai pas trouvé de titres qui collent, essaie autre chose.', mix: m.tracks.length ? m : null, play: u.play };
   }
-  await new Promise(r => setTimeout(r, Math.max(0, 700 - (Date.now() - t0))));
-  S.chat.push({ role: 'assistant', text: res.reply, mix: res.mix ? { name: res.mix.name, desc: res.mix.desc, ids: res.mix.tracks.map(t => t.id) } : null });
-  S.chat = S.chat.slice(-40);
-  saveJSON('onde.chat', S.chat);
-  S.aiBusy = false;
-  document.body.classList.remove('ai-busy');
+  const msg = pushChat({ role: 'assistant', text: res.reply, mix: res.mix ? { name: res.mix.name, desc: res.mix.desc, ids: res.mix.tracks.map(t => t.id) } : null });
   if (S.route?.name === 'ai') {
     $('#ai-log').innerHTML = renderChat();
     main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
   }
   if ((res.play || !navigate) && res.mix) {
-    const key = 'chat-' + (S.chat.length - 1);
+    const key = 'chat-' + msg.id;
     const mx = S.mixes[key] || res.mix;
     playIds(mx.tracks.map(t => t.id), 0, { context: { label: mx.name, route: '#/mix/' + key } });
   }
@@ -1340,7 +1564,7 @@ async function aiSend(text, { navigate = true } = {}) {
 
 
 // ======================================================================
-// Compréhension des demandes (texte et voix)
+// Chapitre 14 · Compréhension des demandes (texte et voix)
 // ======================================================================
 const GENRES = [
   ['classique', /\b(classique|classical|mozart|beethoven|chopin|bach|piano classique|orchestre|symphonie|opera)\b/, 'classical', 'musique classique'],
@@ -1366,7 +1590,7 @@ const GENRES = [
   ['annees 90', /\b(annees 90|90s)\b/, '90s', 'années 90'],
   ['chanson francaise', /\b(chanson francaise|variete)\b/, 'chanson francaise', 'chanson française'],
 ];
-const MOOD_RADIO = { ecole: ['lofi', 'lofi hip hop pour étudier'], sport: ['edm', 'rap motivation muscu son'], chill: ['chill', 'chill music'], soiree: ['dance', 'musique soirée'], nuit: ['ambient', 'musique douce pour dormir'], matin: ['pop', 'musique bonne humeur'], trajet: ['hits', 'hits du moment'] };
+const MOOD_RADIO = { ecole: ['lofi', 'lofi hip hop pour étudier'], sport: ['edm', 'rap motivation muscu son'], chill: ['chill', 'chill music'], soiree: ['dance', 'musique soirée'], nuit: ['ambient', 'musique douce pour dormir'], matin: ['pop', 'musique bonne humeur'], trajet: ['hits', 'hits du moment'], triste: ['sad', 'sons tristes rap fr'] };
 
 function cleanAsk(text) {
   let n = norm(text).replace(/[.!?,;:"«»]/g, ' ').replace(/['’`-]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1374,9 +1598,18 @@ function cleanAsk(text) {
   n = n.replace(/\b(s il te plait|s il vous plait|stp|svp|please|merci)\b/g, ' ').replace(/\s+/g, ' ').trim();
   n = n.replace(/^(est ce que |est ce qu )?(tu peux|tu pourrais|peux tu|pourrais tu|tu veux bien|je veux|jveux|j veux|je voudrais|jvoudrais|j aimerais|j ai envie d ecouter|j ai envie de|j ai envie d|vas y|fais moi|on ecoute|on met)\s+/, '');
   n = n.replace(/^(?:me |m )?(mettre|lancer|jouer|passer|ecouter)\s+/, (_, v) => ({ mettre: 'mets ', lancer: 'lance ', jouer: 'joue ', passer: 'passe ', ecouter: 'ecoute ' })[v]);
-  // nombres écrits en lettres → chiffres (« avance d une minute »)
-  const NUM = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, dix: 10, quinze: 15, vingt: 20, trente: 30, quarante: 40, cinquante: 50 };
-  n = n.replace(/\b(une?|deux|trois|quatre|cinq|dix|quinze|vingt|trente|quarante|cinquante)\s+(s|sec|secondes?|min|minutes?|h|heures?)\b/g, (_, w, u) => NUM[w] + ' ' + u);
+  // erreurs de dictée : « mais / mé / mai du rap » → « mets du rap », « nan » → « non »
+  n = n.replace(/^(?:mai|mais|me|mes|mettez|metre)\s+(?!(?:non|oui|pas|c est|ca|je|tu|a|en|ou|toi|moi)\b|(?:titres?|likes?|playlists?|favoris|reglages|parametres)\b)/, 'mets ');
+  n = n.replace(/^(nan|nn|nope|naan)\b/, 'non');
+  // lettres épelées : « r f m » → rfm, « n r j » → nrj
+  n = n.replace(/\b[b-df-hj-np-tv-z](?: [b-df-hj-np-tv-z]\b)+/g, x => x.replace(/ /g, ''));
+  // durées et nombres écrits en lettres → chiffres (« minuteur une demi heure », « volume à cinquante »)
+  n = n.replace(/\b(?:une )?demi ?heure\b/g, '30 min').replace(/\btrois quarts? d heure\b/g, '45 min').replace(/\b(?:un )?quart d heure\b/g, '15 min').replace(/\bune heure et demie\b/g, '90 min');
+  const U = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6, sept: 7, huit: 8, neuf: 9, dix: 10, onze: 11, douze: 12, quinze: 15, vingt: 20, trente: 30, quarante: 40, cinquante: 50, soixante: 60, cent: 100 };
+  const W = '(?:' + Object.keys(U).join('|') + ')(?:[ ](?:et[ ])?(?:un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix))?';
+  const toN = x => x.split(/ (?:et )?/).reduce((a, w) => a + (U[w] || 0), 0);
+  n = n.replace(new RegExp(`\\b(${W})\\s+(s|sec|secondes?|min|minutes?|h|heures?|pour ?cent|%)\\b`, 'g'), (_, w, u) => toN(w) + ' ' + u);
+  n = n.replace(new RegExp(`\\b(volume|son)\\s+(a|au)\\s+(${W})\\b`, 'g'), (_, a, b, w) => `${a} ${b} ${toN(w)}`);
   return n.trim();
 }
 
@@ -1400,6 +1633,104 @@ function clearChat() {
   if (S.route?.name === 'ai') render(true);
 }
 
+// ======================================================================
+// Chapitre 15 · Réglages, personnalisation et navigation à la voix
+// ======================================================================
+const COLOR_WORDS = { rubis: /rouge|rubis|bordeaux/, saphir: /bleu|saphir/, emeraude: /vert|emeraude/, amethyste: /violet|mauve|amethyste/, rose: /\brose\b/, argent: /gris|argent|blanc|silver/, corail: /orange|corail/, or: /\bor\b|dore|jaune|gold/ };
+const OFF_WORDS = /\b(enleve|retire|desactive|arrete|coupe|enlever|sans|plus de|stop|eteins|vire|supprime)\b/;
+const cap = x => x.trim().replace(/^./, c => c.toUpperCase());
+function setS(patch, msg) {
+  Object.assign(S.settings, patch);
+  saveSettings(); applyTheme();
+  Voice.setVoicePrefs({ name: S.settings.voiceName, rate: S.settings.voiceRate });
+  if (S.route?.name === 'settings') render(true);
+  return msg;
+}
+function settingsCommand(n) {
+  let m;
+  if (/^(mets?|lance|joue) (du |des |de la |le son |la musique )/.test(n) && !/\b(theme|couleur|fond|vinyle|police|egaliseur)\b/.test(n)) return null;
+  // nom de l'assistant
+  if ((m = n.match(/^(?:appelle toi|maintenant tu t appelles?|tu t appelles? (?:maintenant )?|ton (?:nouveau )?(?:nom|prenom) (?:c est|est|sera)|je vais t appeler|je t appelle(?:rai)?)\s+(?!comment|qui|quoi)(.{1,20})$/)))
+    return setS({ botName: cap(m[1]) }, `D'accord, je m'appelle ${cap(m[1])} maintenant.`);
+  // prénom de l'utilisateur
+  if ((m = n.match(/^(?:appelle moi|mon (?:pre)?nom (?:c est|est)|je m appelle)\s+(.{1,24})$/)))
+    return setS({ name: cap(m[1]) }, `Enchanté ${cap(m[1])} ! Ta Maison porte maintenant ton prénom.`);
+  // nom de l'app
+  if ((m = n.match(/(?:renomm\w*|appelle) (?:l app(?:li(?:cation)?)?|l appli)\s+(?:en |comme )?(.{1,30})$/)))
+    return setS({ appName: cap(m[1]) }, `L'app s'appelle maintenant « ${cap(m[1])} ».`);
+  // couleur
+  if (/\b(couleur|theme|teinte)\b|^(mets?|passe) (tout |l app )?en (rouge|bleu|vert|violet|rose|orange|gris|or|dore|jaune)$/.test(n)) {
+    const k = Object.keys(COLOR_WORDS).find(c => COLOR_WORDS[c].test(n));
+    if (k) return setS({ theme: k }, `Couleur ${THEMES[k].label} appliquée.`);
+    const hex = n.match(/#?([0-9a-f]{6})\b/);
+    if (hex) return setS({ theme: 'perso', customColor: '#' + hex[1] }, 'Couleur perso appliquée.');
+  }
+  // fond d'écran
+  if (/(?<!a )\bfond\b(?! sonore)|arriere plan|mode sombre|amoled|noir pur/.test(n) && !/\ba fond\b/.test(n)) {
+    const k = /amoled|noir pur|tout noir/.test(n) ? 'amoled' : /nuit|bleu/.test(n) ? 'nuit' : /ardoise|gris/.test(n) ? 'ardoise' : /chaud|marron|brun/.test(n) ? 'chaud' : /foret|vert/.test(n) ? 'foret' : /noir/.test(n) ? 'noir' : null;
+    if (k) return setS({ bgTheme: k }, `Fond ${BACKGROUNDS[k].label}.`);
+  }
+  if (/\bvinyles?\b/.test(n) && !/\b(sons?|musiques?|playlist|disques?)\b/.test(n)) return setS({ vinyl: !OFF_WORDS.test(n) }, OFF_WORDS.test(n) ? 'Mode vinyle désactivé.' : 'Mode vinyle activé : la pochette tourne comme un disque.');
+  if (/\b(texte|ecriture|police|lettres|ecrit)\b/.test(n) && /(agrandi|plus gros|plus grand|grossi|retreci|plus petit|rapetiss)/.test(n)) {
+    const L = ['petit', 'normal', 'grand', 'tresgrand']; const i = Math.max(0, L.indexOf(S.settings.textSize || 'normal'));
+    const j = Math.max(0, Math.min(3, i + (/(retreci|plus petit|rapetiss)/.test(n) ? -1 : 1)));
+    return setS({ textSize: L[j] }, 'Taille du texte ajustée.');
+  }
+  if ((m = n.match(/police (elegante|moderne|arrondie|ronde|machine|mono|normale)/))) return setS({ font: { elegante: 'serif', moderne: 'sans', arrondie: 'rond', ronde: 'rond', machine: 'mono', mono: 'mono', normale: 'auto' }[m[1]] }, 'Police changée.');
+  // voix de l'assistant
+  if (/parle (moins vite|plus lentement|doucement|lentement)/.test(n)) return setS({ voiceRate: Math.max(0.8, +((S.settings.voiceRate || 1.04) - 0.15).toFixed(2)) }, 'Je parle plus lentement.');
+  if (/parle (plus vite|plus rapidement)/.test(n)) return setS({ voiceRate: Math.min(1.4, +((S.settings.voiceRate || 1.04) + 0.15).toFixed(2)) }, 'Je parle plus vite.');
+  if (/(repond|parle|lis).*(voix haute|a l oral|a voix)|\b(ta|la) voix\b/.test(n) && /(arrete|\bne\b|plus|coupe|desactive|sans)/.test(n)) return setS({ voiceReply: false }, 'Ok, je réponds seulement par écrit.');
+  if (/(repond|parle)s?\b.*(voix haute|a l oral)/.test(n)) return setS({ voiceReply: true }, 'Je te réponds à voix haute.');
+  // ton
+  if (/parle (moi )?(comme|en mode) (un )?(pote|poto|frere|jeune)|sois (plus )?(familier|cool|detendu)/.test(n)) return setS({ botTone: 'pote' }, 'Ça marche, on se parle entre potes.');
+  if (/sois (plus )?(bref|court|concis)|fais court|reponses? (plus )?courtes?/.test(n)) return setS({ botTone: 'bref' }, 'Compris.');
+  if (/sois (plus )?(elegant|classe|poli|raffine)/.test(n)) return setS({ botTone: 'elegant' }, 'Avec plaisir.');
+  // égaliseur
+  if ((m = n.match(/(?:egaliseur|eq)\s+(?:en |mode |sur )?(normal|basses?|voix|aigus|soiree|douce)|(plus|encore plus) de (basses?|aigus)\b|^(?:mets? )?(?:le )?son (?:en mode |mode )(normal|basses?|voix|aigus|soiree|douce)$/))) {
+    let k = (m[1] || m[3] || m[4]).replace(/^basse$/, 'basses');
+    if (k === 'basses' && (m[2] === 'encore plus' || S.settings.eq === 'basses')) k = 'basses2';
+    S.settings.eq = k; saveSettings(); player.setEQ(EQ_PRESETS[k]); if (player.kind === 'local') player.ensureAudioGraph();
+    return `Égaliseur ${EQ_NAMES[k]}.` + (player.kind !== 'local' ? ' (Il agit sur tes fichiers importés.)' : '');
+  }
+  if (/\b(pubs?|sponsors?)\b/.test(n) && /(saute|zappe|vire|enleve|skip)/.test(n) && !/podcast|episode/.test(n) && !player.current) return setS({ skipAds: true }, 'Je saute les passages de pub dès que je peux (podcasts et sponsors YouTube).');
+  if (/\b(fondu|crossfade|enchainement)\b/.test(n)) return setS({ crossfade: OFF_WORDS.test(n) ? 0 : 6 }, OFF_WORDS.test(n) ? 'Fondu désactivé.' : 'Fondu enchaîné activé.');
+  if (/lecture auto(matique)?/.test(n)) return setS({ autoplay: !OFF_WORDS.test(n) }, OFF_WORDS.test(n) ? 'Lecture automatique désactivée.' : 'Lecture automatique activée.');
+  // navigation
+  if ((m = n.match(/^(?:ouvre|va (?:dans|sur|a)|vas (?:dans|sur|a)|affiche|montre(?: moi)?|emmene moi (?:dans|sur|a))\s+(?:les |la |le |l |mes |ma |mon )?(reglages|parametres|options|bibliotheque|accueil|recherche|likes|titres likes|playlists|historique)$/))) {
+    const h = { reglages: '#/settings', parametres: '#/settings', options: '#/settings', bibliotheque: '#/library', playlists: '#/library', accueil: '#/', recherche: '#/search', likes: '#/liked', 'titres likes': '#/liked', historique: '#/history' }[m[1]];
+    Promise.resolve(closeAllOverlays()).then(() => { S.pendingFwd = true; goto(h); });
+    return 'Voilà.';
+  }
+  if (/^(montre|affiche|ouvre|voir).*(file|a suivre)/.test(n)) { openNP(); setTimeout(queueSheet, 450); return 'Voici la file d\'attente.'; }
+  return null;
+}
+
+// Plusieurs demandes dans une phrase : « mets du rap et monte le son », « lance jul en aléatoire », « mets ninho puis jul »
+const CLAUSE_VERB = /^(mets?|met|lance|joue|monte|baisse|augmente|diminue|pause|stop|arrete|coupe|passe|ajoute|active|desactive|change|minuteur|reprends?|remets?|like|enleve|vide|ouvre|appelle)\b/;
+async function multiCommand(text) {
+  const n = cleanAsk(text);
+  const mod = n.match(/^(.+?) (en (?:mode )?(aleatoire|boucle|shuffle))$/);
+  if (mod && /^(mets?|lance|joue)\b/.test(mod[1])) {
+    const r = await smartCommand(mod[1]);
+    if (!r) return null;
+    if (mod[3] === 'boucle') { player.repeat = 'one'; player.emit('modes'); } else if (!player.shuffle) player.toggleShuffle();
+    return `${r} En ${mod[3] === 'boucle' ? 'boucle' : 'aléatoire'}.`;
+  }
+  const parts = n.split(/\s+(?:et puis|et apres|et ensuite|puis|ensuite|et)\s+/);
+  if (parts.length < 2) return null;
+  // « mets ninho puis jul » : la suite sans verbe va dans la file d'attente
+  if (/^(mets?|lance|joue)\b/.test(parts[0]) && /\b(puis|ensuite|apres)\b/.test(n) && parts.slice(1).every(p => !CLAUSE_VERB.test(p) && p.split(' ').length <= 4)) {
+    const out = [await smartCommand(parts[0])];
+    for (const p of parts.slice(1)) out.push(await manageCommand(`ajoute ${p} a la file`));
+    return out.filter(Boolean).join(' ') || null;
+  }
+  if (!parts.slice(1).every(p => CLAUSE_VERB.test(p))) return null; // « Bigflo et Oli » reste une seule demande
+  const out = [];
+  for (const p of parts) { const r = await smartCommand(p); if (r) out.push(r); }
+  return out.length ? out.join(' ') : null;
+}
+
 async function smartCommand(text) {
   const n = cleanAsk(text);
   const words = n.split(' ').filter(Boolean).length;
@@ -1421,9 +1752,16 @@ async function smartCommand(text) {
   if (!n) return null;
 
   // --- volume (avant la gestion des playlists : « mets le son à 30 » ne crée pas de playlist)
-  if (/(volume|son).*(au max|a fond|au maximum|a 100)|^a fond$/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; player.setVolume(1); return 'Volume à 100 %.'; }
+  if (/(volume|son).*(au max|a fond|au maximum|a 100)|^(?:mets? )?(?:le |a )?(?:a fond|au max(?:imum)?)$/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; player.setVolume(1); return 'Volume à 100 %.'; }
   let mv = n.match(/(?:volume|son)\s+(?:a\s+|au\s+)?(\d+)/);
   if (mv) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume(+mv[1] / 100); return `Volume à ${Math.round(v * 100)} %.`; }
+  // --- réglages et navigation (avant la pause : « arrête de me répondre à voix haute » ne coupe pas la musique)
+  const stc = settingsCommand(n);
+  if (stc) return stc;
+  // --- heure, météo, morceau proposé en attente
+  if (/(quelle heure|l heure qu il est|il est quelle heure)/.test(n)) return `Il est ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}.`;
+  if (/\b(meteo|quel temps|il fait (beau|froid|chaud)|il va pleuvoir)\b/.test(n)) return 'Je n\'ai pas la météo, mais dis « mets les infos » pour le dernier flash.';
+  if (S.pendingPlay && /^(oui|ouais|vas y|go|ok|lance|lance le|mets le|mets la|d accord)$/.test(n)) { const ts = S.pendingPlay; S.pendingPlay = null; playIds(ts.map(t => t.id), 0, { context: { label: ts[0].title } }); return `Je lance « ${ts[0].title} ».`; }
   // --- répétition et minuteur « off » (avant la pause : « arrête de répéter » ne met pas en pause)
   if (/(boucle|repet)/.test(n)) { player.repeat = /(arrete|plus|stop|desactive|enleve|retire|annule|coupe|sans|enlever)/.test(n) ? 'off' : 'one'; player.emit('modes'); return player.repeat === 'one' ? 'Je répète ce titre.' : 'Répétition désactivée.'; }
   if (/(annule|enleve|desactive|supprime|stop|arrete).*(minuteur|timer|mise en veille)/.test(n)) { player.setSleep(0); return 'Minuteur annulé.'; }
@@ -1443,6 +1781,14 @@ async function smartCommand(text) {
     return await playYtQuery(cur.artist, `d'autres sons de ${cur.artist}`) || `Je n'ai rien trouvé d'autre de ${cur.artist}.`;
   }
 
+  const fu = n.match(/\b(?:son|ses|leur) (dernier|derniere|nouvel|nouveau|nouvelle|premier|meilleur|plus gros) ?(album|single|son|titre|clip|projet|tube|hit|morceau)?s?\b|\bses (sons|titres|classiques|hits|tubes)\b/);
+  if (fu && cur?.artist && cur.source === 'yt') { const what = fu[0].replace(/^(son|ses|leur) /, ''); return await playYtQuery(`${cur.artist} ${what}`, `${what} de ${cur.artist}`) || `Je n'ai rien trouvé pour ${what} de ${cur.artist}.`; }
+  if (cur?.source === 'radio' && /(change|autre|une autre|suivante?|zappe) (de |la )?(radio|station)|^(radio |station )?suivante$/.test(n)) {
+    const L = Src.FR_STATIONS; const i = L.findIndex(x => norm(cur.title).includes(norm(x)));
+    const r = await playRadioByName(L[(i + 1) % L.length]); return r ? 'Radio suivante. ' + r : 'Je n\'ai pas trouvé d\'autre radio.';
+  }
+  if (cur && /^(encore|encore une fois|remets la|remets le|une deuxieme fois|bis)$/.test(n)) { player.seek(0); player.play(); return 'Encore une fois, je le remets.'; }
+
   // --- correction : « je voulais les sons officiels, pas des compils / vidéos »
   if (S.lastYtQuery && S.settings.ytKey && /(officiel|vrais? sons?|vraies? musiques?|pas (des |de |une )?(compil|mix|video|ensemble|longue)|que des sons|titre par titre|morceaux? separes?)/.test(n)) {
     try {
@@ -1458,12 +1804,17 @@ async function smartCommand(text) {
   }
 
   // --- minuteur
-  let m = n.match(/(?:arrete|coupe|stop|eteins|pause).*?(?:dans|d ici|apres)\s*(\d+)\s*(min|minute|h|heure)/);
+  if (/\breveill?e[ -]?moi\b|\b(alarme|reveil)\b.*\b(a|pour|de|vers)\s*\d|\bmets?( moi)? (un|une) (reveil|alarme)\b/.test(n))
+    return 'Je ne peux pas sonner quand l\'app est fermée : règle plutôt l\'alarme de ton téléphone. Par contre je peux arrêter la musique toute seule : dis « minuteur 30 minutes ».';
+  let m = n.match(/(?:(?:arrete|coupe|stop|eteins|pause).*?(?:dans|d ici|apres)|\b(?:minuteur|timer|mise en veille|veille)\b)\D{0,14}?(\d+)\s*(min|minute|h|heure)/);
   if (m) { const mins = m[2].startsWith('h') ? +m[1] * 60 : +m[1]; player.setSleep(mins); return `D'accord, j'arrête la musique dans ${mins} minutes.`; }
+  if (/\b(minuteur|timer)\b/.test(n) && /(combien|reste|quand)/.test(n)) return player.sleepAt ? `Il reste ${Math.ceil((player.sleepAt - Date.now()) / 60000)} minutes au minuteur.` : player.sleepEndOfTrack ? 'J\'arrête à la fin de ce titre.' : 'Aucun minuteur en cours.';
+  if (/\b(minuteur|timer|mise en veille)\b/.test(n) && !/\d/.test(n) && !/(annule|enleve|desactive|stop|arrete)/.test(n)) { sleepSheet(); return 'Dans combien de minutes ? Dis par exemple « minuteur 20 minutes ».'; }
   if (/(a la fin (du|de ce) (titre|son|morceau))/.test(n) && /(arrete|stop|coupe)/.test(n)) { player.setSleep('end'); return 'J\'arrête à la fin de ce titre.'; }
 
-  // --- contrôles de lecture
-  if (words <= 7) {
+  // --- contrôles de lecture (sauf si c'est une demande « mets X » : « mets changes », « mets i like it »)
+  const playReq = /^(?:mets?|met|lance|joue|ecoute|trouve|cherche)\s+(?!(?:en )?pause\b|plus (?:fort|bas)|moins fort|le son\b|la suite\b|le suivant|la suivante|au suivant|a fond|la lecture$|la musique$|(?:en )?(?:mode )?aleatoire$|en boucle$|(?:un |le )?(?:coeur|like)$|en favori)/.test(n);
+  if (words <= 7 && !playReq) {
     if (/\b(pause|stop|stoppe|arrete|arreter|coupe|silence|tais toi|chut)\b/.test(n) && !/\b(pas|plus de pub)\b/.test(n)) { player.pause(); S.cmdPaused = true; return 'Pause.'; }
     if (/^(reprends?|reprendre|relance|relancer|remets?|remettre|continue|continuer|play|lecture|joue|vas y|go|allez|resume)( la musique| le son| la lecture| le morceau| le titre)?$/.test(n)) { if (!cur) return 'Il n\'y a rien en cours. Dis-moi quoi écouter.'; player.play(); return 'C\'est reparti.'; }
     if (/(recommence|depuis le debut|au debut|reprends au debut)/.test(n)) { player.seek(0); player.play(); return 'Je reprends depuis le début.'; }
@@ -1475,14 +1826,26 @@ async function smartCommand(text) {
     if (m && cur) { const sec = +m[3] * (m[4].startsWith('m') ? 60 : 1); player.seek(player.time + sec); return `J'avance de ${fmtDur(sec)}.`; }
     m = n.match(/(recule|reviens|retourne)\s+(de\s+|d\s+)?(\d+)\s*(s|sec|secondes?|min|minutes?)/);
     if (m && cur) { const sec = +m[3] * (m[4].startsWith('m') ? 60 : 1); player.seek(player.time - sec); return `Je recule de ${fmtDur(sec)}.`; }
-    if (/(monte|augmente|plus fort|hausse|monter) ?(le )?(son|volume)?|^plus fort$/.test(n) && !/\b(sport|energie)\b/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) + 0.2); return `Volume à ${Math.round(v * 100)} %.`; }
-    if (/(baisse|diminue|moins fort|plus bas|baisser) ?(le )?(son|volume)?/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) - 0.25); return `Volume à ${Math.round(v * 100)} %.`; }
+    if (/^(?:mets? )?(?:monte|augmente|hausse|monter)(?: (?:le |un peu (?:le )?)?(?:son|volume))?(?: un peu)?$|\bplus fort\b/.test(n) && !/\b(sport|energie)\b/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) + 0.2); return `Volume à ${Math.round(v * 100)} %.`; }
+    if (/^(?:mets? )?(?:baisse|diminue|baisser)(?: (?:le |un peu (?:le )?)?(?:son|volume))?(?: un peu)?$|\b(moins fort|plus bas)\b/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) - 0.25); return `Volume à ${Math.round(v * 100)} %.`; }
     if (/\b(aleatoire|shuffle|melange|melanger)\b/.test(n)) { player.toggleShuffle(); return player.shuffle ? 'Lecture aléatoire activée.' : 'Lecture aléatoire désactivée.'; }
     if (/\b(file d attente|a suivre|apres|ensuite|prochain)\b/.test(n) && /(quoi|qu est|c est|koi)/.test(n)) { const nx = S.tracks.get(player.queue[player.index + 1]); return nx ? `Ensuite : « ${nx.title} »${nx.artist ? ' de ' + nx.artist : ''}.` : 'Rien à suivre pour l\'instant.'; }
     if (cur && /(j ?aime|like|liker|coeur|favori|kiffe|adore|banger|love|trop bien ce son|ajoute (le |ce |aux? )?(titre |son )?(aux? )?(likes?|favoris|coups? de coeur))/.test(n) && !/(playlist|mix|pas)/.test(n)) { if (!cur.liked) toggleLike(cur); return `« ${cur.title} » est dans tes titres likés.`; }
     if (cur && /(c est quoi|cest quoi|c quoi|c koi|ckoi|quel est|qu est ce que c est|qui chante|comment (ca |il )?s appelle|c est qui|quelle (musique|chanson|radio|emission))/.test(n) && !/\b(infos?|actus?|journal|news|apres|a suivre|ensuite|prochain|meteo)\b/.test(n)) return cur.source === 'radio' ? `Tu écoutes ${cur.title} en direct.` : `C'est « ${cur.title} »${cur.artist ? ' de ' + cur.artist : ''}.`;
     if (cur && /\bparoles?\b/.test(n)) { openNP(); setTimeout(openLyrics, 450); return 'Voici les paroles.'; }
     if (/\b(file d attente|a suivre|apres)\b/.test(n) && /(quoi|qu est|c est)/.test(n)) { const nx = S.tracks.get(player.queue[player.index + 1]); return nx ? `Ensuite : « ${nx.title} »${nx.artist ? ' de ' + nx.artist : ''}.` : 'Rien à suivre pour l\'instant.'; }
+  }
+
+  // --- questions sur la musique (sans clé Claude : réponse via YouTube)
+  if (/^(c est quoi|cest quoi|c quoi|c koi|qui a (chante|fait|ecrit|sorti)|quand est sorti|il est sorti quand|quel est|quelle est|raconte moi|parle moi de)\b|\b(il|elle) a quel age\b|\bsorti quand\b/.test(n) && words >= 3 && !/\b(infos?|actus?|actualites?|journal|news|podcasts?|radios?|meteo|heure)\b/.test(n)) {
+    const tip = S.settings.apiKey ? '' : ' Pour de vraies réponses sur la musique, ajoute une clé Claude dans les Réglages.';
+    const q = n.replace(/^(c est quoi|cest quoi|c quoi|c koi|qui a (chante|fait|ecrit|sorti)|quand est sorti|il est sorti quand|quel est|quelle est|raconte moi|parle moi de)\s*/, '')
+      .replace(/\b(ce son|cette musique|ce titre|l histoire de ce son)\b/, cur ? `${cur.title} ${cur.artist || ''}` : '').replace(/\b(il a quel age|sorti quand)\b/, '').trim();
+    if (S.settings.ytKey && q) {
+      const r = await Src.ytSearch(S.settings.ytKey, q, 3).catch(() => []);
+      if (r[0]) { S.pendingPlay = r.map(x => remoteTrack(x, 'yt')); return `D'après YouTube : « ${r[0].title} »${r[0].artist ? ' de ' + r[0].artist : ''}. Dis « vas-y » pour l'écouter.${tip}`; }
+    }
+    return `Je ne peux pas répondre à ça tout seul.${tip || ' Essaie « mets » suivi d\'un artiste.'}`;
   }
 
   // --- verbe d'action « mets / joue / lance … »
@@ -1569,7 +1932,7 @@ async function smartCommand(text) {
 
   // --- ambiances quand la bibliothèque est petite : on passe par la radio / YouTube
   if (allTracks().length < 8) {
-    const mood = [['ecole', /ecole|cours|devoir|revis|travail|bosser|focus|concentr|etud/], ['sport', /sport|muscu|salle|courir|running|cardio|motiv/], ['nuit', /dormir|dodo|sommeil|nuit/], ['chill', /chill|calme|detente|relax|tranquille|pluie|triste|deprim|seum|chagrin|melancol|coup de mou/], ['soiree', /soiree|fete|danser|ambiance|apero/], ['matin', /matin|reveil/], ['trajet', /trajet|voiture|route/]].find(([, re]) => re.test(ask));
+    const mood = [['triste', /triste|pleur|\bsad\b|deprim|seum|chagrin|melancol|rupture|coeur brise|nostalg/], ['ecole', /ecole|cours|devoir|revis|travail|bosser|focus|concentr|etud/], ['sport', /sport|muscu|salle|courir|running|cardio|motiv/], ['nuit', /dormir|dodo|sommeil|nuit/], ['chill', /chill|calme|detente|relax|tranquille|pluie|triste|deprim|seum|chagrin|melancol|coup de mou/], ['soiree', /soiree|fete|danser|ambiance|apero/], ['matin', /matin|reveil/], ['trajet', /trajet|voiture|route/]].find(([, re]) => re.test(ask));
     if (mood) {
       const [tag, ytq] = MOOD_RADIO[mood[0]];
       if (S.settings.ytKey) {
@@ -1603,7 +1966,7 @@ async function smartCommand(text) {
 }
 
 // ======================================================================
-// Outils du Concierge-agent (Claude)
+// Chapitre 16 · Outils du Concierge-agent (Claude)
 // ======================================================================
 function agentContext() {
   const t = player.current;
@@ -1684,6 +2047,10 @@ async function agentExec(name, a) {
       const nx = player.queue.slice(player.index + 1, player.index + 6).map(id => S.tracks.get(id)).filter(Boolean).map(t => `${t.title} — ${t.artist || ''}`);
       return { current: cur ? { title: cur.title, artist: cur.artist, source: cur.source || 'fichier', playing: player.playing, position: Math.round(player.time), duration: Math.round(player.duration || 0) } : null, next: nx, volume: Math.round((player.base ?? 1) * 100) };
     }
+    case 'app_command': {
+      const c = cleanAsk(a.command || '');
+      return settingsCommand(c) || await manageCommand(c) || (/(vide|efface).*(file|conversation)/.test(c) ? await smartCommand(a.command) : null) || { error: 'Commande non comprise par l\'application' };
+    }
     case 'navigate': { await closeAllOverlays(); S.pendingFwd = true; goto({ home: '#/', search: '#/search', library: '#/library', concierge: '#/ai', settings: '#/settings', liked: '#/liked' }[a.screen] || '#/'); return 'OK'; }
   }
   return 'Outil inconnu';
@@ -1760,7 +2127,7 @@ async function manageCommand(n) {
     await deleteTracks([cur.id]); return 'Titre supprimé.';
   }
   // vider la file d'attente
-  if (/(vide|efface|nettoie|supprime) (la )?file/.test(n)) { player.queue.splice(player.index + 1); player.emit('queue'); return 'File d\'attente vidée.'; }
+  if (/(vide|efface|nettoie|supprime) (la )?file/.test(n)) { player.clearUpcoming(); return 'File d\'attente vidée.'; }
   // renommer une playlist
   let m = n.match(/renomm\w* (?:la playlist |ma playlist |cette playlist )?(.*?)\s*(?:en|par|comme) (.+)$/);
   if (m) {
@@ -1804,13 +2171,14 @@ async function manageCommand(n) {
   return null;
 }
 // ======================================================================
-// Commandes directes (texte ou voix)
+// Chapitre 17 · Commandes directes (texte ou voix)
 // ======================================================================
 function quickCommand(text) {
   const n = norm(text).replace(/[.!?,]/g, ' ').replace(/'/g, ' ').replace(/\s+/g, ' ').trim();
   const words = n.split(' ').length;
   const cur = player.current;
-  if (words <= 4) {
+  const playReq = /^(joue|jouer|mets|met|mais|lance|ecoute|ecouter|play)\s/.test(n);
+  if (words <= 4 && !playReq) {
     if (/^(pause|stop|arrete|coupe|silence|tais)/.test(n)) { player.pause(); return 'Pause.'; }
     if (/^(reprends|reprend|play|relance|continue|remets|lecture)$/.test(n)) { player.play(); return 'C\'est reparti.'; }
     if (/(suivant|suivante|next|passe|skip|zappe|change)/.test(n)) { player.next(); return 'Titre suivant.'; }
@@ -1818,7 +2186,7 @@ function quickCommand(text) {
     if (/(aleatoire|shuffle|melange)/.test(n)) { player.toggleShuffle(); return player.shuffle ? 'Lecture aléatoire activée.' : 'Lecture aléatoire désactivée.'; }
     if (/(en boucle|repete|boucle)/.test(n)) { player.repeat = 'one'; player.emit('modes'); return 'Je répète ce titre.'; }
   }
-  if (cur && words <= 7 && /(j aime|like|coeur|favori|kiffe)/.test(n) && !/playlist|mix/.test(n)) {
+  if (cur && words <= 7 && !playReq && /(j aime|like|coeur|favori|kiffe)/.test(n) && !/playlist|mix/.test(n)) {
     if (!cur.liked) toggleLike(cur);
     return `« ${cur.title} » est dans tes titres likés.`;
   }
@@ -1849,7 +2217,7 @@ function quickCommand(text) {
 }
 
 // ======================================================================
-// Mode vocal
+// Chapitre 18 · Mode vocal
 // ======================================================================
 const vbox = $('#voice');
 async function startVoice({ navigate = false } = {}) {
@@ -1858,23 +2226,27 @@ async function startVoice({ navigate = false } = {}) {
     return;
   }
   if (S.voiceOn) { Voice.stopListening(); return; }
+  if (S.aiBusy) { toast('Une seconde, je finis la demande précédente'); return; }
   S.voiceOn = true;
   Voice.stopSpeaking();
+  // iPhone : la voix doit être « débloquée » pendant l'appui
+  if (Voice.canSpeak && !S.ttsUnlocked) { try { speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch { /* ignore */ } S.ttsUnlocked = true; }
   const said = $('.v-said', vbox), ans = $('.v-answer', vbox);
   said.textContent = ''; ans.textContent = '';
   vbox.className = 'voice listening';
   vbox.hidden = false;
   requestAnimationFrame(() => vbox.classList.add('open'));
-  // Pendant que tu parles, la musique se met en pause (meilleure écoute), puis reprend
+  // Pendant que tu parles, la musique se met en pause (une radio baisse juste le son), puis reprend
   S.voiceWasPlaying = player.playing;
   S.voiceTrack = player.currentId;
-  if (player.playing) player.pause();
+  if (player.playing) { if (player.current?.source === 'radio') player.duck(true); else player.pause(); }
   let text = '';
   try {
     text = await Voice.listen({ onPartial: t => { said.textContent = t; } });
   } catch (e) {
     ans.textContent = e.message === 'not-allowed' || e.message === 'service-not-allowed'
-      ? 'Autorise le micro pour cette app dans les réglages du navigateur.'
+      ? 'Micro refusé : autorise-le pour cette app (réglages du navigateur), ou utilise la dictée du clavier dans le chat.'
+      : e.message === 'audio-capture' ? 'Aucun micro détecté.'
       : e.message === 'network' ? 'La reconnaissance vocale a besoin d\'internet.' : 'Je n\'ai pas pu t\'écouter.';
   }
   if (!S.voiceOn) return;
@@ -1913,18 +2285,20 @@ $('.v-orb', vbox).addEventListener('click', () => Voice.stopListening());
 
 
 // ======================================================================
-// Anti-pub : YouTube (SponsorBlock) et podcasts (début / fin appris)
+// Chapitre 19 · Anti-pub : YouTube (SponsorBlock) et podcasts (début / fin appris)
 // ======================================================================
 const podPrefs = loadJSON('onde.podprefs', {});
 const savePodPrefs = () => saveJSON('onde.podprefs', podPrefs);
 const showKey = t => norm(t?.artist || '');
 let sbSegs = null, sbFor = null, podLearn = null, autoStartDone = null;
+const endSkipped = new Set(); // épisodes dont la fin (pubs) a déjà été sautée
 
 player.addEventListener('track', async () => {
   const t = player.current;
   np.classList.toggle('pod', t?.source === 'podcast');
   sbSegs = null; sbFor = t?.id; podLearn = null;
   if (!t) return;
+  if (t.source === 'podcast') endSkipped.delete(t.id);
   if (t.source === 'yt' && S.settings.skipAds) {
     const segs = await Src.sponsorSegments(t.ytId);
     if (sbFor === t.id) sbSegs = segs.map(x => ({ ...x, done: false }));
@@ -1955,7 +2329,7 @@ player.addEventListener('time', () => {
   }
   if (t.source === 'podcast' && d && isFinite(d)) {
     const pr = podPrefs[showKey(t)];
-    if (pr?.end && d - now <= pr.end && d - now > 1 && !t._endSkipped) { t._endSkipped = true; toast('Fin de l\'émission (pubs) sautée'); player.next(true); }
+    if (pr?.end && d - now <= pr.end && d - now > 1 && !endSkipped.has(t.id)) { endSkipped.add(t.id); toast('Fin de l\'émission (pubs) sautée'); player.next(); }
   }
 });
 
@@ -1988,24 +2362,24 @@ player.addEventListener('queue', () => {
   const t = S.tracks.get(prevId);
   if (t?.source !== 'podcast' || !S._lastPodPos) return;
   const rem = (t.duration || 0) - S._lastPodPos;
-  if (rem > 25 && rem < 420 && S._lastPodPos > t.duration * 0.6 && !t._endSkipped) {
+  if (rem > 25 && rem < 420 && S._lastPodPos > (S._lastPodDur || t.duration) * 0.6 && !endSkipped.has(t.id)) {
     const k = showKey(t);
     podPrefs[k] = { ...(podPrefs[k] || {}), end: Math.round(rem - 5) };
     savePodPrefs();
     toast(`C'est noté : je couperai les ${fmt(rem)} de fin de « ${t.artist} »`);
   }
 });
-player.addEventListener('time', () => { if (player.current?.source === 'podcast') S._lastPodPos = player.time; });
+player.addEventListener('time', () => { if (player.current?.source === 'podcast') { S._lastPodPos = player.time; S._lastPodDur = player.duration; } });
 
 // ======================================================================
-// Son : volume et égaliseur
+// Chapitre 20 · Son : volume et égaliseur
 // ======================================================================
 const EQ_PRESETS = { normal: [0, 0, 0], basses: [6, 0, 1], basses2: [10, -1, 2], voix: [-3, 4, 2], aigus: [-1, 0, 5], soiree: [6, -2, 4], douce: [2, -1, -4] };
 const EQ_NAMES = { normal: 'Normal', basses: 'Basses +', basses2: 'Basses ++', voix: 'Voix (podcasts)', aigus: 'Aigus +', soiree: 'Soirée', douce: 'Douce' };
 function soundSheet() {
   const cur = S.settings.eq || 'normal';
   openSheet(`<h3 class="sheet-title">Son</h3>
-    ${isIOS ? '<p class="sheet-text">Sur iPhone, le volume se règle avec les boutons du téléphone.</p>' : `<div class="vol-row">${icon('timer')}<input type="range" class="range" id="vol" min="5" max="100" step="1" value="${Math.round((player.base ?? 1) * 100)}"><b id="vol-v">${Math.round((player.base ?? 1) * 100)} %</b></div>`}
+    ${isIOS ? '<p class="sheet-text">Sur iPhone, le volume se règle avec les boutons du téléphone.</p>' : `<div class="vol-row">${icon('vol')}<input type="range" class="range" id="vol" aria-label="Volume" min="5" max="100" step="1" value="${Math.round((player.base ?? 1) * 100)}"><b id="vol-v">${Math.round((player.base ?? 1) * 100)} %</b></div>`}
     <h4 class="sub">Égaliseur</h4>
     <div class="eq-presets">${Object.keys(EQ_PRESETS).map(k => `<button class="chip ${k === cur ? 'on' : ''}" data-sa="eq" data-k="${k}">${EQ_NAMES[k]}</button>`).join('')}</div>
     <p class="sheet-text">${isIOS ? 'L\'égaliseur n\'est pas disponible sur iPhone.' : 'L\'égaliseur s\'applique à tes musiques importées. YouTube et les radios utilisent leur propre son.'}</p>`, {
@@ -2026,7 +2400,7 @@ function soundSheet() {
   });
 }
 // ======================================================================
-// Sources en ligne : YouTube (lecteur officiel) & radios
+// Chapitre 21 · Sources en ligne : YouTube (lecteur officiel) & radios
 // ======================================================================
 const ytbox = $('#ytbox');
 // La vidéo YouTube prend exactement la place de la pochette : dans le lecteur, dans les paroles ou dans le mini-lecteur
@@ -2072,7 +2446,7 @@ function remoteTrack(item, source) {
 
 function onlineRow(t, i, listKey) {
   const live = t.source === 'radio';
-  return `<div class="row ${t.id === player.currentId ? 'playing' : ''}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
+  return `<div class="row ${t.id === player.currentId ? 'playing' : ''}" role="button" tabindex="0" aria-label="${esc(t.title)}${t.artist ? ', ' + esc(t.artist) : ''}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
     ${trackCover(t, live ? 'radio-cv' : 'wide')}
     <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${live ? '<span class="live-dot">EN DIRECT</span> ' : t.source === 'podcast' ? '<span class="src-pc">PODCAST</span> ' : '<span class="src-yt">YouTube</span> '}${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}</small></div>
     <button class="ib sm more" aria-label="Options">${icon('more')}</button>
@@ -2136,14 +2510,15 @@ async function onlineSearch(q) {
         <p class="hint">Déjà possible sans clé : colle un lien YouTube (partager → copier le lien) dans la barre de recherche.</p></div>
         ${savedOnline()}`);
     }
-    if (!q) return show(savedOnline() || `<div class="no-res"><b>Cherche un artiste ou un titre</b><p>Tout YouTube est là.</p></div>`);
+    if (!q) return show(recentSearches() + (savedOnline() || `<div class="no-res"><b>Cherche un artiste ou un titre</b><p>Tout YouTube est là.</p></div>`));
     show('<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>');
     const res = await Src.ytSearch(S.settings.ytKey, q);
     const ts = res.map(x => remoteTrack(x, 'yt'));
     const key = registerList('yt-q', ts.map(t => t.id), `YouTube « ${q} »`);
+    if (ts.length) rememberSearch(q);
     show(ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : `<div class="no-res"><b>Aucun résultat</b></div>`);
   } catch (e) {
-    show(`<div class="no-res"><b>Impossible de charger</b><p>${esc(e.message || 'Vérifie ta connexion.')}</p></div>`);
+    show(netErr('Impossible de charger', e, S.settings.searchSrc));
   }
 }
 
@@ -2210,7 +2585,7 @@ async function morePodcasts(q, name) {
     const res = await Src.podcastSearch(q, 30);
     $('#results').innerHTML = `<button class="link back-link" data-act="src" data-src="info">${icon('back')} Les infos</button><h2 class="sec-title">${esc(name)}</h2>` +
       (res.length ? `<div class="pc-grid">${res.map((p, i) => `<button class="pc-card" data-act="pc-show" data-id="${p.id}" style="--d:${Math.min(i, 12) * 30}ms"><img src="${esc(p.art)}" alt="" loading="lazy"><b>${esc(p.name)}</b><small>${esc(p.author)}</small></button>`).join('')}</div>` : '<div class="no-res"><b>Rien trouvé</b></div>');
-  } catch (e) { $('#results').innerHTML = `<div class="no-res"><b>Podcasts indisponibles</b><p>${esc(e.message)}</p></div>`; }
+  } catch (e) { $('#results').innerHTML = netErr('Podcasts indisponibles', e, 'info'); }
 }
 
 async function playNewsFlash(i, btn) {
@@ -2237,7 +2612,7 @@ async function openFeatured(q) {
     await showPodcast(show.id);
     $('#results')?.insertAdjacentHTML('afterbegin', `<button class="link back-link" data-act="src" data-src="info">${icon('back')} Les infos</button>`);
   } catch (e) {
-    $('#results').innerHTML = `<div class="no-res"><b>Indisponible</b><p>${esc(e.message)}</p></div>`;
+    $('#results').innerHTML = netErr('Indisponible', e, S.settings.searchSrc);
   }
 }
 
@@ -2259,7 +2634,7 @@ async function showPodcast(id) {
     $('#results').innerHTML = `<div class="pc-head">${p.art ? `<img src="${esc(p.art)}" alt="">` : ''}<div><b>${esc(p.name)}</b><small>${esc(p.author)} · ${plural(ts.length, 'épisode')}</small></div></div>` +
       (ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : '<div class="no-res"><b>Aucun épisode disponible</b></div>');
   } catch (e) {
-    $('#results').innerHTML = `<div class="no-res"><b>Podcast indisponible</b><p>${esc(e.message)}</p></div>`;
+    $('#results').innerHTML = netErr('Podcast indisponible', e, 'info');
   }
 }
 
@@ -2274,12 +2649,12 @@ async function showRadios(tag, label) {
     $('#results').innerHTML = `<button class="link back-link" data-act="src" data-src="radio">${icon('back')} Tous les genres</button><h2 class="sec-title">${esc(label)}</h2>` +
       (ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : '<div class="no-res"><b>Aucune radio</b></div>');
   } catch (e) {
-    $('#results').innerHTML = `<div class="no-res"><b>Radios indisponibles</b><p>${esc(e.message)}</p></div>`;
+    $('#results').innerHTML = netErr('Radios indisponibles', e, 'radio');
   }
 }
 
 // ======================================================================
-// Personnalisation : prénom, nom de l'app, couleurs, style, goûts
+// Chapitre 22 · Personnalisation : prénom, nom de l'app, couleurs, style, goûts
 // ======================================================================
 const THEMES = {
   or: { label: 'Or', a: '#d9b26a', a2: '#f1d9a3', g: ['#f6e3b4', '#d4a955', '#a77c37'], on: '#140f06' },
@@ -2348,7 +2723,7 @@ function applyTheme() {
   const ml = document.querySelector('link[rel="manifest"]');
   if (ml && ml.getAttribute('href') !== href) ml.setAttribute('href', href);
   document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', short);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#070707');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', (BACKGROUNDS[S.settings.bgTheme] || BACKGROUNDS.noir).bg);
   // le logo dégradé suit la couleur choisie
   const stops = document.querySelectorAll('#gold stop');
   if (stops.length === 3) t.g.forEach((c, i) => stops[i].setAttribute('stop-color', c));
@@ -2365,9 +2740,8 @@ function onboarding() {
   const draw = () => {
     const steps = [
       `<div class="onb-logo"><svg><use href="#i-logo"/></svg></div>
-       <h1>Bienvenue</h1><p>Ton app de musique perso : sans pub ajoutée, avec tes radios, tes sons, tes infos et ton assistant. On la règle pour toi en 30 secondes.</p>
-       <label>Ton prénom<input id="onb-first" value="${esc(st.first)}" maxlength="24" autocomplete="given-name" placeholder="Ton prénom"></label>
-       <label>Ton nom <small>(facultatif)</small><input id="onb-last" value="${esc(st.last)}" maxlength="30" autocomplete="family-name" placeholder="Ton nom"></label>`,
+       <h1>Bienvenue</h1><p>Ton app de musique perso, avec tes radios, tes sons, tes infos et ton assistant. On la règle pour toi en 30 secondes.</p>
+       <label>Ton prénom<input id="onb-first" value="${esc(st.first)}" maxlength="24" autocomplete="given-name" placeholder="Ton prénom" aria-label="Ton prénom"></label>`,
       `<h1>Ta couleur</h1><p>Elle habille toute l'app : boutons, logo, lecteur.</p>
        <div class="swatches">${swatches(st.theme)}</div>
        <h2>Ton style</h2>
@@ -2509,7 +2883,7 @@ async function playTaste(key) {
 }
 
 // ======================================================================
-// Bibliothèque utile : récap, historique, playlists, radios, épisodes
+// Chapitre 23 · Bibliothèque utile : récap, historique, playlists, radios, épisodes
 // ======================================================================
 function viewLibrary(params) {
   if (params.get('f')) return viewLibraryList(params);
@@ -2520,6 +2894,16 @@ function viewLibrary(params) {
   const eps = [...S.tracks.values()].filter(t => t.source === 'podcast' && t.saved);
   const local = [...S.tracks.values()].filter(t => !t.source);
   const histCount = [...S.tracks.values()].filter(t => t.lastPlayed).length;
+  if (!st.count) {
+    // pas encore de statistiques détaillées : on se base sur les écoutes de la semaine
+    const wk = [...S.tracks.values()].filter(t => t.lastPlayed > Date.now() - 7 * 864e5);
+    if (wk.length) {
+      st.count = wk.reduce((n, t) => n + Math.max(1, Math.min(t.plays || 1, 50)), 0);
+      st.minutes = Math.round(wk.reduce((n, t) => n + (t.duration || 180), 0) / 60);
+      const c = {}; wk.forEach(t => { if (t.artist && t.source !== 'radio') c[t.artist] = (c[t.artist] || 0) + 1; });
+      st.topArtists = Object.entries(c).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+    }
+  }
   const recap = st.count
     ? `<section class="recap">
         <small>Ta semaine</small>
@@ -2536,7 +2920,7 @@ function viewLibrary(params) {
     ${recap}
     <div class="lib-links">
       ${link('#/liked', likedCover(), 'Titres likés', plural(lk.length, 'titre'))}
-      ${link('#/history', `<div class="cv st-art search-art">${icon('timer')}</div>`, 'Historique', histCount ? `${plural(histCount, 'son')} écouté${histCount > 1 ? 's' : ''}` : 'Rien pour l\'instant')}
+      ${link('#/history', `<div class="cv st-art search-art">${icon('clock')}</div>`, 'Historique', histCount ? `${plural(histCount, 'son')} écouté${histCount > 1 ? 's' : ''}` : 'Rien pour l\'instant')}
       ${local.length ? link('#/library?f=tracks', `<div class="cv st-art search-art">${icon('note')}</div>`, 'Sur ton téléphone', `${plural(local.length, 'fichier')} · hors ligne`) : ''}
       ${local.length ? link('#/library?f=artists', `<div class="cv st-art search-art">${icon('user')}</div>`, 'Artistes et albums', `${plural(artists().size, 'artiste')}`) : ''}
     </div>
@@ -2592,16 +2976,39 @@ function homeHero() {
   </button>`;
 }
 // ======================================================================
-// Vues
+// Chapitre 24 · Vues
 // ======================================================================
 function registerList(key, ids, label, extra = {}) {
   S.lists[key] = { ids, label, ...extra };
   return key;
 }
 
+// Longues listes : on affiche les 80 premières lignes tout de suite, la suite au fil du défilement
+const LAZY = new Map();
+function lazyRows(items, rowFn, first = 80) {
+  if (items.length <= first + 20) return items.map(rowFn).join('');
+  const id = 'lz' + (LAZY.size + 1) + Date.now().toString(36);
+  LAZY.set(id, { items, rowFn, at: first });
+  return items.slice(0, first).map(rowFn).join('') + `<div class="lazy-more" data-lazy="${id}" aria-hidden="true"></div>`;
+}
+let lazyObs = null;
+function wireLazy(root) {
+  if (!('IntersectionObserver' in window)) { $$('.lazy-more', root).forEach(el => fillLazy(el, Infinity)); return; }
+  lazyObs ||= new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) fillLazy(e.target, 150); }), { rootMargin: '800px' });
+  $$('.lazy-more', root).forEach(el => lazyObs.observe(el));
+}
+function fillLazy(el, n) {
+  const L = LAZY.get(el.dataset.lazy);
+  if (!L) { el.parentNode?.removeChild(el); return; }
+  const end = Math.min(L.items.length, L.at + n);
+  el.insertAdjacentHTML('beforebegin', L.items.slice(L.at, end).map((x, k) => L.rowFn(x, L.at + k)).join(''));
+  L.at = end;
+  if (end >= L.items.length) { lazyObs?.unobserve(el); el.parentNode?.removeChild(el); LAZY.delete(el.dataset.lazy); }
+}
+
 function trackRow(t, i, listKey, { num = false, showCover = true } = {}) {
   const playing = t.id === player.currentId;
-  return `<div class="row ${playing ? 'playing' : ''}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
+  return `<div class="row ${playing ? 'playing' : ''}" role="button" tabindex="0" aria-label="${esc(t.title)}, ${esc(artistOf(t))}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
     ${num ? `<span class="num">${t.track || i + 1}</span>` : ''}
     ${showCover ? trackCover(t) : ''}
     <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${t.liked ? `<span class="like-mark on">${icon('heart-f')}</span>` : '<span class="like-mark">' + icon('heart-f') + '</span>'}${esc(artistOf(t))}${num ? '' : t.album ? ' · ' + esc(t.album) : ''}</small></div>
@@ -2653,7 +3060,8 @@ function pushCtxHist(ids, i, opts) {
   const c = opts.context || {};
   const radio = t.source === 'radio';
   const key = radio ? 'radio:' + t.id : c.route || 'ctx:' + (c.label || t.title);
-  const entry = { key, label: radio ? t.title : (c.label || t.title), route: radio ? null : c.route || null, ids: radio ? [t.id] : ids.slice(0, 80), coverId: t.coverId || null, kind: t.source || 'local', at: Date.now() };
+  const route = c.route?.startsWith('#/mix/chat-') ? null : c.route;
+  const entry = { key, label: radio ? t.title : (c.label || t.title), route: radio ? null : route || null, ids: radio ? [t.id] : ids.slice(0, 80), coverId: t.coverId || null, kind: t.source || 'local', at: Date.now() };
   const list = loadJSON('onde.ctxHist', []).filter(h => h.key !== key);
   list.unshift(entry);
   saveJSON('onde.ctxHist', list.slice(0, 10));
@@ -2785,7 +3193,7 @@ function viewSearch(params) {
   const src = S.settings.searchSrc || 'yt';
   const ph = { yt: 'Artiste, titre, ou colle un lien YouTube', radio: 'Nom d\'une radio (Skyrock, NRJ…)',  info: 'Les infos du moment', lib: 'Dans ta bibliothèque…' }[src];
   return `<header class="page-head"><h1>Rechercher</h1></header>
-    <div class="search-sticky"><div class="search-box">${icon('search')}<input type="search" id="q" placeholder="${ph}" value="${esc(S.searchQ)}" autocomplete="off" enterkeyhint="search"><button class="ib sm clear-q" aria-label="Effacer" ${S.searchQ ? '' : 'hidden'}>${icon('close')}</button></div>
+    <div class="search-sticky"><div class="search-box">${icon('search')}<input type="search" id="q" aria-label="Rechercher" placeholder="${ph}" value="${esc(S.searchQ)}" autocomplete="off" enterkeyhint="search"><button class="ib sm clear-q" aria-label="Effacer" ${S.searchQ ? '' : 'hidden'}>${icon('close')}</button></div>
     <div class="chips src-chips">${[['yt', 'YouTube'], ['radio', 'Radios'], ['info', 'Infos'], ['lib', 'Ma bibliothèque']].map(([k, l]) => `<button class="chip ${k === src ? 'on' : ''}" data-act="src" data-src="${k}">${l}</button>`).join('')}</div></div>
     <div id="results">${src === 'lib' ? searchResults(S.searchQ) : '<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>'}</div>`;
 }
@@ -2834,7 +3242,7 @@ function viewLibraryList(params) {
   if (f === 'tracks') {
     const tr = allTracks().slice().sort(sort === 'az' ? (a, b) => collator.compare(a.title, b.title) : (a, b) => b.addedAt - a.addedAt);
     const key = registerList('lib-tracks', tr.map(t => t.id), 'Tous les titres', { route: '#/all' });
-    body = tr.length ? `<div class="list">${tr.map((t, i) => trackRow(t, i, key)).join('')}</div>` : '';
+    body = tr.length ? `<div class="list">${lazyRows(tr, (t, i) => trackRow(t, i, key))}</div>` : '';
   } else {
     const pinned = items.filter(i => i.pin);
     const rest = items.filter(i => !i.pin).sort(sort === 'az' ? byName : byRecent);
@@ -2868,7 +3276,7 @@ function collectionView({ kind, title, sub, coverHtml, ids, listKey, label, colo
       ${tracks.length ? `<button class="ib shuffle-btn" data-act="shuffle-list" data-list="${listKey}" aria-label="Aléatoire">${icon('shuffle')}</button>
       <button class="hero-play" data-act="play-list" data-list="${listKey}" aria-label="Lire">${icon('play')}</button>` : ''}
     </div>
-    ${tracks.length ? `<div class="list">${tracks.map((t, i) => trackRow(t, i, listKey, { num, showCover: !num })).join('')}</div>` : `<p class="coll-empty">${emptyMsg || 'Aucun titre.'}</p>`}
+    ${tracks.length ? `<div class="list">${lazyRows(tracks, (t, i) => trackRow(t, i, listKey, { num, showCover: !num }))}</div>` : `<p class="coll-empty">${emptyMsg || 'Aucun titre.'}</p>`}
     ${extra}
   </div>`;
 }
@@ -2945,7 +3353,7 @@ function viewSettings() {
     <h1 class="set-h">Réglages</h1>
     <section class="set-group"><h3>Lecture</h3>
       <div class="set-item"><div><b>Fondu enchaîné</b><small>${isIOS ? 'Non disponible sur iPhone (le volume est verrouillé par iOS).' : 'Les titres se mélangent en douceur à la transition.'}</small></div><output id="cf-val">${S.settings.crossfade ? S.settings.crossfade + ' s' : 'Désactivé'}</output></div>
-      ${isIOS ? '' : `<input type="range" class="range" id="cf" min="0" max="12" step="1" value="${S.settings.crossfade}">`}
+      ${isIOS ? '' : `<input type="range" class="range" id="cf" aria-label="Durée du fondu enchaîné" min="0" max="12" step="1" value="${S.settings.crossfade}">`}
       ${isIOS ? '' : `<label class="set-item toggle"><div><b>Visualiseur animé</b><small>Ondes autour de la pochette qui suivent la musique.</small></div><input type="checkbox" id="viz" ${S.settings.visualizer ? 'checked' : ''}><span class="sw"></span></label>`}
     </section>
     ${persoSettings()}
@@ -2963,10 +3371,11 @@ function viewSettings() {
       <button class="set-item btnlike" data-act="sound"><div><b>Volume et égaliseur</b><small>Basses, voix, aigus · ${esc(EQ_NAMES[S.settings.eq] || 'Normal')}</small></div>${icon('gear')}</button>
       <label class="set-item col"><div><b>Voix du Concierge</b><small>${Voice.canSpeak ? 'Choisis la voix qui te répond' : 'Synthèse vocale indisponible sur ce navigateur'}</small></div>
         <select class="set-select" id="set-vname"><option value="">Automatique (la plus naturelle)</option>${Voice.frenchVoices().map(v => `<option value="${esc(v.name)}" ${v.name === S.settings.voiceName ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
-        <div class="vol-row"><small>Lente</small><input type="range" class="range" id="set-vrate" min="0.8" max="1.4" step="0.05" value="${S.settings.voiceRate}"><small>Rapide</small></div>
+        <div class="vol-row"><small>Lente</small><input type="range" class="range" id="set-vrate" aria-label="Vitesse de la voix" min="0.8" max="1.4" step="0.05" value="${S.settings.voiceRate}"><small>Rapide</small></div>
         <button class="btn ghost sm" data-act="voice-test" type="button">Écouter la voix</button></label>
     </section>
     <section class="set-group"><h3>Anti-pub</h3>
+      <label class="set-item toggle"><div><b>Lecture automatique</b><small>Quand la file est finie, l'app enchaîne sur des sons du même style.</small></div><input type="checkbox" id="set-autoplay" ${S.settings.autoplay ? 'checked' : ''}><span class="sw"></span></label>
       <label class="set-item toggle"><div><b>Sauter les pubs et passages hors sujet</b><small>YouTube : sponsors, autopromo, intros (base collaborative SponsorBlock). Podcasts : quand tu sautes la pub du début ou de la fin, l'app s'en souvient pour les épisodes suivants de la même émission.</small></div><input type="checkbox" id="set-ads" ${S.settings.skipAds ? 'checked' : ''}><span class="sw"></span></label>
     </section>
     <section class="set-group"><h3>Paroles</h3>
@@ -2983,6 +3392,8 @@ function viewSettings() {
     <section class="set-group"><h3>Bibliothèque</h3>
       <button class="set-item btnlike" data-act="import"><div><b>Importer de la musique</b><small>Fichiers ou dossier depuis ton téléphone</small></div>${icon('import')}</button>
       <div class="set-item"><div><b>Stockage utilisé</b><small id="storage">Calcul…</small></div></div>
+      <button class="set-item btnlike" data-act="backup-export"><div><b>Sauvegarder mes données</b><small>Playlists, likes, radios et réglages dans un fichier (sans tes clés). Utile pour changer de téléphone.</small></div>${icon('import')}</button>
+      <button class="set-item btnlike" data-act="backup-import"><div><b>Restaurer ou ouvrir un fichier</b><small>Une sauvegarde, ou une playlist qu'on t'a envoyée</small></div>${icon('folder')}</button>
       <button class="set-item btnlike danger" data-act="wipe"><div><b>Tout effacer</b><small>Supprime toute la musique et les playlists de l'application</small></div>${icon('trash')}</button>
     </section>
     <section class="set-group"><h3>Installer l'application</h3>
@@ -2993,7 +3404,7 @@ function viewSettings() {
         ${S.installPrompt ? `<button class="btn primary" data-act="install">${icon('import')} Installer maintenant</button>` : ''}
       </div>
     </section>
-    <p class="about">${esc(brandName())} · ta maison de la musique · aucune pub, aucun pistage. Ta musique ne quitte jamais ton téléphone.</p>
+    <p class="about">${esc(brandName())} · ta maison de la musique · aucun pistage. Tes fichiers restent sur ton téléphone ; les recherches passent par YouTube, les radios et les podcasts.</p>
     </div></div>`;
 }
 
@@ -3002,7 +3413,7 @@ function notFound() {
 }
 
 // ======================================================================
-// Routeur avec transitions
+// Chapitre 25 · Routeur avec transitions
 // ======================================================================
 const main = $('#main');
 const TAB_ROUTES = ['home', 'search', 'ai', 'library'];
@@ -3069,6 +3480,8 @@ function render(keepScroll = false) {
 }
 
 function afterRender(view, r) {
+  LAZY.forEach((v, k) => { if (!document.querySelector(`[data-lazy="${k}"]`)) LAZY.delete(k); });
+  setTimeout(() => wireLazy(view), 0);
   // teintes des en-têtes de collection selon la pochette
   const coll = $('.coll', view);
   if (coll && r.name === 'album') { const a = albums().get(r.arg); if (a) tint(coll, a.coverId, a.title); }
@@ -3083,7 +3496,7 @@ function afterRender(view, r) {
       clr.hidden = !q.value;
       if (S.settings.searchSrc === 'lib') { S.lists = {}; $('#results').innerHTML = searchResults(q.value); return; }
       clearTimeout(deb);
-      deb = setTimeout(() => onlineSearch(q.value), Src.parseYouTubeUrl(q.value) ? 0 : 650);
+      deb = setTimeout(() => onlineSearch(q.value), Src.parseYouTubeUrl(q.value) ? 0 : 1100);
     });
     q.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(deb); onlineSearch(q.value); q.blur(); } });
     if (S.settings.searchSrc !== 'lib') onlineSearch(S.searchQ);
@@ -3098,6 +3511,7 @@ function afterRender(view, r) {
     vr?.style.setProperty('--p', `${(S.settings.voiceRate - 0.8) / 0.6 * 100}%`);
     vr?.addEventListener('input', () => { S.settings.voiceRate = +vr.value; saveSettings(); Voice.setVoicePrefs({ rate: +vr.value }); vr.style.setProperty('--p', `${(vr.value - 0.8) / 0.6 * 100}%`); });
     $('#set-ads', view).addEventListener('change', e => { S.settings.skipAds = e.target.checked; saveSettings(); });
+    $('#set-autoplay', view)?.addEventListener('change', e => { S.settings.autoplay = e.target.checked; saveSettings(); });
     $('#set-voice', view).addEventListener('change', e => { S.settings.voiceReply = e.target.checked; saveSettings(); });
     $('#set-lyr', view).addEventListener('change', e => { S.settings.onlineLyrics = e.target.checked; saveSettings(); });
     $('#set-key', view).addEventListener('change', e => { S.settings.apiKey = e.target.value.trim(); saveSettings(); toast(S.settings.apiKey ? 'Clé enregistrée sur ce téléphone' : 'Clé supprimée'); });
@@ -3155,7 +3569,7 @@ let scrollRaf = 0;
 main.addEventListener('scroll', () => { if (!scrollRaf) scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; onScroll(); }); }, { passive: true });
 
 // ======================================================================
-// Clics globaux (délégation)
+// Chapitre 26 · Clics globaux (délégation)
 // ======================================================================
 document.addEventListener('click', e => {
   if (S.lpFired) { S.lpFired = false; e.preventDefault(); e.stopPropagation(); return; }
@@ -3197,6 +3611,10 @@ document.addEventListener('click', e => {
         render(true); toast('Bibliothèque effacée');
       });
       case 'install': S.installPrompt?.prompt(); return;
+      case 'backup-export': return exportBackup();
+      case 'search-hist-clear': saveJSON('onde.searchHist', []); return render(true);
+      case 'search-again': { const qi = $('#q'); if (qi) { qi.value = act.dataset.q; S.searchQ = act.dataset.q; } return onlineSearch(act.dataset.q); }
+      case 'backup-import': return pickDataFile();
       case 'clear-hist': AI.clearHistory(); S.mixes = {}; toast('Historique effacé'); return render(true);
       case 'mix-regen': S.mixes[act.dataset.key] = null; getMix(act.dataset.key); return render(true);
       case 'mix-save': return saveMixAsPlaylist(S.mixes[act.dataset.key]);
@@ -3271,15 +3689,17 @@ window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.inst
 
 // Raccourcis clavier (ordinateur)
 document.addEventListener('keydown', e => {
-  if (e.target.matches('input, textarea')) return;
-  if (e.code === 'Space') { e.preventDefault(); player.toggle(); }
+  if (e.target.matches('input, textarea, select, [contenteditable]')) return;
+  // Entrée / Espace sur une ligne de titre = la lancer (clavier, lecteur d'écran)
+  if ((e.code === 'Enter' || e.code === 'Space') && e.target.matches('[role="button"]:not(button)')) { e.preventDefault(); e.target.click(); return; }
+  if (e.code === 'Space' && !e.target.closest('button, a, [role="button"]')) { e.preventDefault(); player.toggle(); }
   if (e.code === 'ArrowRight' && e.shiftKey) player.next();
   if (e.code === 'ArrowLeft' && e.shiftKey) player.prev();
   if (e.code === 'Escape') { if (S.voiceOn) closeVoice(); else if (overlays.length) popOverlay(); }
 });
 
 // ======================================================================
-// Démarrage
+// Chapitre 27 · Démarrage
 // ======================================================================
 async function loadCovers() {
   const d = await new Promise((res, rej) => { const r = indexedDB.open('onde'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
@@ -3310,18 +3730,36 @@ async function boot() {
   if ((!location.hash || location.hash === '#/' || location.hash === '#') && S.settings.startTab && S.settings.startTab !== 'home') history.replaceState(null, '', { search: '#/search', ai: '#/ai', library: '#/library' }[S.settings.startTab] || '#/');
   render();
   if (!S.settings.onboarded) setTimeout(onboarding, 1300);
+  // titres en ligne de la file précédente (YouTube, podcasts) : on les remet en mémoire avant la reprise
+  try {
+    const sess = loadJSON('onde.session', null);
+    for (const t of Object.values(sess?.remote || {})) {
+      if (!t?.id || S.tracks.has(t.id) || !['yt', 'radio', 'podcast'].includes(t.source)) continue;
+      t.thumb = safeUrl(t.thumb || ''); if (t.url) t.url = safeUrl(t.url);
+      S.tracks.set(t.id, t); if (t.thumb && t.coverId) S.covers.set(t.coverId, t.thumb);
+    }
+  } catch { /* ignore */ }
   player.restore(new Set(S.tracks.keys()));
   updateNowPlaying();
   updateModes();
   document.body.classList.add('ready');
   const sp = $('#splash');
-  setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 900); }, 1100);
+  // écran d'accueil plus court : l'app est prête bien avant
+  setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.parentNode?.removeChild(sp), 600); }, 450);
   setTimeout(queueAnalysis, 4000);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
     // nouvelle version installée → on recharge une fois pour l'afficher
     let reloaded = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded && S.hadController) { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded || !S.hadController) return;
+      // Nouvelle version : on ne coupe jamais une musique, un import ou une réponse en cours
+      const apply = () => { if (reloaded) return; reloaded = true; player.save?.(); location.reload(); };
+      const safe = () => !player.playing && !S.importing && !S.aiBusy;
+      if (safe()) return apply();
+      toast('Mise à jour prête : elle s\'appliquera à la prochaine pause');
+      const iv = setInterval(() => { if (safe()) { clearInterval(iv); apply(); } }, 5000);
+    });
     S.hadController = !!navigator.serviceWorker.controller;
   }
 }
