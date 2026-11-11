@@ -729,3 +729,70 @@ body { font-size: 17px; }
 .photo-ev b { display: block; }
 .photo-ev small { color: var(--muted); font-size: 13px; }
 .small-orb { width: 90px; height: 90px; animation: breathe 1.4s ease-in-out infinite; }
+
+/* v9 — planning façon agenda de téléphone (grille horaire, blocs pleins) */
+.today-btn { width: 40px; height: 40px; flex: none; border-radius: 10px; border: 2px solid var(--text); font-weight: 800; font-size: 16px; display: grid; place-items: center; }
+.sd-head { display: flex; align-items: baseline; gap: 12px; margin: 4px 6px 12px; }
+.sd-head b { font-size: 34px; font-weight: 800; letter-spacing: -.02em; }
+.sd-head span { font-size: 19px; font-weight: 700; }
+.sd-head em { font-style: normal; font-size: 13px; font-weight: 800; color: var(--accent); text-transform: uppercase; margin-left: auto; }
+.sd-allday { display: flex; flex-direction: column; gap: 4px; margin: 0 0 10px 34px; }
+.ad-chip { text-align: left; padding: 7px 10px; border-radius: 8px; font-size: 14px; font-weight: 650; color: #fff; background: color-mix(in srgb, var(--c) 72%, #000); }
+.tgrid { position: relative; display: flex; margin-bottom: 90px; }
+.tg-hours { position: relative; width: 30px; flex: none; }
+.tg-hours span { position: absolute; right: 6px; transform: translateY(-50%); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tg-hours .tg-now-lbl { right: auto; left: -4px; color: var(--danger); font-weight: 800; font-size: 11px; background: var(--bg); padding: 1px 0; z-index: 3; }
+.tg-cols { flex: 1; display: grid; position: relative; border-top: 1px solid var(--line2);
+  background-image: repeating-linear-gradient(to bottom, transparent 0 calc(var(--hp) - 1px), var(--line2) calc(var(--hp) - 1px) var(--hp)); }
+.tg-cols::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image: repeating-linear-gradient(to bottom, transparent 0 calc(var(--hp) / 2 - 1px), color-mix(in srgb, var(--line2) 60%, transparent) calc(var(--hp) / 2 - 1px) calc(var(--hp) / 2)); opacity: .6; }
+.tg-col { position: relative; }
+.tg-cols .tg-col + .tg-col { border-left: 1px solid color-mix(in srgb, var(--line2) 50%, transparent); }
+.tg-ev { position: absolute; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; overflow: hidden; padding: 5px 8px 4px 10px; border-radius: 7px; color: #fff; background: color-mix(in srgb, var(--c) 70%, #000); box-shadow: inset 4px 0 0 var(--c); }
+.tg-ev b { font-size: 16px; font-weight: 600; line-height: 1.2; }
+.tg-ev small { font-size: 13px; color: rgba(255, 255, 255, .72); line-height: 1.2; }
+.tg-ev.narrow { padding: 4px 3px 3px 6px; border-radius: 6px; box-shadow: inset 3px 0 0 var(--c); }
+.tg-ev.narrow b { font-size: 12px; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.tg-ev.narrow small { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.tg-ev.past { opacity: .55; }
+.tg-gap { position: absolute; left: 6px; right: 6px; z-index: 0; border-radius: 10px; border: 1.5px dashed color-mix(in srgb, var(--ok) 45%, transparent); color: var(--ok); font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--ok) 5%, transparent); }
+.tg-now { position: absolute; left: 0; right: 0; height: 2px; background: var(--danger); z-index: 2; pointer-events: none; }
+.tg-now i { position: absolute; left: -6px; top: -5px; border: 6px solid transparent; border-left: 8px solid var(--danger); }
+.wk-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.wk-nav b { font-size: 16px; }
+.wk-head { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 0 0 10px 30px; touch-action: pan-y; }
+.wk-day { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-height: 92px; padding: 4px 3px 6px; border-radius: 10px; background: var(--bg2); border: 1.5px solid transparent; overflow: hidden; }
+.wk-day .wk-name { font-size: 11px; font-weight: 700; color: var(--muted); text-align: center; text-transform: uppercase; }
+.wk-day.sun .wk-name, .wk-day.sun b { color: var(--danger); }
+.wk-day b { font-size: 19px; font-weight: 700; text-align: center; padding: 2px 0; }
+.wk-day.today { border-color: var(--text); background: color-mix(in srgb, var(--ok) 10%, var(--bg2)); }
+.wk-day.today b { background: var(--text); color: var(--bg); border-radius: 7px; margin: 0 6px; }
+.wk-day i { font-style: normal; font-size: 10.5px; font-weight: 600; color: #fff; padding: 2px 3px; border-radius: 4px; background: color-mix(in srgb, var(--c) 72%, #000); white-space: nowrap; overflow: hidden; text-overflow: clip; text-align: left; }
+.wk-day i.more { background: var(--bg4); color: var(--muted); }
+.add-pill { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--tabs-h) + var(--safe-b) + 14px); z-index: 9; display: flex; align-items: center; gap: 40px; padding: 14px 18px 14px 26px; border-radius: 999px; background: color-mix(in srgb, var(--bg3) 92%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--line2); font-size: 18px; font-weight: 500; box-shadow: var(--shadow); white-space: nowrap; }
+.add-pill span { display: grid; place-items: center; }
+.add-pill svg { width: 26px; height: 26px; }
+
+/* v10 — accueil guidé pour toute personne + emploi du temps */
+.ob-hero { padding: 6px 0; }
+.ob-logo { width: 84px; height: 84px; margin: 4px auto 6px; border-radius: 26px; background: var(--grad); color: var(--on-accent); display: grid; place-items: center; box-shadow: 0 14px 40px color-mix(in srgb, var(--accent) 35%, transparent); }
+.ob-logo svg { width: 42px; height: 42px; }
+.ob-list { list-style: none; padding: 0; margin: 16px 0 0; text-align: left; display: flex; flex-direction: column; gap: 10px; font-size: 17px; }
+.ob-list li { background: var(--bg3); padding: 12px 14px; border-radius: 14px; }
+.ob-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ob-card { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 8px; border-radius: 18px; background: var(--bg3); border: 2px solid transparent; font-weight: 700; font-size: 16px; }
+.ob-card span { font-size: 32px; }
+.ob-card.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg3)); }
+.ob-opt b { display: block; font-size: 16px; }
+.ob-opt small { display: block; font-size: 13px; color: var(--muted); font-weight: 500; }
+.tt-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.tt-item { position: relative; padding: 10px 34px 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--c) 22%, var(--bg3)); border-left: 4px solid var(--c); }
+.tt-item b { display: block; }
+.tt-item small { color: var(--muted); font-size: 13px; }
+.tt-item .x-mini { position: absolute; top: 8px; right: 6px; }
+.tt-box { padding: 14px; border-radius: 18px; background: var(--bg3); }
+.tt-box .big-input { background: var(--bg2); }
+.tt-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 12px 0; }
+.tt-days button { height: 44px; border-radius: 12px; background: var(--bg2); font-weight: 800; font-size: 16px; border: 2px solid transparent; }
+.tt-days button.on { background: var(--accent); color: var(--on-accent); }
+.tt-box .field input, .tt-box .field select { background: var(--bg2); }
