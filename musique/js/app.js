@@ -15,7 +15,7 @@ const S = {
   playlists: new Map(),
   covers: new Map(),       // coverId -> objectURL
   colors: loadJSON('onde.colors', {}),
-  settings: Object.assign({ name: '', lastName: '', appName: '', theme: 'or', style: 'maison', tastes: [], onboarded: false, homeFilter: 'all', customColor: '#d9b26a', bgTheme: 'noir', font: 'auto', textSize: 'normal', corners: 'arrondis', motion: 'normal', coverShape: 'carree', vinyl: false, npBg: 'pochette', avatar: '', greet: '', botName: 'Concierge', botTone: 'complice', startTab: 'home', homeSections: { hero: true, quick: true, mixes: true, recent: true, radios: true, tastes: true }, crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, autoplay: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
+  settings: Object.assign({ name: '', lastName: '', appName: '', theme: 'or', style: 'maison', tastes: [], onboarded: false, homeFilter: 'all', customColor: '#d9b26a', bgTheme: 'noir', font: 'auto', textSize: 'normal', corners: 'arrondis', motion: 'normal', coverShape: 'carree', vinyl: false, npBg: 'pochette', avatar: '', greet: '', botName: 'Concierge', botTone: 'complice', startTab: 'home', homeSections: { hero: true, quick: true, mixes: true, recent: true, radios: true, tastes: true }, crossfade: 4, visualizer: false, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, autoplay: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
   mixes: {},
   chat: loadJSON('onde.chat', []),
   version: 0,
@@ -532,8 +532,7 @@ gesture($('.np-art', np), {
   move: (dx, dy) => {
     const tr = $('.np-cover-track');
     if (Math.abs(dx) > Math.abs(dy)) { tr.style.transition = 'none'; tr.style.transform = `translateX(${dx}px) rotate(${dx / 40}deg)`; np.style.transform = ''; ytbox.classList.add('moving'); }
-    else if (dy > 0) ytbox.classList.add('moving');
-    else if (dy > 0) { np.style.transition = 'none'; np.style.transform = `translateY(${dy}px)`; }
+    else if (dy > 0) { ytbox.classList.add('moving'); np.style.transition = 'none'; np.style.transform = `translateY(${dy}px)`; }
   },
   end: (dx, dy) => {
     const tr = $('.np-cover-track');
@@ -682,8 +681,36 @@ function sheetItems(items) {
 }
 
 let toastT;
+// Recherches récentes (10 dernières), affichées quand la barre est vide
+function rememberSearch(q) {
+  q = q.trim(); if (q.length < 2) return;
+  const h = loadJSON('onde.searchHist', []).filter(x => norm(x) !== norm(q));
+  h.unshift(q); saveJSON('onde.searchHist', h.slice(0, 10));
+}
+function recentSearches() {
+  const h = loadJSON('onde.searchHist', []);
+  if (!h.length) return '';
+  return `<div class="shelf-head"><h2>Recherches récentes</h2><button class="link" data-act="search-hist-clear">Effacer</button></div>
+    <div class="chips wrap recent-q">${h.map(x => `<button class="chip" data-act="search-again" data-q="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
+}
+// Message d'erreur réseau clair, avec « Réessayer »
+function netErr(title, e, src) {
+  const off = navigator.onLine === false;
+  const msg = off ? 'Pas de connexion internet. Tes fichiers et tes titres enregistrés marchent toujours.' : (e?.message && !/fetch|network|Load failed/i.test(e.message) ? e.message : 'Le service ne répond pas pour le moment.');
+  return `<div class="net-err"><b>${esc(title)}</b><p>${esc(msg)}</p>${src ? `<button class="btn ghost sm" data-act="src" data-src="${esc(src)}">${icon('refresh')} Réessayer</button>` : ''}</div>`;
+}
+// Message avec bouton « Annuler » (5 s) pour les actions qu'on peut regretter
+function undoToast(msg, undo) {
+  const t = $('#toast');
+  t.innerHTML = `<span>${esc(msg)}</span><button class="undo-btn">Annuler</button>`;
+  t.classList.add('show', 'undo');
+  t.querySelector('.undo-btn').onclick = () => { t.classList.remove('show', 'undo'); clearTimeout(toastT); undo(); };
+  clearTimeout(toastT);
+  toastT = setTimeout(() => t.classList.remove('show', 'undo'), 5000);
+}
 function toast(msg) {
   const t = $('#toast');
+  t.classList.remove('undo');
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastT);
@@ -741,7 +768,8 @@ function trackSheet(t, { listKey, fromNP } = {}) {
       const i = p.trackIds.indexOf(t.id);
       if (i >= 0) p.trackIds.splice(i, 1);
       await db.put('playlists', p); bump();
-      await closeSheet(); render(true); toast('Retiré de la playlist');
+      await closeSheet(); render(true);
+      undoToast('Retiré de la playlist', async () => { if (i >= 0) { p.trackIds.splice(i, 0, t.id); await db.put('playlists', p); bump(); render(true); } });
     },
     album: async () => { await closeAllOverlays(); goto('#/album/' + encodeURIComponent(albumKey(t))); },
     artist: async () => { await closeAllOverlays(); goto('#/artist/' + encodeURIComponent(artistOf(t))); },
@@ -873,7 +901,11 @@ function queueSheet() {
   openSheet('<div class="queue"></div>', {
     jump: b => player.jump(+b.dataset.i),
     rm: (b, e) => { e.stopPropagation(); player.removeAt(+b.dataset.i); },
-    clear: () => { player.clearUpcoming(); },
+    clear: () => {
+      const q = player.queue.slice(), o = player.original?.slice() || null, idx = player.index;
+      player.clearUpcoming();
+      undoToast('File d\'attente vidée', () => { const cur = player.currentId; player.queue = q; player.original = o; player.index = Math.max(0, q.indexOf(cur)); player.emit('queue'); });
+    },
   });
   renderQueue();
 }
@@ -1179,6 +1211,9 @@ async function loadLyrics(t) {
   if (!S.lyr.parsed && S.settings.onlineLyrics && stale && navigator.onLine !== false) {
     S.lyr.loading = true;
     renderLyrics();
+    // on attend un peu : si on zappe vite, pas de requête inutile
+    if (!S.lyrOpen) await new Promise(r => setTimeout(r, 1500));
+    if (player.currentId !== t.id) return;
     const txt = await fetchOnline(t);
     t.lyricsChecked = Date.now();
     if (txt) { t.lyrics = txt; t.lyricsSource = 'LRCLIB'; }
@@ -1385,7 +1420,7 @@ function viewAI() {
     <div class="ai-log" id="ai-log">${renderChat()}</div>
     <div class="ai-foot">
     ${has ? `<div class="ai-suggest">${AI_SUGGEST.map(x => `<button class="chip" data-act="ai-send" data-text="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : ''}
-    <form class="ai-input" id="ai-form"><input id="ai-q" placeholder="${has ? 'Écris ou parle au Concierge…' : 'Importe ta musique pour commencer'}" autocomplete="off" enterkeyhint="send" ${has ? '' : 'disabled'}>${has ? `<button type="button" class="ai-mic" data-act="voice" aria-label="Parler au Concierge">${icon('mic')}</button>` : ''}<button class="ai-send" aria-label="Envoyer">${icon('send')}</button></form>
+    <form class="ai-input" id="ai-form"><input id="ai-q" aria-label="Message pour l'assistant" placeholder="${has ? 'Écris ou parle au Concierge…' : 'Importe ta musique pour commencer'}" autocomplete="off" enterkeyhint="send" ${has ? '' : 'disabled'}>${has ? `<button type="button" class="ai-mic" data-act="voice" aria-label="Parler au Concierge">${icon('mic')}</button>` : ''}<button class="ai-send" aria-label="Envoyer">${icon('send')}</button></form>
     </div>
   </div>`;
 }
@@ -2313,7 +2348,7 @@ const EQ_NAMES = { normal: 'Normal', basses: 'Basses +', basses2: 'Basses ++', v
 function soundSheet() {
   const cur = S.settings.eq || 'normal';
   openSheet(`<h3 class="sheet-title">Son</h3>
-    ${isIOS ? '<p class="sheet-text">Sur iPhone, le volume se règle avec les boutons du téléphone.</p>' : `<div class="vol-row">${icon('timer')}<input type="range" class="range" id="vol" min="5" max="100" step="1" value="${Math.round((player.base ?? 1) * 100)}"><b id="vol-v">${Math.round((player.base ?? 1) * 100)} %</b></div>`}
+    ${isIOS ? '<p class="sheet-text">Sur iPhone, le volume se règle avec les boutons du téléphone.</p>' : `<div class="vol-row">${icon('vol')}<input type="range" class="range" id="vol" aria-label="Volume" min="5" max="100" step="1" value="${Math.round((player.base ?? 1) * 100)}"><b id="vol-v">${Math.round((player.base ?? 1) * 100)} %</b></div>`}
     <h4 class="sub">Égaliseur</h4>
     <div class="eq-presets">${Object.keys(EQ_PRESETS).map(k => `<button class="chip ${k === cur ? 'on' : ''}" data-sa="eq" data-k="${k}">${EQ_NAMES[k]}</button>`).join('')}</div>
     <p class="sheet-text">${isIOS ? 'L\'égaliseur n\'est pas disponible sur iPhone.' : 'L\'égaliseur s\'applique à tes musiques importées. YouTube et les radios utilisent leur propre son.'}</p>`, {
@@ -2380,7 +2415,7 @@ function remoteTrack(item, source) {
 
 function onlineRow(t, i, listKey) {
   const live = t.source === 'radio';
-  return `<div class="row ${t.id === player.currentId ? 'playing' : ''}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
+  return `<div class="row ${t.id === player.currentId ? 'playing' : ''}" role="button" tabindex="0" aria-label="${esc(t.title)}${t.artist ? ', ' + esc(t.artist) : ''}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
     ${trackCover(t, live ? 'radio-cv' : 'wide')}
     <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${live ? '<span class="live-dot">EN DIRECT</span> ' : t.source === 'podcast' ? '<span class="src-pc">PODCAST</span> ' : '<span class="src-yt">YouTube</span> '}${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}</small></div>
     <button class="ib sm more" aria-label="Options">${icon('more')}</button>
@@ -2444,14 +2479,15 @@ async function onlineSearch(q) {
         <p class="hint">Déjà possible sans clé : colle un lien YouTube (partager → copier le lien) dans la barre de recherche.</p></div>
         ${savedOnline()}`);
     }
-    if (!q) return show(savedOnline() || `<div class="no-res"><b>Cherche un artiste ou un titre</b><p>Tout YouTube est là.</p></div>`);
+    if (!q) return show(recentSearches() + (savedOnline() || `<div class="no-res"><b>Cherche un artiste ou un titre</b><p>Tout YouTube est là.</p></div>`));
     show('<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>');
     const res = await Src.ytSearch(S.settings.ytKey, q);
     const ts = res.map(x => remoteTrack(x, 'yt'));
     const key = registerList('yt-q', ts.map(t => t.id), `YouTube « ${q} »`);
+    if (ts.length) rememberSearch(q);
     show(ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : `<div class="no-res"><b>Aucun résultat</b></div>`);
   } catch (e) {
-    show(`<div class="no-res"><b>Impossible de charger</b><p>${esc(e.message || 'Vérifie ta connexion.')}</p></div>`);
+    show(netErr('Impossible de charger', e, S.settings.searchSrc));
   }
 }
 
@@ -2518,7 +2554,7 @@ async function morePodcasts(q, name) {
     const res = await Src.podcastSearch(q, 30);
     $('#results').innerHTML = `<button class="link back-link" data-act="src" data-src="info">${icon('back')} Les infos</button><h2 class="sec-title">${esc(name)}</h2>` +
       (res.length ? `<div class="pc-grid">${res.map((p, i) => `<button class="pc-card" data-act="pc-show" data-id="${p.id}" style="--d:${Math.min(i, 12) * 30}ms"><img src="${esc(p.art)}" alt="" loading="lazy"><b>${esc(p.name)}</b><small>${esc(p.author)}</small></button>`).join('')}</div>` : '<div class="no-res"><b>Rien trouvé</b></div>');
-  } catch (e) { $('#results').innerHTML = `<div class="no-res"><b>Podcasts indisponibles</b><p>${esc(e.message)}</p></div>`; }
+  } catch (e) { $('#results').innerHTML = netErr('Podcasts indisponibles', e, 'info'); }
 }
 
 async function playNewsFlash(i, btn) {
@@ -2545,7 +2581,7 @@ async function openFeatured(q) {
     await showPodcast(show.id);
     $('#results')?.insertAdjacentHTML('afterbegin', `<button class="link back-link" data-act="src" data-src="info">${icon('back')} Les infos</button>`);
   } catch (e) {
-    $('#results').innerHTML = `<div class="no-res"><b>Indisponible</b><p>${esc(e.message)}</p></div>`;
+    $('#results').innerHTML = netErr('Indisponible', e, S.settings.searchSrc);
   }
 }
 
@@ -2567,7 +2603,7 @@ async function showPodcast(id) {
     $('#results').innerHTML = `<div class="pc-head">${p.art ? `<img src="${esc(p.art)}" alt="">` : ''}<div><b>${esc(p.name)}</b><small>${esc(p.author)} · ${plural(ts.length, 'épisode')}</small></div></div>` +
       (ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : '<div class="no-res"><b>Aucun épisode disponible</b></div>');
   } catch (e) {
-    $('#results').innerHTML = `<div class="no-res"><b>Podcast indisponible</b><p>${esc(e.message)}</p></div>`;
+    $('#results').innerHTML = netErr('Podcast indisponible', e, 'info');
   }
 }
 
@@ -2582,7 +2618,7 @@ async function showRadios(tag, label) {
     $('#results').innerHTML = `<button class="link back-link" data-act="src" data-src="radio">${icon('back')} Tous les genres</button><h2 class="sec-title">${esc(label)}</h2>` +
       (ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : '<div class="no-res"><b>Aucune radio</b></div>');
   } catch (e) {
-    $('#results').innerHTML = `<div class="no-res"><b>Radios indisponibles</b><p>${esc(e.message)}</p></div>`;
+    $('#results').innerHTML = netErr('Radios indisponibles', e, 'radio');
   }
 }
 
@@ -2656,7 +2692,7 @@ function applyTheme() {
   const ml = document.querySelector('link[rel="manifest"]');
   if (ml && ml.getAttribute('href') !== href) ml.setAttribute('href', href);
   document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', short);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#070707');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', (BACKGROUNDS[S.settings.bgTheme] || BACKGROUNDS.noir).bg);
   // le logo dégradé suit la couleur choisie
   const stops = document.querySelectorAll('#gold stop');
   if (stops.length === 3) t.g.forEach((c, i) => stops[i].setAttribute('stop-color', c));
@@ -2673,9 +2709,8 @@ function onboarding() {
   const draw = () => {
     const steps = [
       `<div class="onb-logo"><svg><use href="#i-logo"/></svg></div>
-       <h1>Bienvenue</h1><p>Ton app de musique perso : sans pub ajoutée, avec tes radios, tes sons, tes infos et ton assistant. On la règle pour toi en 30 secondes.</p>
-       <label>Ton prénom<input id="onb-first" value="${esc(st.first)}" maxlength="24" autocomplete="given-name" placeholder="Ton prénom"></label>
-       <label>Ton nom <small>(facultatif)</small><input id="onb-last" value="${esc(st.last)}" maxlength="30" autocomplete="family-name" placeholder="Ton nom"></label>`,
+       <h1>Bienvenue</h1><p>Ton app de musique perso, avec tes radios, tes sons, tes infos et ton assistant. On la règle pour toi en 30 secondes.</p>
+       <label>Ton prénom<input id="onb-first" value="${esc(st.first)}" maxlength="24" autocomplete="given-name" placeholder="Ton prénom" aria-label="Ton prénom"></label>`,
       `<h1>Ta couleur</h1><p>Elle habille toute l'app : boutons, logo, lecteur.</p>
        <div class="swatches">${swatches(st.theme)}</div>
        <h2>Ton style</h2>
@@ -2828,6 +2863,16 @@ function viewLibrary(params) {
   const eps = [...S.tracks.values()].filter(t => t.source === 'podcast' && t.saved);
   const local = [...S.tracks.values()].filter(t => !t.source);
   const histCount = [...S.tracks.values()].filter(t => t.lastPlayed).length;
+  if (!st.count) {
+    // pas encore de statistiques détaillées : on se base sur les écoutes de la semaine
+    const wk = [...S.tracks.values()].filter(t => t.lastPlayed > Date.now() - 7 * 864e5);
+    if (wk.length) {
+      st.count = wk.reduce((n, t) => n + Math.max(1, Math.min(t.plays || 1, 50)), 0);
+      st.minutes = Math.round(wk.reduce((n, t) => n + (t.duration || 180), 0) / 60);
+      const c = {}; wk.forEach(t => { if (t.artist && t.source !== 'radio') c[t.artist] = (c[t.artist] || 0) + 1; });
+      st.topArtists = Object.entries(c).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+    }
+  }
   const recap = st.count
     ? `<section class="recap">
         <small>Ta semaine</small>
@@ -2844,7 +2889,7 @@ function viewLibrary(params) {
     ${recap}
     <div class="lib-links">
       ${link('#/liked', likedCover(), 'Titres likés', plural(lk.length, 'titre'))}
-      ${link('#/history', `<div class="cv st-art search-art">${icon('timer')}</div>`, 'Historique', histCount ? `${plural(histCount, 'son')} écouté${histCount > 1 ? 's' : ''}` : 'Rien pour l\'instant')}
+      ${link('#/history', `<div class="cv st-art search-art">${icon('clock')}</div>`, 'Historique', histCount ? `${plural(histCount, 'son')} écouté${histCount > 1 ? 's' : ''}` : 'Rien pour l\'instant')}
       ${local.length ? link('#/library?f=tracks', `<div class="cv st-art search-art">${icon('note')}</div>`, 'Sur ton téléphone', `${plural(local.length, 'fichier')} · hors ligne`) : ''}
       ${local.length ? link('#/library?f=artists', `<div class="cv st-art search-art">${icon('user')}</div>`, 'Artistes et albums', `${plural(artists().size, 'artiste')}`) : ''}
     </div>
@@ -2907,9 +2952,32 @@ function registerList(key, ids, label, extra = {}) {
   return key;
 }
 
+// Longues listes : on affiche les 80 premières lignes tout de suite, la suite au fil du défilement
+const LAZY = new Map();
+function lazyRows(items, rowFn, first = 80) {
+  if (items.length <= first + 20) return items.map(rowFn).join('');
+  const id = 'lz' + (LAZY.size + 1) + Date.now().toString(36);
+  LAZY.set(id, { items, rowFn, at: first });
+  return items.slice(0, first).map(rowFn).join('') + `<div class="lazy-more" data-lazy="${id}" aria-hidden="true"></div>`;
+}
+let lazyObs = null;
+function wireLazy(root) {
+  if (!('IntersectionObserver' in window)) { $$('.lazy-more', root).forEach(el => fillLazy(el, Infinity)); return; }
+  lazyObs ||= new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) fillLazy(e.target, 150); }), { rootMargin: '800px' });
+  $$('.lazy-more', root).forEach(el => lazyObs.observe(el));
+}
+function fillLazy(el, n) {
+  const L = LAZY.get(el.dataset.lazy);
+  if (!L) { el.parentNode?.removeChild(el); return; }
+  const end = Math.min(L.items.length, L.at + n);
+  el.insertAdjacentHTML('beforebegin', L.items.slice(L.at, end).map((x, k) => L.rowFn(x, L.at + k)).join(''));
+  L.at = end;
+  if (end >= L.items.length) { lazyObs?.unobserve(el); el.parentNode?.removeChild(el); LAZY.delete(el.dataset.lazy); }
+}
+
 function trackRow(t, i, listKey, { num = false, showCover = true } = {}) {
   const playing = t.id === player.currentId;
-  return `<div class="row ${playing ? 'playing' : ''}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
+  return `<div class="row ${playing ? 'playing' : ''}" role="button" tabindex="0" aria-label="${esc(t.title)}, ${esc(artistOf(t))}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
     ${num ? `<span class="num">${t.track || i + 1}</span>` : ''}
     ${showCover ? trackCover(t) : ''}
     <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${t.liked ? `<span class="like-mark on">${icon('heart-f')}</span>` : '<span class="like-mark">' + icon('heart-f') + '</span>'}${esc(artistOf(t))}${num ? '' : t.album ? ' · ' + esc(t.album) : ''}</small></div>
@@ -3094,7 +3162,7 @@ function viewSearch(params) {
   const src = S.settings.searchSrc || 'yt';
   const ph = { yt: 'Artiste, titre, ou colle un lien YouTube', radio: 'Nom d\'une radio (Skyrock, NRJ…)',  info: 'Les infos du moment', lib: 'Dans ta bibliothèque…' }[src];
   return `<header class="page-head"><h1>Rechercher</h1></header>
-    <div class="search-sticky"><div class="search-box">${icon('search')}<input type="search" id="q" placeholder="${ph}" value="${esc(S.searchQ)}" autocomplete="off" enterkeyhint="search"><button class="ib sm clear-q" aria-label="Effacer" ${S.searchQ ? '' : 'hidden'}>${icon('close')}</button></div>
+    <div class="search-sticky"><div class="search-box">${icon('search')}<input type="search" id="q" aria-label="Rechercher" placeholder="${ph}" value="${esc(S.searchQ)}" autocomplete="off" enterkeyhint="search"><button class="ib sm clear-q" aria-label="Effacer" ${S.searchQ ? '' : 'hidden'}>${icon('close')}</button></div>
     <div class="chips src-chips">${[['yt', 'YouTube'], ['radio', 'Radios'], ['info', 'Infos'], ['lib', 'Ma bibliothèque']].map(([k, l]) => `<button class="chip ${k === src ? 'on' : ''}" data-act="src" data-src="${k}">${l}</button>`).join('')}</div></div>
     <div id="results">${src === 'lib' ? searchResults(S.searchQ) : '<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>'}</div>`;
 }
@@ -3143,7 +3211,7 @@ function viewLibraryList(params) {
   if (f === 'tracks') {
     const tr = allTracks().slice().sort(sort === 'az' ? (a, b) => collator.compare(a.title, b.title) : (a, b) => b.addedAt - a.addedAt);
     const key = registerList('lib-tracks', tr.map(t => t.id), 'Tous les titres', { route: '#/all' });
-    body = tr.length ? `<div class="list">${tr.map((t, i) => trackRow(t, i, key)).join('')}</div>` : '';
+    body = tr.length ? `<div class="list">${lazyRows(tr, (t, i) => trackRow(t, i, key))}</div>` : '';
   } else {
     const pinned = items.filter(i => i.pin);
     const rest = items.filter(i => !i.pin).sort(sort === 'az' ? byName : byRecent);
@@ -3177,7 +3245,7 @@ function collectionView({ kind, title, sub, coverHtml, ids, listKey, label, colo
       ${tracks.length ? `<button class="ib shuffle-btn" data-act="shuffle-list" data-list="${listKey}" aria-label="Aléatoire">${icon('shuffle')}</button>
       <button class="hero-play" data-act="play-list" data-list="${listKey}" aria-label="Lire">${icon('play')}</button>` : ''}
     </div>
-    ${tracks.length ? `<div class="list">${tracks.map((t, i) => trackRow(t, i, listKey, { num, showCover: !num })).join('')}</div>` : `<p class="coll-empty">${emptyMsg || 'Aucun titre.'}</p>`}
+    ${tracks.length ? `<div class="list">${lazyRows(tracks, (t, i) => trackRow(t, i, listKey, { num, showCover: !num }))}</div>` : `<p class="coll-empty">${emptyMsg || 'Aucun titre.'}</p>`}
     ${extra}
   </div>`;
 }
@@ -3254,7 +3322,7 @@ function viewSettings() {
     <h1 class="set-h">Réglages</h1>
     <section class="set-group"><h3>Lecture</h3>
       <div class="set-item"><div><b>Fondu enchaîné</b><small>${isIOS ? 'Non disponible sur iPhone (le volume est verrouillé par iOS).' : 'Les titres se mélangent en douceur à la transition.'}</small></div><output id="cf-val">${S.settings.crossfade ? S.settings.crossfade + ' s' : 'Désactivé'}</output></div>
-      ${isIOS ? '' : `<input type="range" class="range" id="cf" min="0" max="12" step="1" value="${S.settings.crossfade}">`}
+      ${isIOS ? '' : `<input type="range" class="range" id="cf" aria-label="Durée du fondu enchaîné" min="0" max="12" step="1" value="${S.settings.crossfade}">`}
       ${isIOS ? '' : `<label class="set-item toggle"><div><b>Visualiseur animé</b><small>Ondes autour de la pochette qui suivent la musique.</small></div><input type="checkbox" id="viz" ${S.settings.visualizer ? 'checked' : ''}><span class="sw"></span></label>`}
     </section>
     ${persoSettings()}
@@ -3272,7 +3340,7 @@ function viewSettings() {
       <button class="set-item btnlike" data-act="sound"><div><b>Volume et égaliseur</b><small>Basses, voix, aigus · ${esc(EQ_NAMES[S.settings.eq] || 'Normal')}</small></div>${icon('gear')}</button>
       <label class="set-item col"><div><b>Voix du Concierge</b><small>${Voice.canSpeak ? 'Choisis la voix qui te répond' : 'Synthèse vocale indisponible sur ce navigateur'}</small></div>
         <select class="set-select" id="set-vname"><option value="">Automatique (la plus naturelle)</option>${Voice.frenchVoices().map(v => `<option value="${esc(v.name)}" ${v.name === S.settings.voiceName ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
-        <div class="vol-row"><small>Lente</small><input type="range" class="range" id="set-vrate" min="0.8" max="1.4" step="0.05" value="${S.settings.voiceRate}"><small>Rapide</small></div>
+        <div class="vol-row"><small>Lente</small><input type="range" class="range" id="set-vrate" aria-label="Vitesse de la voix" min="0.8" max="1.4" step="0.05" value="${S.settings.voiceRate}"><small>Rapide</small></div>
         <button class="btn ghost sm" data-act="voice-test" type="button">Écouter la voix</button></label>
     </section>
     <section class="set-group"><h3>Anti-pub</h3>
@@ -3381,6 +3449,8 @@ function render(keepScroll = false) {
 }
 
 function afterRender(view, r) {
+  LAZY.forEach((v, k) => { if (!document.querySelector(`[data-lazy="${k}"]`)) LAZY.delete(k); });
+  setTimeout(() => wireLazy(view), 0);
   // teintes des en-têtes de collection selon la pochette
   const coll = $('.coll', view);
   if (coll && r.name === 'album') { const a = albums().get(r.arg); if (a) tint(coll, a.coverId, a.title); }
@@ -3395,7 +3465,7 @@ function afterRender(view, r) {
       clr.hidden = !q.value;
       if (S.settings.searchSrc === 'lib') { S.lists = {}; $('#results').innerHTML = searchResults(q.value); return; }
       clearTimeout(deb);
-      deb = setTimeout(() => onlineSearch(q.value), Src.parseYouTubeUrl(q.value) ? 0 : 650);
+      deb = setTimeout(() => onlineSearch(q.value), Src.parseYouTubeUrl(q.value) ? 0 : 1100);
     });
     q.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(deb); onlineSearch(q.value); q.blur(); } });
     if (S.settings.searchSrc !== 'lib') onlineSearch(S.searchQ);
@@ -3511,6 +3581,8 @@ document.addEventListener('click', e => {
       });
       case 'install': S.installPrompt?.prompt(); return;
       case 'backup-export': return exportBackup();
+      case 'search-hist-clear': saveJSON('onde.searchHist', []); return render(true);
+      case 'search-again': { const qi = $('#q'); if (qi) { qi.value = act.dataset.q; S.searchQ = act.dataset.q; } return onlineSearch(act.dataset.q); }
       case 'backup-import': return pickDataFile();
       case 'clear-hist': AI.clearHistory(); S.mixes = {}; toast('Historique effacé'); return render(true);
       case 'mix-regen': S.mixes[act.dataset.key] = null; getMix(act.dataset.key); return render(true);
@@ -3586,8 +3658,10 @@ window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.inst
 
 // Raccourcis clavier (ordinateur)
 document.addEventListener('keydown', e => {
-  if (e.target.matches('input, textarea')) return;
-  if (e.code === 'Space') { e.preventDefault(); player.toggle(); }
+  if (e.target.matches('input, textarea, select, [contenteditable]')) return;
+  // Entrée / Espace sur une ligne de titre = la lancer (clavier, lecteur d'écran)
+  if ((e.code === 'Enter' || e.code === 'Space') && e.target.matches('[role="button"]:not(button)')) { e.preventDefault(); e.target.click(); return; }
+  if (e.code === 'Space' && !e.target.closest('button, a, [role="button"]')) { e.preventDefault(); player.toggle(); }
   if (e.code === 'ArrowRight' && e.shiftKey) player.next();
   if (e.code === 'ArrowLeft' && e.shiftKey) player.prev();
   if (e.code === 'Escape') { if (S.voiceOn) closeVoice(); else if (overlays.length) popOverlay(); }
@@ -3639,7 +3713,8 @@ async function boot() {
   updateModes();
   document.body.classList.add('ready');
   const sp = $('#splash');
-  setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 900); }, 1100);
+  // écran d'accueil plus court : l'app est prête bien avant
+  setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.parentNode?.removeChild(sp), 600); }, 450);
   setTimeout(queueAnalysis, 4000);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
