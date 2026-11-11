@@ -716,7 +716,7 @@ body.has-mini .ai-foot { bottom: calc(var(--tabs-h) + var(--mini-h) + var(--safe
 .ytbox.on { opacity: 1; }
 .ytbox.moving { opacity: 0; transition: none; }
 .ytbox.in-np { border-radius: 8px; box-shadow: 0 30px 70px -18px rgba(0,0,0,.8); }
-.ytbox .yt-host, .ytbox .yt-host iframe { width: 178% !important; left: -39% !important; }
+.ytbox .yt-host { width: 178% !important; left: -39% !important; }
 .yt-badge { display: none; }
 body:not(.has-mini) .ytbox:not(.in-np) { opacity: 0; pointer-events: none; }
 .mini.yt .mini-cover { visibility: hidden; }
@@ -974,3 +974,7 @@ body.npbg-theme .np-bg { background: linear-gradient(to bottom, color-mix(in srg
 /* Les vignettes radio / styles prennent un reflet de la couleur choisie */
 .st-art { background: radial-gradient(circle at 70% 20%, color-mix(in srgb, hsl(var(--h) 38% 30%) 70%, var(--gold)), color-mix(in srgb, hsl(calc(var(--h) + 30) 30% 11%) 85%, var(--gold)) 80%); }
 .search-art { background: var(--bg3); }
+
+.yt-slot { position: absolute; inset: 0; }
+.yt-slot iframe { width: 100% !important; height: 100% !important; border: 0; }
+.yt-slot.yt-standby { visibility: hidden; pointer-events: none; }

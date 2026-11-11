@@ -1,10 +1,10 @@
-import { db } from './db.js?v=17';
-import { readTags } from './tags.js?v=17';
-import { Player, isIOS } from './player.js?v=17';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=17';
-import * as AI from './ai.js?v=17';
-import * as Voice from './voice.js?v=17';
-import * as Src from './sources.js?v=17';
+import { db } from './db.js?v=18';
+import { readTags } from './tags.js?v=18';
+import { Player, isIOS } from './player.js?v=18';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=18';
+import * as AI from './ai.js?v=18';
+import * as Voice from './voice.js?v=18';
+import * as Src from './sources.js?v=18';
 
 
 // ======================================================================
@@ -224,7 +224,14 @@ player.addEventListener('played', async e => {
   await db.put('tracks', t);
 });
 let listen = { id: null, max: 0 };
-player.addEventListener('track', () => { setTimeout(placeYT, 30); setTimeout(placeYT, 520); np.classList.toggle('live', player.current?.source === 'radio');
+player.addEventListener('track', () => { setTimeout(placeYT, 30); setTimeout(placeYT, 520);
+  // prépare le son YouTube suivant en coulisses pour un changement instantané
+  clearTimeout(S.preT);
+  S.preT = setTimeout(() => {
+    const n = player.nextIndex();
+    const nx = n >= 0 && S.tracks.get(player.queue[n]);
+    if (nx?.source === 'yt' && nx.ytId) player.els[2].preload(nx.ytId);
+  }, 4000); np.classList.toggle('live', player.current?.source === 'radio');
   if (listen.id && listen.id !== player.currentId && listen.max > 0.02) {
     AI.logListen(listen.id, { skipped: listen.max < 0.35, ratio: Math.min(1, listen.max) });
     S.mixes.moment = null;
@@ -2323,6 +2330,12 @@ function applyTheme() {
   r.setProperty('--line', hexA(t.a, 0.13));
   document.body.classList.toggle('style-moderne', S.settings.style === 'moderne');
   document.title = brandName();
+  // nom de l'app installée : « Maison <prénom> » (le service worker fabrique le manifest correspondant)
+  const full = brandName(), short = full.length <= 12 ? full : (S.settings.name || full).slice(0, 12);
+  const href = `manifest.webmanifest?name=${encodeURIComponent(full)}&short=${encodeURIComponent(short)}`;
+  const ml = document.querySelector('link[rel="manifest"]');
+  if (ml && ml.getAttribute('href') !== href) ml.setAttribute('href', href);
+  document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', short);
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#070707');
   // le logo dégradé suit la couleur choisie
   const stops = document.querySelectorAll('#gold stop');

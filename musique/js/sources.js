@@ -139,11 +139,13 @@ function loadYT() {
 }
 
 export class YouTubeElement extends EventTarget {
+  // Deux lecteurs YouTube : l'un joue, l'autre prépare le son suivant en coulisses (changement quasi instantané)
   constructor(host) {
     super();
     document.addEventListener('visibilitychange', () => { if (document.hidden) { this._hiddenAt = Date.now(); this._retries = 0; } });
-    this.host = host;           // conteneur visible (le lecteur YouTube doit rester visible)
-    this.player = null;
+    this.host = host;
+    this.slots = [0, 1].map(() => ({ el: null, player: null, videoId: null, priming: false }));
+    this.a = 0;                 // lecteur actif
     this.videoId = null;
     this._paused = true;
     this._vol = 1;
@@ -151,6 +153,7 @@ export class YouTubeElement extends EventTarget {
     this._tick = 0;
     this.src = '';
   }
+  get player() { return this.slots[this.a].player; }
   get paused() { return this._paused; }
   get currentTime() { try { return this.player?.getCurrentTime?.() || 0; } catch { return 0; } }
   set currentTime(t) { try { this.player?.seekTo(t, true); } catch { /* ignore */ } }
@@ -160,47 +163,100 @@ export class YouTubeElement extends EventTarget {
   set volume(v) { this._vol = v; try { this.player?.setVolume(Math.round(v * 100)); } catch { /* ignore */ } }
   fire(t) { this.dispatchEvent(new Event(t)); }
 
-  async load(id, duration = 0, autoplay = false) {
-    this.videoId = id;
-    this.src = 'yt:' + id;
-    this._dur = duration;
+  showActive() {
+    this.slots.forEach((s, i) => { if (s.el) s.el.classList.toggle('yt-standby', i !== this.a); });
+  }
+
+  // Crée (une seule fois) le lecteur d'un emplacement
+  async ensure(i, id, autoplay) {
     const YT = await loadYT();
-    // loadVideoById démarre tout de suite (flèche « suivant ») ; cueVideoById prépare sans lancer
-    if (this.player) { this._userPause = false; autoplay ? this.player.loadVideoById(id) : this.player.cueVideoById(id); return; }
+    const s = this.slots[i];
+    if (s.player) return false;
+    if (!this.host.querySelector('.yt-slot')) this.host.innerHTML = '';
+    s.el = document.createElement('div');
+    s.el.className = 'yt-slot';
+    const div = document.createElement('div');
+    s.el.appendChild(div);
+    this.host.appendChild(s.el);
+    s.videoId = id;
     await new Promise(resolve => {
-      const div = document.createElement('div');
-      this.host.innerHTML = '';
-      this.host.appendChild(div);
-      this.player = new YT.Player(div, {
+      s.player = new YT.Player(div, {
         videoId: id,
         width: '100%', height: '100%',
         playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, iv_load_policy: 3, autoplay: autoplay ? 1 : 0, origin: location.origin },
         events: {
           onReady: () => resolve(),
-          onStateChange: e => this.onState(e.data),
-          onError: () => this.fire('error'),
+          onStateChange: e => this.onState(e.data, i),
+          onError: () => { if (i === this.a) this.fire('error'); },
         },
       });
     });
+    this.showActive();
+    return true;
   }
 
-  onState(s) {
+  async load(id, duration = 0, autoplay = false) {
+    this.videoId = id;
+    this.src = 'yt:' + id;
+    this._dur = duration;
+    this._userPause = false;
+    const standby = this.slots[1 - this.a];
+    // Le son demandé est déjà prêt dans le lecteur de coulisses : on bascule dessus
+    if (standby.player && standby.videoId === id) {
+      try { this.player?.pauseVideo(); } catch { /* ignore */ }
+      this.a = 1 - this.a;
+      standby.priming = false;
+      this.showActive();
+      try { standby.player.unMute(); standby.player.setVolume(Math.round(this._vol * 100)); } catch { /* ignore */ }
+      if (autoplay) standby.player.playVideo();
+      return;
+    }
+    const s = this.slots[this.a];
+    if (await this.ensure(this.a, id, autoplay)) return;
+    s.videoId = id;
+    s.priming = false;
+    try { s.player.unMute(); } catch { /* ignore */ }
+    autoplay ? s.player.loadVideoById(id) : s.player.cueVideoById(id);
+  }
+
+  // Prépare le son suivant : chargé en silence puis mis en pause au début
+  async preload(id) {
+    const i = 1 - this.a;
+    const s = this.slots[i];
+    if (s.videoId === id && s.player) return;
+    try {
+      const created = await this.ensure(i, id, false);
+      if (i === this.a) return; // la lecture a changé entre-temps
+      s.videoId = id;
+      s.priming = true;
+      s.player.mute();
+      if (created) s.player.playVideo(); else s.player.loadVideoById(id);
+    } catch { /* tant pis, chargement normal au moment voulu */ }
+  }
+
+  onState(st, i) {
+    const s = this.slots[i];
+    if (i !== this.a) {
+      // lecteur de coulisses : dès qu'il a commencé à charger, on le met en pause au début
+      if (s.priming && st === 1) { s.priming = false; try { s.player.pauseVideo(); s.player.seekTo(0, true); } catch { /* ignore */ } }
+      return;
+    }
     // -1 non démarré, 0 fini, 1 lecture, 2 pause, 3 chargement, 5 prêt
     // Le navigateur met souvent la vidéo en pause quand on quitte l'app : on tente de la relancer.
-    if (s === 2 && !this._userPause && document.hidden && Date.now() - (this._hiddenAt || 0) < 4000 && (this._retries || 0) < 3) {
+    if (st === 2 && !this._userPause && document.hidden && Date.now() - (this._hiddenAt || 0) < 4000 && (this._retries || 0) < 3) {
       this._retries = (this._retries || 0) + 1;
       setTimeout(() => { try { this.player.playVideo(); } catch { /* ignore */ } }, 250);
     }
-    if (s === 1) { this._userPause = false; this._retries = 0; }
-    if (s === 1) {
+    if (st === 1) { this._userPause = false; this._retries = 0; }
+    if (st === 1) {
       if (this._paused) { this._paused = false; this.fire('play'); }
       this.fire('loadedmetadata');
       clearInterval(this._tick);
       this._tick = setInterval(() => this.fire('timeupdate'), 400);
-    } else if (s === 2 || s === 0 || s === 5 || s === -1) {
+    } else if (st === 2 || st === 0 || st === 5 || st === -1) {
       clearInterval(this._tick);
       if (!this._paused) { this._paused = true; this.fire('pause'); }
-      if (s === 0) this.fire('ended');
+      if (st === 0) this.fire('ended');
     }
   }
 
