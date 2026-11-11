@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/app.css?v=17">
+<link rel="stylesheet" href="css/app.css?v=18">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -66,6 +66,10 @@ try {
   var st = JSON.parse(localStorage.getItem('onde.settings') || '{}');
   var nm = (st.appName || (st.name ? 'Maison ' + st.name : 'Maison')).toUpperCase();
   var parts = nm.split(' ');
+  var full = st.appName || (st.name ? 'Maison ' + st.name : 'Maison');
+  var ml = document.querySelector('link[rel="manifest"]');
+  if (ml && st.name) ml.setAttribute('href', 'manifest.webmanifest?name=' + encodeURIComponent(full) + '&short=' + encodeURIComponent(full.length <= 12 ? full : st.name.slice(0, 12)));
+  document.title = full;
   document.querySelector('.splash-word small').textContent = parts.length > 1 ? parts[0] : '';
   document.getElementById('splash-name').textContent = parts.length > 1 ? parts.slice(1).join(' ') : parts[0];
   var T = { or: ['#f6e3b4', '#d4a955', '#a77c37'], rubis: ['#ffb0ba', '#e5566a', '#9e1f33'], saphir: ['#c2d6ff', '#5b93ff', '#2a4fb8'], emeraude: ['#b3f5d2', '#35c47c', '#167a47'], amethyste: ['#ddd0ff', '#a07bff', '#5d3bc4'], rose: ['#ffd0e5', '#ff74b1', '#c2306f'], argent: ['#ffffff', '#c5ccd6', '#7d8794'], corail: ['#ffd2bf', '#ff8a5c', '#c24e22'] }[st.theme || 'or'];
@@ -172,6 +176,6 @@ try {
 <input type="file" id="pick-files" accept="audio/*,.mp3,.m4a,.aac,.flac,.ogg,.opus,.wav,.webm" multiple hidden>
 <input type="file" id="pick-folder" webkitdirectory multiple hidden>
 
-<script type="module" src="js/app.js?v=17"></script>
+<script type="module" src="js/app.js?v=18"></script>
 </body>
 </html>
