@@ -7,7 +7,7 @@ import {
   DAY, MIN, startOfDay, addDays, sameDay, startOfWeek, startOfMonth, dayDiff, pad, hm, hm2, ymd, fromYmd,
   cap, fmtDay, fmtDayShort, relDay, fmtDuration, countdown, JOURS_C, MOIS,
 } from './dates.js';
-import { localAssistant, askClaude, revisionPlan, revisionTitle, spoken } from './ai.js';
+import { localAssistant, askClaude, revisionPlan, revisionTitle, spoken, readSchedulePhoto, testClaudeKey } from './ai.js';
 import {
   subjects, subjectOf, subjectColor, goalProgress, toggleCheck, busyMinutes, dayLoad, briefing, greetingWord,
   templates, countdownList, stats,
@@ -388,6 +388,7 @@ function renderToday() {
       n ? `<button class="next-card" style="--c:${colEv(n.e)}" data-a="ev" data-id="${n.e.id}"><span class="nc-lbl">${n.lbl}</span><span class="nc-ttl">${esc(shortTitle(n.e))}</span>${n.e.location ? `<span class="nc-loc">${esc(n.e.location)}</span>` : ''}</button>`
         : `<div class="next-card"><span class="nc-ttl">Rien de prévu 🌿</span></div>`}
     <button class="talk" data-a="voice"><span class="talk-orb">${icon('mic')}</span><span><b>Parle-moi</b><small>« Qu'est-ce que j'ai demain ? »</small></span></button>
+    <button class="photo-btn" data-a="photo"><span>📷</span><span><b>Ajouter depuis une photo</b><small>Emploi du temps, convocation, affiche…</small></span></button>
     <div class="tiles">${tiles.map(([to, e, t, sub]) => `<button class="tile" data-a="open" data-to="${to}"><span class="t-ic">${e}</span><b>${t}</b><small>${esc(sub)}</small></button>`).join('')}</div>`;
 }
 
@@ -442,6 +443,7 @@ function renderCal() {
       <span class="day-load" style="--l:${L.c}">${list.filter(e => !e.allDay).length ? `${list.length} · ${fmtDuration(L.minutes * MIN)}` : list.length ? list.length : 'Libre'}</span>
     </div>
     ${S().events.length ? '' : `<div class="insight" style="--c:var(--danger)"><div class="ic">⚠️</div><div class="grow"><p><b>Ton agenda est vide sur ce téléphone.</b> Ouvre le lien d'import que tu as reçu (dans Chrome) pour récupérer tous tes événements.</p></div></div>`}
+    ${list.some(e => !e.allDay) ? `<div class="hb-wrap">${hourBar(selDay, { ticks: true })}</div>` : ''}
     <div class="day-list">${dayCards(list)}</div>`}`;
 }
 
@@ -492,15 +494,45 @@ function evCard(e, now = Date.now()) {
   if (e.allDay) return `<div class="wr-ev allday" style="--c:${colEv(e)}" data-a="ev" data-id="${e.id}">${catOf(e.cat).emoji} ${esc(shortTitle(e))}</div>`;
   return `<div class="wr-ev ${e.end < now ? 'past' : e.start <= now ? 'now' : ''}" style="--c:${colEv(e)}" data-a="ev" data-id="${e.id}"><b>${hm(e.start)}<small>${hm(e.end)}</small></b><span>${e.star ? '★ ' : ''}${esc(shortTitle(e))}${e.location ? `<small>${esc(e.location)}</small>` : ''}</span></div>`;
 }
+// Journée à l'échelle du temps : plus c'est long, plus c'est haut ; les trous se voient.
+const PX_H = 46; // pixels par heure
 function dayCards(evs) {
   if (!evs.length) return '<div class="empty">Rien de prévu ce jour-là 🌿<br><small>Touche + pour ajouter quelque chose</small></div>';
-  let out = '', last = null;
-  for (const e of evs) {
-    if (!e.allDay && last && e.start - last >= 90 * MIN && e.start > Date.now()) out += `<div class="wr-gap" data-a="new-at" data-t="${Math.max(last, Date.now())}">Libre ${fmtDuration(e.start - Math.max(last, Date.now()))}</div>`;
-    out += evCard(e);
-    if (!e.allDay) last = Math.max(last || 0, e.end);
+  const allDay = evs.filter(e => e.allDay);
+  const timed = evs.filter(e => !e.allDay).sort((a, b) => a.start - b.start);
+  let out = allDay.map(e => evCard(e)).join('');
+  let last = null;
+  for (const e of timed) {
+    if (last != null) {
+      const gap = e.start - last;
+      const mins = Math.round(gap / MIN);
+      if (mins < 0) out += `<div class="link warn">⚠️ chevauche le précédent</div>`;
+      else if (mins === 0) out += `<div class="link chain">↓ enchaîné</div>`;
+      else if (mins < 60) out += `<div class="link pause" style="height:${Math.max(26, mins / 60 * PX_H)}px">☕ pause ${fmtDuration(gap)}</div>`;
+      else out += `<button class="hole" style="height:${Math.min(240, Math.max(56, mins / 60 * PX_H))}px" data-a="new-at" data-t="${last}"><b>Trou de ${fmtDuration(gap)}</b><span>${hm(last)} → ${hm(e.start)}</span><em>+ ajouter</em></button>`;
+    }
+    const h = Math.max(62, (e.end - e.start) / 3600000 * PX_H);
+    out += evCard(e).replace('style="--c:', `style="min-height:${h}px;--c:`);
+    last = Math.max(last || 0, e.end);
   }
   return out;
+}
+
+// Barre horaire d'une journée (8h → 22h) : les blocs occupés et les trous d'un coup d'œil
+function hourBar(d, { ticks = false } = {}) {
+  const d0 = startOfDay(d).getTime();
+  const evs = eventsOfDay(d).filter(e => !e.allDay && e.cat !== 'ferie');
+  let h0 = 8, h1 = 22;
+  evs.forEach(e => { h0 = Math.min(h0, new Date(Math.max(e.start, d0)).getHours()); h1 = Math.max(h1, Math.min(24, new Date(Math.min(e.end, d0 + DAY - 1)).getHours() + 1)); });
+  const span = (h1 - h0) * 3600000, base = d0 + h0 * 3600000;
+  const segs = evs.map(e => {
+    const l = Math.max(0, (e.start - base) / span * 100), r = Math.min(100, (e.end - base) / span * 100);
+    return `<i style="left:${l}%;width:${Math.max(1.2, r - l)}%;background:${colEv(e)}" title="${esc(shortTitle(e))}"></i>`;
+  }).join('');
+  const now = Date.now();
+  const nowMark = sameDay(d, new Date()) && now > base && now < base + span ? `<b class="hb-now" style="left:${(now - base) / span * 100}%"></b>` : '';
+  const tk = ticks ? `<div class="hb-ticks">${[...Array(Math.floor((h1 - h0) / 2) + 1)].map((_, i) => `<span style="left:${i * 2 / (h1 - h0) * 100}%">${h0 + i * 2}h</span>`).join('')}</div>` : '';
+  return `<div class="hbar">${segs}${nowMark}</div>${tk}`;
 }
 
 function weekRows() {
@@ -511,7 +543,7 @@ function weekRows() {
     const rel = relDay(d);
     return `<div class="wrow ${sameDay(d, new Date()) ? 'today' : ''}" id="wr-${ymd(d)}">
       <div class="wr-day" data-a="day" data-d="${ymd(d)}"><span>${JOURS_C[d.getDay()]}</span><b>${d.getDate()}</b>${['aujourd\'hui', 'demain'].includes(rel) ? `<em>${rel === 'demain' ? 'demain' : 'auj.'}</em>` : ''}</div>
-      <div class="wr-list">${evs.map(e => evCard(e)).join('') || `<div class="wr-free" data-a="new-at" data-t="${new Date(d).setHours(10)}">Libre · ajouter</div>`}</div></div>`;
+      <div class="wr-list">${evs.some(e => !e.allDay) ? hourBar(d) : ''}${evs.map(e => evCard(e)).join('') || `<div class="wr-free" data-a="new-at" data-t="${new Date(d).setHours(10)}">Libre · ajouter</div>`}</div></div>`;
   }).join('')}</div>`;
 }
 
@@ -1265,6 +1297,55 @@ function editCountdown(id) {
 function keepScroll(fn) { const y = $('#sheet').scrollTop; fn(); $('#sheet').scrollTop = y; }
 function reopenHome() { if (sheetBack === 'home') keepScroll(openHome); else keepScroll(openSettings); }
 
+// ---------- Photo → agenda ----------
+let photoDraft = null;
+async function handlePhoto(file) {
+  openSheet(`${shTitle('📷 Lecture de la photo…')}<div class="v-orb small-orb" style="margin:30px auto"></div><p class="muted" style="text-align:center">Je lis ton emploi du temps, ça prend quelques secondes.</p>`);
+  try {
+    const { b64, type } = await shrinkImage(file);
+    const r = await readSchedulePhoto(b64, type);
+    photoDraft = r;
+    if (!r.events.length) { openSheet(`${shTitle('📷 Photo')}<p>${esc(r.note || 'Je n\'ai trouvé aucun événement sur cette image.')}</p>`); return; }
+    const weekly = r.events.some(e => e.weekly);
+    openSheet(`${shTitle(`📷 ${r.events.length} événement${r.events.length > 1 ? 's' : ''} trouvé${r.events.length > 1 ? 's' : ''}`)}
+      <p class="muted" style="margin-top:0">${esc(r.note)}</p>
+      ${r.events.map((e, i) => `<button class="photo-ev" data-a="photo-tg" data-i="${i}"><span class="box">✓</span><span class="grow"><b>${esc(e.title)}</b><small>${cap(fmtDay(e.start))}${e.allDay ? '' : ` · ${hm(e.start)}–${hm(e.end)}`}${e.location ? ' · ' + esc(e.location) : ''}${e.weekly ? ' · chaque semaine' : ''}</small></span></button>`).join('')}
+      ${weekly ? `<div class="field" style="margin-top:12px"><label>Répéter les cours de la semaine type</label><select id="photo-rep"><option value="1">Juste cette semaine</option><option value="4">4 semaines</option><option value="8" selected>8 semaines</option><option value="15">Tout le semestre (15 semaines)</option></select></div>` : ''}
+      <button class="btn gold block" style="margin-top:12px" data-a="photo-add">Ajouter à mon agenda</button>`);
+  } catch (e) {
+    console.warn(e);
+    openSheet(`${shTitle('📷 Photo')}<p>Je n'ai pas réussi à lire la photo : ${esc(e.message || e)}</p>`);
+  }
+}
+function shrinkImage(file, max = 1600) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      resolve({ b64: c.toDataURL('image/jpeg', 0.85).split(',')[1], type: 'image/jpeg' });
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror = () => reject(new Error('image illisible'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+function addPhotoEvents() {
+  const rep = +($('#photo-rep')?.value || 1);
+  let n = 0;
+  for (const e of photoDraft.events.filter(x => !x.skip)) {
+    const times = e.weekly ? rep : 1;
+    for (let w = 0; w < times; w++) {
+      const ev = addEvent({ title: e.title, start: addDays(new Date(e.start), 7 * w).getTime(), end: addDays(new Date(e.end), 7 * w).getTime(), allDay: e.allDay, location: e.location });
+      gpush(ev); n++;
+    }
+  }
+  photoDraft = null; closeSheet(); render();
+  toast(`${n} événement${n > 1 ? 's' : ''} ajouté${n > 1 ? 's' : ''} à ton agenda 📅`);
+}
+
 // ---------- Accueil guidé ----------
 const INTERESTS = [
   ['brief', '☀️', 'Un résumé de ma journée'],
@@ -1299,36 +1380,67 @@ function openMenu() { openSettings(); }
 function openLook() { openSettings(); }
 function openSettings() {
   const s = set();
+  const p = PALETTES[s.palette] || PALETTES.or;
+  const T = (a, ic, t, sub, extra = '') => `<button class="set-tile" data-a="${a}" ${extra}><span class="st-ic">${ic}</span><b>${t}</b><small>${sub}</small></button>`;
   openSheet(`${shTitle('Réglages')}
-    <div class="set-sec">Moi</div>
-    <div class="field"><label>Prénom</label><input data-set="name" value="${esc(s.name)}"></div>
-    <div class="emoji-pick">${AVATARS.map(a => `<button class="${s.avatar === a ? 'on' : ''}" data-a="avatar" data-v="${a}">${a}</button>`).join('')}</div>
-
-    <div class="set-sec">Style</div>
-    <div class="palettes">${Object.entries(PALETTES).map(([k, p]) => `<button class="pal ${s.palette === k ? 'on' : ''}" data-a="palette" data-v="${k}" style="background:${p.bg};color:${p.text};border-color:${s.palette === k ? p.accent : 'transparent'}"><i style="background:${p.accent}"></i>${p.name}</button>`).join('')}</div>
-    <div class="field" style="margin-top:12px"><label>Taille du texte</label><div class="seg">${[[1, 'Normal'], [1.12, 'Grand'], [1.25, 'Très grand']].map(([v, l]) => `<button class="${s.textSize === v ? 'on' : ''}" data-a="textsize" data-v="${v}">${l}</button>`).join('')}</div></div>
-
-    <div class="set-sec">Mode vocal</div>
+    <div class="set-me" data-a="st-profile"><span class="avatar big">${esc(s.avatar)}</span><div class="grow"><b>${esc(s.name)}</b><small>Toucher pour changer</small></div>${icon('right')}</div>
+    <div class="set-tiles">
+      ${T('st-style', `<i class="st-swatch" style="background:${p.bg};border-color:${s.accent || p.accent}"></i>`, 'Style', `${p.name} · texte ${({ 1: 'normal', 1.12: 'grand', 1.25: 'très grand' })[s.textSize] || 'normal'}`)}
+      ${T('st-voice', '🎙️', 'Voix', s.voiceSpeak !== false ? 'Répond à voix haute' : 'Muette')}
+      ${T('st-ai', '✨', 'IA avancée', s.claudeKey ? '<span class="ok-badge">Activée</span>' : 'Désactivée')}
+      ${T('st-google', `<svg class="g"><use href="#i-google"/></svg>`, 'Google Agenda', s.googleConnected ? 'Synchronisé' : 'Bouton « + Google »')}
+      ${T('set-goals', '🎯', 'Objectifs', `${s.goals.length} objectif${s.goals.length > 1 ? 's' : ''}`)}
+      ${T('set-cats', '🏷', 'Couleurs', 'Catégories d\'événements')}
+      ${T('notif', '🔔', 'Notifications', 'Autoriser les alertes')}
+      ${T('set-data', '💾', 'Mes données', `${S().events.length} événements`)}
+    </div>
+    <button class="link-btn" data-a="go-ai">💬 Historique de l'assistant</button>
+    <button class="link-btn" data-a="onboard">Refaire l'accueil guidé</button>`);
+}
+function openProfile() {
+  const s = set();
+  openSheet(`${shTitle('Moi', true)}
+    <div class="ob-emoji center">${esc(s.avatar)}</div>
+    <input class="big-input" data-set="name" value="${esc(s.name)}" placeholder="Ton prénom">
+    <div class="emoji-pick center" style="margin-top:14px">${AVATARS.map(a => `<button class="${s.avatar === a ? 'on' : ''}" data-a="avatar" data-v="${a}">${a}</button>`).join('')}</div>`, 'settings');
+}
+function openStyle() {
+  const s = set();
+  openSheet(`${shTitle('Style', true)}
+    <div class="palettes big">${Object.entries(PALETTES).map(([k, p]) => `<button class="pal-prev ${s.palette === k ? 'on' : ''}" data-a="palette" data-v="${k}" style="--pb:${p.bg};--pb2:${p.bg2};--pt:${p.text};--pa:${p.accent}"><span class="pp-bar"></span><span class="pp-card"><i></i><i></i></span><b>${p.name}</b></button>`).join('')}</div>
+    <div class="set-sec">Taille du texte</div>
+    <div class="size-pick">${[[1, 'Normal'], [1.12, 'Grand'], [1.25, 'Très grand']].map(([v, l]) => `<button class="${s.textSize === v ? 'on' : ''}" data-a="textsize" data-v="${v}"><span style="font-size:${18 * v}px">Aa</span><small>${l}</small></button>`).join('')}</div>
+    <div class="switch"><div>Contraste renforcé<small>Textes plus nets</small></div><button class="tg ${s.contrast ? 'on' : ''}" data-a="set-tg" data-k="contrast"></button></div>`, 'settings');
+}
+function openVoiceSet() {
+  const s = set();
+  openSheet(`${shTitle('Voix', true)}
     <div class="switch"><div>Me répondre à voix haute</div><button class="tg ${s.voiceSpeak !== false ? 'on' : ''}" data-a="set-tg2" data-k="voiceSpeak"></button></div>
     <div class="switch"><div>Conversation continue<small>Je réécoute après avoir répondu. Dis « merci » pour arrêter.</small></div><button class="tg ${s.voiceLoop !== false ? 'on' : ''}" data-a="set-tg2" data-k="voiceLoop"></button></div>
-
-    <div class="set-sec">Google Agenda</div>
-    <div class="guide">✅ <b>Rien à configurer.</b> Quand tu ajoutes un événement, un bouton <b>« + Google »</b> te permet de l'ajouter aussi dans ton Google Agenda en 1 clic.</div>
+    <button class="btn block" style="margin-top:14px" data-a="voice-test">🔊 Écouter la voix</button>`, 'settings');
+}
+function openAiSet() {
+  const s = set();
+  openSheet(`${shTitle('✨ IA avancée', true)}
+    <div class="ai-card ${s.claudeKey ? 'on' : ''}">
+      <b>${s.claudeKey ? '✅ Activée' : 'Désactivée'}</b>
+      <p>${s.claudeKey ? 'L\'assistant utilise Claude : il comprend tout ce que tu dis, organise ta semaine et lit les photos.' : 'Sans elle, l\'assistant comprend déjà les demandes courantes, gratuitement. Avec elle, il comprend <b>tout</b> et peut <b>lire une photo</b> de ton emploi du temps.'}</p>
+    </div>
+    ${s.claudeKey ? '' : `<div class="steps">
+      <div><span>1</span>Va sur <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> et crée un compte.</div>
+      <div><span>2</span>Ajoute 5 € de crédit (ça dure des mois : une demande coûte moins d'un centime).</div>
+      <div><span>3</span>Clique « Create Key », copie la clé et colle-la ici :</div>
+    </div>`}
+    <div class="row" style="margin-top:10px"><input id="ai-key" class="inp grow" type="password" placeholder="sk-ant-…" value="${esc(s.claudeKey)}" autocomplete="off"><button class="btn gold" data-a="ai-save">${s.claudeKey ? 'Mettre à jour' : 'Activer'}</button></div>
+    ${s.claudeKey ? '<button class="link-btn" data-a="ai-off">Désactiver l\'IA avancée</button>' : ''}
+    <p class="dim small">La clé reste uniquement sur ton téléphone.</p>`, 'settings');
+}
+function openGoogleSet() {
+  const s = set();
+  openSheet(`${shTitle('Google Agenda', true)}
+    <div class="ai-card on"><b>✅ Rien à configurer</b><p>Après chaque ajout, un bouton <b>« + Google »</b> l'ajoute aussi à ton Google Agenda en 1 clic.</p></div>
     <div class="switch"><div>Proposer « + Google » après chaque ajout</div><button class="tg ${s.googleAddPrompt ? 'on' : ''}" data-a="set-tg" data-k="googleAddPrompt"></button></div>
-
-
-    <details class="more-opts"><summary>Réglages avancés</summary>
-      <button class="menu-row" data-a="set-cats"><span class="me-ic">🏷</span><span class="grow"><b>Catégories & couleurs</b><small>Renommer, recolorer, créer les tiennes</small></span>${icon('right')}</button>
-      <button class="menu-row" data-a="set-goals"><span class="me-ic">🎯</span><span class="grow"><b>Objectifs</b><small>Boxe, révisions, habitudes</small></span>${icon('right')}</button>
-      <button class="menu-row" data-a="set-connect"><span class="me-ic">🔗</span><span class="grow"><b>Synchro Google automatique & IA Claude</b><small>Pour les experts, facultatif</small></span>${icon('right')}</button>
-      <button class="menu-row" data-a="set-data"><span class="me-ic">💾</span><span class="grow"><b>Mes données</b><small>Importer, sauvegarder, doublons</small></span>${icon('right')}</button>
-      <div class="switch"><div>Contraste renforcé</div><button class="tg ${s.contrast ? 'on' : ''}" data-a="set-tg" data-k="contrast"></button></div>
-      <div class="switch"><div>Masquer les doublons</div><button class="tg ${s.hideDups ? 'on' : ''}" data-a="set-tg" data-k="hideDups"></button></div>
-      <div class="field" style="margin-top:12px"><label>Temps de trajet par défaut</label><select data-set="travelMin">${TRAVELS.map(m => `<option value="${m}" ${s.travelMin === m ? 'selected' : ''}>${m ? m + ' min' : 'Aucun'}</option>`).join('')}</select></div>
-      <button class="btn block" data-a="notif">🔔 Activer les notifications</button>
-      <button class="btn block" style="margin-top:8px" data-a="go-ai">💬 Voir l'historique de l'assistant</button>
-      <button class="btn block" style="margin-top:8px" data-a="onboard">Refaire l'accueil guidé</button>
-    </details>`);
+    <button class="link-btn" data-a="set-connect">Synchro automatique (avancé)</button>`, 'settings');
 }
 function homeToggles() {
   const mods = set().homeModules;
@@ -1515,6 +1627,28 @@ const ACTIONS = {
   close: closeSheet,
   'sheet-back': () => (sheetBack === 'goals' ? openGoals() : openSettings()),
   settings: openMenu,
+  'st-profile': () => openProfile(), 'st-style': () => openStyle(), 'st-voice': () => openVoiceSet(), 'st-ai': () => openAiSet(), 'st-google': () => openGoogleSet(),
+  'voice-test': () => speak(`Salut ${set().name}, je suis ton assistant. Dis-moi ce que tu veux programmer.`),
+  'ai-off': () => { set().claudeKey = ''; save(); openAiSet(); },
+  'ai-save': async el => {
+    const key = $('#ai-key').value.trim();
+    if (!key) return toast('Colle ta clé d\'abord.');
+    el.textContent = 'Vérification…'; el.disabled = true;
+    try { await testClaudeKey(key); set().claudeKey = key; save(); toast('IA avancée activée ✨'); openAiSet(); }
+    catch (e) { el.textContent = 'Activer'; el.disabled = false; toast('Clé refusée : vérifie-la ou ton crédit. (' + (e.status || e.message || e) + ')'); }
+  },
+  photo: () => {
+    if (!set().claudeKey) {
+      openSheet(`${shTitle('📷 Photo → agenda')}
+        <div class="ai-card"><b>Il faut l'IA avancée</b><p>Pour lire une photo, l'appli a besoin de l'IA avancée (Claude). Elle se règle en 2 minutes.</p></div>
+        <button class="btn gold block" data-a="st-ai">✨ Activer l'IA avancée</button>
+        <p class="muted small" style="margin-top:14px">Astuce gratuite : envoie la photo de ton emploi du temps à Claude dans la conversation, il te renverra un lien qui met tout dans ton agenda.</p>`);
+      return;
+    }
+    $('#photo-in').click();
+  },
+  'photo-add': () => addPhotoEvents(),
+  'photo-tg': el => { const i = +el.dataset.i; photoDraft.events[i].skip = !photoDraft.events[i].skip; el.classList.toggle('off', photoDraft.events[i].skip); el.querySelector('.box').textContent = photoDraft.events[i].skip ? '' : '✓'; },
   'set-look': openLook, 'set-home': openHome, 'set-cats': openCats, 'set-goals': openGoals, 'set-connect': openConnect, 'set-data': openData,
   open: el => { const [t, seg] = el.dataset.to.split(':'); if (seg) { set().meSeg = seg; save(); } go(t); },
   voice: () => openVoice(),
@@ -1551,10 +1685,10 @@ const ACTIONS = {
     toast(p === 'granted' ? 'Notifications activées 🔔' : 'Notifications refusées.');
   },
   // apparence
-  avatar: el => { set().avatar = el.dataset.v; save(); keepScroll(openSettings); render(); },
-  palette: el => { set().palette = el.dataset.v; set().accent = ''; save(); keepScroll(openSettings); render(); },
+  avatar: el => { set().avatar = el.dataset.v; save(); keepScroll(openProfile); render(); },
+  palette: el => { set().palette = el.dataset.v; set().accent = ''; save(); keepScroll(openStyle); render(); },
   accent: el => { set().accent = el.dataset.v; save(); keepScroll(openSettings); render(); },
-  textsize: el => { set().textSize = +el.dataset.v; save(); keepScroll(openSettings); render(); },
+  textsize: el => { set().textSize = +el.dataset.v; save(); keepScroll(openStyle); render(); },
   'set-tg': el => { const k = el.dataset.k; set()[k] = !set()[k]; save(); el.classList.toggle('on', set()[k]); render(); },
   // accueil
   'home-tg': el => { const m = set().homeModules[+el.dataset.i]; m.on = !m.on; save(); reopenHome(); render(); },
@@ -1757,6 +1891,7 @@ document.addEventListener('input', ev => {
 });
 document.addEventListener('change', ev => { const t = ev.target; if (t.dataset.catC || t.dataset.catL || t.dataset.catE || t.dataset.set || t.dataset.memo) render(); });
 
+$('#photo-in').addEventListener('change', e => { const f = e.target.files[0]; if (f) handlePhoto(f); e.target.value = ''; });
 $('#file-in').addEventListener('change', e => { const f = e.target.files[0]; if (f) handleFile(f); e.target.value = ''; });
 $('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) go(b.dataset.tab); });
 $('#btn-settings').onclick = openSettings;

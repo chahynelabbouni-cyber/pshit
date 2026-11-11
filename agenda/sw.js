@@ -1,8 +1,8 @@
 // Service worker : l'agenda fonctionne hors connexion.
-const CACHE = 'agenda-chahyn-v7';
+const CACHE = 'agenda-chahyn-v8';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/app.js', 'js/store.js', 'js/insights.js', 'js/dates.js', 'js/parse.js', 'js/ai.js', 'js/google.js', 'js/ics.js', 'js/voice.js',
+  'js/app.js', 'js/store.js', 'js/insights.js', 'js/nlu.js', 'js/dates.js', 'js/parse.js', 'js/ai.js', 'js/google.js', 'js/ics.js', 'js/voice.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
