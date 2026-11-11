@@ -2,6 +2,7 @@
 // « ajoute boxe jeudi de 20h30 à 22h », « rdv dentiste le 15 novembre à 10h »,
 // « rappelle-moi d'envoyer le dossier avant vendredi », « qu'est-ce que j'ai demain ? »
 import { norm } from './store.js';
+import { normalizeSpoken } from './nlu.js';
 import { addDays, startOfDay, DAY, MIN } from './dates.js';
 
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
@@ -11,6 +12,8 @@ const monthIdx = s => MOIS.findIndex(m => m.startsWith(s.replace('.', '').slice(
 
 const NUM = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6, sept: 7, huit: 8, neuf: 9, dix: 10, onze: 11, douze: 12, quinze: 15, vingt: 20, trente: 30 };
 const num = s => (s in NUM ? NUM[s] : parseInt(s, 10));
+const startOfWeekN = d => { const x = startOfDay(d); return addDays(x, -((x.getDay() + 6) % 7)); };
+const dayDiffN = (a, b) => Math.round((startOfDay(b) - startOfDay(a)) / DAY);
 
 // Retire les formules d'oral : « je voudrais que tu mettes… », « est-ce que tu peux ajouter… »
 export function stripPreamble(input) {
@@ -30,7 +33,7 @@ export function stripPreamble(input) {
 }
 
 export function parseFr(input, now = new Date()) {
-  const src = stripPreamble(input);
+  const src = stripPreamble(normalizeSpoken(input));
   let t = norm(src);
   const full = t;
   const spans = [];
@@ -44,7 +47,14 @@ export function parseFr(input, now = new Date()) {
     return true;
   };
   const today = startOfDay(now);
-  let day = null, time = null, endTime = null, dur = null, part = null, weekRange = false, explicitDay = false;
+  let day = null, time = null, endTime = null, dur = null, part = null, weekRange = false, explicitDay = false, allDayExplicit = false, relTime = false;
+
+  // « dans 2 heures », « dans 20 minutes » : un moment précis à partir de maintenant
+  take(/\bdans (\d+) ?(h|heures?|minutes?|min)\b/, m => {
+    const at = new Date(now.getTime() + (+m[1]) * (m[2].startsWith('h') ? 60 : 1) * MIN);
+    day = startOfDay(at); time = [at.getHours(), at.getMinutes()]; explicitDay = true; relTime = true;
+  });
+  take(/\b(toute la journee|journee entiere|toute la journ)\b/, () => { allDayExplicit = true; });
 
   // ----- jour -----
   take(/\b(aujourd'hui|aujourdhui|ce soir|ce matin|cet apres[- ]?midi|cet aprem|cette nuit|ce midi)\b/, m => {
@@ -66,6 +76,7 @@ export function parseFr(input, now = new Date()) {
     const target = JOURS.indexOf(m[1]);
     let diff = (target - today.getDay() + 7) % 7;
     if (diff === 0) diff = 7;
+    if (m[2] && /prochain/.test(m[2])) diff = dayDiffN(today, addDays(startOfWeekN(today), 7 + (target + 6) % 7)); // « jeudi prochain » = jeudi de la semaine prochaine
     if (m[2] && /apres|huit/.test(m[2])) diff += 7;
     day = addDays(today, diff); explicitDay = true;
     if (m[4]) part = m[4] === 'matin' ? 9 : m[4] === 'soir' ? 19 : m[4] === 'midi' ? 12 : 14;
@@ -100,16 +111,19 @@ export function parseFr(input, now = new Date()) {
   take(new RegExp(`\\b(?:de |entre )?${H}\\s?(?:a|-|et|jusqu'a)\\s?${H}`), m => {
     time = [+m[1], +(m[2] || 0)]; endTime = [+m[3], +(m[4] || 0)];
   }) ||
-  take(new RegExp(`\\b(?:a |vers |pour |des )?${H}(?!\\d)`), m => { time = [+m[1], +(m[2] || 0)]; }) ||
+  (!time && take(new RegExp(`\\b(?:a |vers |des |pour )?${H}(?!\\d)`), m => { time = [+m[1], +(m[2] || 0)]; })) ||
   take(/\b(?:a |vers )?midi\b/, () => { time = [12, 0]; }) ||
   take(/\b(?:a )?minuit\b/, () => { time = [23, 59]; });
   if (time && !endTime) {
     take(new RegExp(`\\b(?:a|jusqu'a|-)\\s?${H}`), m => { endTime = [+m[1], +(m[2] || 0)]; });
   }
-  if (!endTime) take(/\b(?:pendant|pour|durant|duree)?\s?(\d+(?:[.,]\d)?|une|deux|trois)\s?(h|heures?|min|minutes?)\b(?!\s?\d)/, m => {
-    const n = m[1] === 'une' ? 1 : m[1] === 'deux' ? 2 : m[1] === 'trois' ? 3 : parseFloat(m[1].replace(',', '.'));
-    dur = m[2].startsWith('h') ? n * 60 : n;
-  });
+  if (!endTime) take(/\b(?:pendant|pour|durant|duree de|duree)\s+(\d+)h(\d{2})?\b/, m => { dur = +m[1] * 60 + +(m[2] || 0); }) ||
+    take(/\b(?:pendant|pour|durant|duree)?\s?(\d+(?:[.,]\d)?|une|deux|trois)\s?(h|heures?|min|minutes?)\b(?!\s?\d)/, m => {
+      const n = m[1] === 'une' ? 1 : m[1] === 'deux' ? 2 : m[1] === 'trois' ? 3 : parseFloat(m[1].replace(',', '.'));
+      dur = m[2].startsWith('h') ? n * 60 : n;
+    });
+  if (time && part === 19 && time[0] < 12) time[0] += 12; // « ce soir à 8h » = 20h
+  const partTime = !time && part != null;
   if (!time && part != null) time = [part, 0];
 
   // ----- intention -----
@@ -161,5 +175,5 @@ export function parseFr(input, now = new Date()) {
       allDay = true; start = startOfDay(d).getTime(); end = start + DAY;
     }
   }
-  return { intent, title, start, end, allDay, day, explicitDay, weekRange, hasTime: !!time, dur };
+  return { intent, title, start, end, allDay, day, explicitDay, weekRange, hasTime: !!time, partTime, dur, allDayExplicit, relTime, src };
 }
