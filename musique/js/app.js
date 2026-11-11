@@ -1,12 +1,11 @@
-import { db } from './db.js?v=15';
-import { readTags } from './tags.js?v=15';
-import { Player, isIOS } from './player.js?v=15';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=15';
-import * as AI from './ai.js?v=15';
-import * as Voice from './voice.js?v=15';
-import * as Src from './sources.js?v=15';
+import { db } from './db.js?v=16';
+import { readTags } from './tags.js?v=16';
+import { Player, isIOS } from './player.js?v=16';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=16';
+import * as AI from './ai.js?v=16';
+import * as Voice from './voice.js?v=16';
+import * as Src from './sources.js?v=16';
 
-const BRAND = 'Maison Chahyn';
 
 // ======================================================================
 // État
@@ -16,7 +15,7 @@ const S = {
   playlists: new Map(),
   covers: new Map(),       // coverId -> objectURL
   colors: loadJSON('onde.colors', {}),
-  settings: Object.assign({ name: 'Chahyn', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
+  settings: Object.assign({ name: '', lastName: '', appName: '', theme: 'or', style: 'maison', tastes: [], onboarded: false, homeFilter: 'all', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
   mixes: {},
   chat: loadJSON('onde.chat', []),
   version: 0,
@@ -645,7 +644,7 @@ async function toggleLike(t) {
     b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
   }
   $$(`[data-tid="${t.id}"] .like-mark`).forEach(el => el.classList.toggle('on', t.liked));
-  toast(t.liked ? 'Ajouté à Titres likés' : 'Retiré de Titres likés');
+  toast(t.source === 'radio' ? (t.liked ? 'Radio gardée dans ta bibliothèque' : 'Radio retirée de ta bibliothèque') : t.liked ? 'Ajouté à Titres likés' : 'Retiré de Titres likés');
   if (S.route?.name === 'liked') render(true);
 }
 
@@ -1543,6 +1542,8 @@ async function smartCommand(text) {
 
   // --- demandes vagues : « mets un son », « un truc », « n'importe quoi »
   if (/^(un truc|un son|quelque chose|n importe quoi|ce que tu veux|de la musique|du son|un truc bien|des sons|une musique|un bon son)$/.test(ask) || /^(jsp|je sais pas)( mets un truc)?$/.test(n)) {
+    const tl = S.settings.tastes || [];
+    if (tl.length) { const r = await playTaste(tl[Math.floor(Math.random() * tl.length)]); if (r) return r; }
     if (allTracks().length >= 8) { const m2 = getMix('moment'); playIds(m2.tracks.map(t => t.id), 0, { context: { label: m2.name, route: '#/mix/moment' } }); return `Je te mets « ${m2.name} ».`; }
     return await playYtQuery('hits du moment france', 'les hits du moment') || await playRadioByName('Skyrock') || null;
   }
@@ -1592,7 +1593,7 @@ function agentContext() {
     t ? `En cours : « ${t.title} »${t.artist ? ' de ' + t.artist : ''} (${t.source || 'fichier'}), ${player.playing ? 'en lecture' : 'en pause'}.` : 'Rien en cours.',
     `Volume ${Math.round((player.base ?? 1) * 100)} %. Égaliseur ${S.settings.eq}.`,
     `Playlists : ${pls}. Titres likés : ${liked().length}.`,
-    `YouTube ${S.settings.ytKey ? 'disponible' : 'non configuré'}. Prénom : ${S.settings.name || 'inconnu'}.`,
+    `YouTube ${S.settings.ytKey ? 'disponible' : 'non configuré'}. Prénom : ${S.settings.name || 'inconnu'}. Nom de l'app : ${brandName()}. Styles préférés : ${(S.settings.tastes || []).join(', ') || 'non précisés'}.`,
   ].join(' ');
 }
 
@@ -2256,6 +2257,229 @@ async function showRadios(tag, label) {
     $('#results').innerHTML = `<div class="no-res"><b>Radios indisponibles</b><p>${esc(e.message)}</p></div>`;
   }
 }
+
+// ======================================================================
+// Personnalisation : prénom, nom de l'app, couleurs, style, goûts
+// ======================================================================
+const THEMES = {
+  or: { label: 'Or', a: '#d9b26a', a2: '#f1d9a3', g: ['#f6e3b4', '#d4a955', '#a77c37'], on: '#140f06' },
+  rubis: { label: 'Rubis', a: '#e5566a', a2: '#ffb3bd', g: ['#ffb0ba', '#e5566a', '#9e1f33'], on: '#1a0508' },
+  saphir: { label: 'Saphir', a: '#5b93ff', a2: '#b9d0ff', g: ['#c2d6ff', '#5b93ff', '#2a4fb8'], on: '#050b1a' },
+  emeraude: { label: 'Émeraude', a: '#35c47c', a2: '#a9f0c9', g: ['#b3f5d2', '#35c47c', '#167a47'], on: '#03140b' },
+  amethyste: { label: 'Améthyste', a: '#a07bff', a2: '#d9cbff', g: ['#ddd0ff', '#a07bff', '#5d3bc4'], on: '#0d0619' },
+  rose: { label: 'Rose', a: '#ff74b1', a2: '#ffc6df', g: ['#ffd0e5', '#ff74b1', '#c2306f'], on: '#1a0510' },
+  argent: { label: 'Argent', a: '#c5ccd6', a2: '#eef1f5', g: ['#ffffff', '#c5ccd6', '#7d8794'], on: '#0b0d10' },
+  corail: { label: 'Corail', a: '#ff8a5c', a2: '#ffc9b3', g: ['#ffd2bf', '#ff8a5c', '#c24e22'], on: '#1a0904' },
+};
+const TASTES = [['rap fr', 'Rap FR'], ['hip-hop', 'Rap US'], ['rnb', 'RnB'], ['afro', 'Afro'], ['drill', 'Drill'], ['pop', 'Pop'], ['electro', 'Électro'], ['house', 'House'], ['rock', 'Rock'], ['reggaeton', 'Latino'], ['rai', 'Raï'], ['kompa', 'Kompa · Zouk'], ['lofi', 'Lo-fi'], ['classique', 'Classique'], ['jazz', 'Jazz'], ['soul', 'Soul · Funk'], ['kpop', 'K-pop'], ['chanson francaise', 'Chanson FR']];
+
+function brandName() {
+  if (S.settings.appName) return S.settings.appName;
+  return S.settings.name ? `Maison ${S.settings.name}` : 'Maison';
+}
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+function applyTheme() {
+  const t = THEMES[S.settings.theme] || THEMES.or;
+  const r = document.documentElement.style;
+  r.setProperty('--accent', t.a); r.setProperty('--gold', t.a); r.setProperty('--accent2', t.a2);
+  r.setProperty('--grad', `linear-gradient(135deg, ${t.g[0]} 0%, ${t.g[1]} 48%, ${t.g[2]} 100%)`);
+  r.setProperty('--on-accent', t.on);
+  r.setProperty('--line', hexA(t.a, 0.13));
+  document.body.classList.toggle('style-moderne', S.settings.style === 'moderne');
+  document.title = brandName();
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#070707');
+  // le logo dégradé suit la couleur choisie
+  const stops = document.querySelectorAll('#gold stop');
+  if (stops.length === 3) t.g.forEach((c, i) => stops[i].setAttribute('stop-color', c));
+}
+
+const swatches = cur => Object.entries(THEMES).map(([k, t]) => `<button class="swatch ${k === cur ? 'on' : ''}" data-theme="${k}" style="--sw:linear-gradient(135deg, ${t.g[0]}, ${t.g[1]} 50%, ${t.g[2]})" aria-label="${t.label}"><i></i><span>${t.label}</span></button>`).join('');
+const tasteChips = sel => TASTES.map(([k, l]) => `<button class="chip taste ${sel.includes(k) ? 'on' : ''}" data-taste="${k}">${l}</button>`).join('');
+
+// ---------- Accueil de bienvenue (premier lancement) ----------
+function onboarding() {
+  const box = document.createElement('div');
+  box.className = 'onb';
+  const st = { step: 0, first: S.settings.name || '', last: S.settings.lastName || '', theme: S.settings.theme || 'or', style: S.settings.style || 'maison', tastes: [...(S.settings.tastes || [])] };
+  const draw = () => {
+    const steps = [
+      `<div class="onb-logo"><svg><use href="#i-logo"/></svg></div>
+       <h1>Bienvenue</h1><p>Ton app de musique perso : sans pub ajoutée, avec tes radios, tes sons, tes infos et ton assistant. On la règle pour toi en 30 secondes.</p>
+       <label>Ton prénom<input id="onb-first" value="${esc(st.first)}" maxlength="24" autocomplete="given-name" placeholder="Ton prénom"></label>
+       <label>Ton nom <small>(facultatif)</small><input id="onb-last" value="${esc(st.last)}" maxlength="30" autocomplete="family-name" placeholder="Ton nom"></label>`,
+      `<h1>Ta couleur</h1><p>Elle habille toute l'app : boutons, logo, lecteur.</p>
+       <div class="swatches">${swatches(st.theme)}</div>
+       <h2>Ton style</h2>
+       <div class="style-pick">
+         <button class="style-opt ${st.style === 'maison' ? 'on' : ''}" data-style="maison"><b class="serif">Élégant</b><small>Titres raffinés, esprit « Maison »</small></button>
+         <button class="style-opt ${st.style === 'moderne' ? 'on' : ''}" data-style="moderne"><b>Moderne</b><small>Épuré, tout en simplicité</small></button>
+       </div>`,
+      `<h1>Tu écoutes quoi ?</h1><p>Choisis tes styles : l'assistant et l'accueil s'en servent pour te proposer des sons.</p>
+       <div class="chips wrap">${tasteChips(st.tastes)}</div>`,
+    ];
+    const name = st.first.trim();
+    box.innerHTML = `<div class="onb-in">
+      <div class="onb-dots">${steps.map((_, i) => `<i class="${i === st.step ? 'on' : ''}"></i>`).join('')}</div>
+      <div class="onb-step">${steps[st.step]}</div>
+      <div class="onb-preview">${st.step ? `<small>Ton app s'appellera</small><b>${esc(name ? 'Maison ' + name.charAt(0).toUpperCase() + name.slice(1) : 'Maison')}</b>` : ''}</div>
+      <div class="onb-btns">${st.step ? '<button class="btn ghost" data-onb="back">Retour</button>' : ''}<button class="btn primary" data-onb="next">${st.step === steps.length - 1 ? 'C\'est parti' : 'Continuer'}</button></div>
+    </div>`;
+    const f = box.querySelector('#onb-first');
+    if (f) { f.addEventListener('input', () => { st.first = f.value; }); setTimeout(() => f.focus(), 350); }
+    box.querySelector('#onb-last')?.addEventListener('input', e => { st.last = e.target.value; });
+  };
+  box.addEventListener('click', e => {
+    const sw = e.target.closest('[data-theme]');
+    if (sw) { st.theme = sw.dataset.theme; S.settings.theme = st.theme; applyTheme(); draw(); return; }
+    const sy = e.target.closest('[data-style]');
+    if (sy) { st.style = sy.dataset.style; S.settings.style = st.style; applyTheme(); draw(); return; }
+    const tc = e.target.closest('[data-taste]');
+    if (tc) { const k = tc.dataset.taste; st.tastes = st.tastes.includes(k) ? st.tastes.filter(x => x !== k) : [...st.tastes, k]; tc.classList.toggle('on'); return; }
+    const b = e.target.closest('[data-onb]');
+    if (!b) return;
+    if (b.dataset.onb === 'back') { st.step--; draw(); return; }
+    if (st.step === 0 && !st.first.trim()) { box.querySelector('#onb-first')?.classList.add('shake'); toast('Dis-moi ton prénom 🙂'); return; }
+    if (st.step < 2) { st.step++; draw(); return; }
+    Object.assign(S.settings, { name: st.first.trim().replace(/^./, c => c.toUpperCase()), lastName: st.last.trim(), theme: st.theme, style: st.style, tastes: st.tastes, onboarded: true, appName: '' });
+    saveSettings(); applyTheme();
+    box.classList.add('out');
+    setTimeout(() => box.remove(), 500);
+    render(true);
+    toast(`Bienvenue dans ta Maison, ${S.settings.name} ✦`);
+  });
+  draw();
+  document.body.appendChild(box);
+  requestAnimationFrame(() => box.classList.add('open'));
+}
+
+// ---------- Section Réglages « Personnalisation » ----------
+function persoSettings() {
+  return `<section class="set-group"><h3>Personnalisation</h3>
+    <div class="set-item col perso">
+      <div class="perso-row"><label>Prénom<input class="set-input wide" id="set-name" value="${esc(S.settings.name)}" maxlength="24"></label><label>Nom<input class="set-input wide" id="set-last" value="${esc(S.settings.lastName || '')}" maxlength="30"></label></div>
+      <label>Nom de l'app<input class="set-input wide" id="set-app" value="${esc(S.settings.appName || '')}" maxlength="30" placeholder="${esc(S.settings.name ? 'Maison ' + S.settings.name : 'Maison')}"></label>
+      <b class="perso-h">Couleur</b><div class="swatches">${swatches(S.settings.theme || 'or')}</div>
+      <b class="perso-h">Style</b>
+      <div class="style-pick">
+        <button class="style-opt ${S.settings.style !== 'moderne' ? 'on' : ''}" data-style="maison"><b class="serif">Élégant</b><small>Esprit « Maison »</small></button>
+        <button class="style-opt ${S.settings.style === 'moderne' ? 'on' : ''}" data-style="moderne"><b>Moderne</b><small>Épuré</small></button>
+      </div>
+      <b class="perso-h">Tes styles de musique</b><div class="chips wrap">${tasteChips(S.settings.tastes || [])}</div>
+      <button class="btn ghost sm" data-act="redo-onb">Revoir l'accueil de bienvenue</button>
+    </div></section>`;
+}
+function bindPerso(view) {
+  const save = () => { saveSettings(); applyTheme(); };
+  $('#set-name', view).addEventListener('change', e => { S.settings.name = e.target.value.trim(); save(); $('#set-app', view).placeholder = S.settings.name ? 'Maison ' + S.settings.name : 'Maison'; toast('Enchanté, ' + (S.settings.name || 'toi') + ' ✦'); });
+  $('#set-last', view).addEventListener('change', e => { S.settings.lastName = e.target.value.trim(); save(); });
+  $('#set-app', view).addEventListener('change', e => { S.settings.appName = e.target.value.trim(); save(); toast('Ton app s\'appelle maintenant « ' + brandName() + ' »'); });
+  view.querySelector('.perso').addEventListener('click', e => {
+    const sw = e.target.closest('[data-theme]');
+    if (sw) { S.settings.theme = sw.dataset.theme; save(); view.querySelectorAll('.perso .swatch').forEach(x => x.classList.toggle('on', x === sw)); return; }
+    const sy = e.target.closest('[data-style]');
+    if (sy) { S.settings.style = sy.dataset.style; save(); view.querySelectorAll('.perso .style-opt').forEach(x => x.classList.toggle('on', x === sy)); return; }
+    const tc = e.target.closest('[data-taste]');
+    if (tc) { const k = tc.dataset.taste; const tl = S.settings.tastes || []; S.settings.tastes = tl.includes(k) ? tl.filter(x => x !== k) : [...tl, k]; tc.classList.toggle('on'); save(); }
+  });
+}
+
+// Lance un de tes styles préférés (accueil et demandes vagues)
+async function playTaste(key) {
+  const g = GENRES.find(x => x[0] === key);
+  if (!g) return null;
+  const [label, , tag, ytq] = g;
+  const lib = allTracks().filter(t => t.genre && norm(t.genre).includes(norm(label).split(' ')[0]));
+  if (lib.length >= 5) { playIds(lib.map(t => t.id), 0, { context: { label }, shuffle: true }); return `Je lance ${label} de ta bibliothèque.`; }
+  const name = TASTES.find(x => x[0] === key)?.[1] || label;
+  const r = await playYtQuery(ytq, name);
+  if (r) return r;
+  try { const list = await Src.radioByTag(tag, 5); if (list.length) { const t = remoteTrack(list[0], 'radio'); playIds([t.id], 0, { context: { label: 'Radio ' + name } }); return `Je lance une radio ${name} : ${t.title}.`; } } catch { /* rien */ }
+  return null;
+}
+
+// ======================================================================
+// Bibliothèque utile : récap, historique, playlists, radios, épisodes
+// ======================================================================
+function viewLibrary(params) {
+  if (params.get('f')) return viewLibraryList(params);
+  const st = AI.listenStats(S.tracks, 7);
+  const lk = liked();
+  const pls = [...S.playlists.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  const radios = savedRadios();
+  const eps = [...S.tracks.values()].filter(t => t.source === 'podcast' && t.saved);
+  const local = [...S.tracks.values()].filter(t => !t.source);
+  const histCount = [...S.tracks.values()].filter(t => t.lastPlayed).length;
+  const recap = st.count
+    ? `<section class="recap">
+        <small>Ta semaine</small>
+        <div class="recap-nums"><div><b>${st.minutes}</b><span>min écoutées</span></div><div><b>${st.count}</b><span>écoutes</span></div><div><b>${lk.length}</b><span>likés</span></div></div>
+        ${st.topArtists.length ? `<p>Ton top : <b>${st.topArtists.slice(0, 3).map(esc).join('</b>, <b>')}</b></p>` : ''}
+      </section>`
+    : `<section class="recap empty-recap"><small>Ta semaine</small><p>Écoute quelques sons : ton récap (minutes, top artistes) apparaîtra ici.</p></section>`;
+  const link = (href, cov, title, sub) => `<a class="lib-link" href="${href}">${cov}<div><b>${esc(title)}</b><small>${esc(sub)}</small></div>${icon('back', 'chev')}</a>`;
+  const plCards = pls.map(p => `<a class="pl-card" href="#/playlist/${p.id}">${playlistCover(p)}<b>${esc(p.name)}</b><small>${plural(p.trackIds.length, 'titre')}</small></a>`);
+  const rk = registerList('lib-radios', radios.map(t => t.id), 'Mes radios');
+  const ek = registerList('lib-eps', eps.map(t => t.id), 'Mes épisodes');
+  return `<header class="page-head"><h1>Bibliothèque</h1>
+      <div class="head-btns"><button class="ib" data-act="lib-add" aria-label="Ajouter">${icon('plus')}</button></div></header>
+    ${recap}
+    <div class="lib-links">
+      ${link('#/liked', likedCover(), 'Titres likés', plural(lk.length, 'titre'))}
+      ${link('#/history', `<div class="cv st-art search-art">${icon('timer')}</div>`, 'Historique', histCount ? `${plural(histCount, 'son')} écouté${histCount > 1 ? 's' : ''}` : 'Rien pour l\'instant')}
+      ${local.length ? link('#/library?f=tracks', `<div class="cv st-art search-art">${icon('note')}</div>`, 'Sur ton téléphone', `${plural(local.length, 'fichier')} · hors ligne`) : ''}
+      ${local.length ? link('#/library?f=artists', `<div class="cv st-art search-art">${icon('user')}</div>`, 'Artistes et albums', `${plural(artists().size, 'artiste')}`) : ''}
+    </div>
+    <div class="shelf-head lib-h"><h2>Tes playlists</h2></div>
+    <div class="pl-grid">${plCards.join('')}<button class="pl-card pl-new" data-act="new-playlist"><div class="cv">${icon('plus')}</div><b>Nouvelle playlist</b><small>ou demande-la au Concierge</small></button></div>
+    ${radios.length ? `<div class="shelf-head lib-h"><h2>Tes radios</h2></div><div class="list">${radios.map((t, i) => onlineRow(t, i, rk)).join('')}</div>` : `<p class="lib-hint">${icon('heart')} Touche le cœur pendant une radio pour la garder ici.</p>`}
+    ${eps.length ? `<div class="shelf-head lib-h"><h2>Tes épisodes</h2></div><div class="list">${eps.map((t, i) => onlineRow(t, i, ek)).join('')}</div>` : ''}
+    ${local.length ? '' : `<button class="lib-item import-row" data-act="import"><div class="cv st-art search-art">${icon('import')}</div><div><b>Importer tes fichiers</b><small>MP3, M4A… pour écouter hors ligne, sans pub</small></div></button>`}`;
+}
+
+function viewHistory() {
+  const ts = [...S.tracks.values()].filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 150);
+  const key = registerList('history', ts.map(t => t.id), 'Historique');
+  const day = d => { const x = new Date(d), now = new Date(); const diff = Math.floor((new Date(now.toDateString()) - new Date(x.toDateString())) / 864e5); return diff === 0 ? 'Aujourd\'hui' : diff === 1 ? 'Hier' : x.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }); };
+  let last = '', rows = '';
+  ts.forEach((t, i) => {
+    const d = day(t.lastPlayed);
+    if (d !== last) { rows += `<h3 class="hist-day">${esc(d)}</h3>`; last = d; }
+    rows += t.source ? onlineRow(t, i, key) : trackRow(t, i, key);
+  });
+  return `<div class="coll settings" style="--tint:#1c1a17">
+    <div class="topbar show"><button class="ib" data-act="back" aria-label="Retour">${icon('back')}</button><b class="topbar-title" style="display:block">Historique</b></div>
+    <div class="set-wrap">${ts.length ? `<div class="list">${rows}</div>` : '<div class="no-res"><b>Rien écouté pour l\'instant</b><p>Tes écoutes apparaîtront ici.</p></div>'}</div></div>`;
+}
+
+// ---------- Carte « héros » de l'accueil : ce qui joue, ce qu'on reprend, ou un de tes styles ----------
+function homeHero() {
+  const cur = player.current;
+  const h = ctxHist()[0];
+  const tastes = S.settings.tastes || [];
+  let cov, kicker, title, sub, act;
+  if (cur) {
+    cov = coverURL(cur.coverId) ? trackCover(cur) : cur.source === 'radio' ? stationArt(cur.title) : trackCover(cur);
+    kicker = player.playing ? 'En cours' : 'En pause'; title = cur.title; sub = cur.source === 'radio' ? 'En direct' : artistOf(cur);
+    act = `data-act="hero-toggle"`;
+  } else if (h) {
+    cov = h.kind === 'radio' ? stationArt(h.label) : cover({ coverId: h.coverId, seed: h.label, kind: 'playlist' });
+    kicker = 'Reprendre'; title = h.label; sub = h.kind === 'radio' ? 'Radio en direct' : 'Là où tu t\'es arrêté';
+    act = h.route ? `data-act="hero-route" data-route="${esc(h.route)}"` : `data-act="ctx-play" data-k="${esc(h.key)}"`;
+  } else if (tastes.length) {
+    const k = tastes[new Date().getHours() % tastes.length];
+    const name = TASTES.find(x => x[0] === k)?.[1] || k;
+    cov = `<div class="cv st-art" style="--h:${placeholderHue(k)}"><span>${esc(name.slice(0, 2).toUpperCase())}</span></div>`;
+    kicker = 'Pour toi'; title = `Ta sélection ${name}`; sub = 'Lancée selon tes goûts';
+    act = `data-act="taste-play" data-k="${esc(k)}"`;
+  } else return '';
+  const playing = cur && player.playing;
+  return `<button class="hero" ${act} style="--h:${placeholderHue(title)}">
+    <div class="hero-bg">${cov}</div>
+    <div class="hero-art">${cov}</div>
+    <div class="hero-txt"><small>${esc(kicker)}</small><b>${esc(title)}</b><span>${esc(sub)}</span></div>
+    <span class="hero-btn">${icon(playing ? 'pause' : 'play')}</span>
+  </button>`;
+}
 // ======================================================================
 // Vues
 // ======================================================================
@@ -2336,15 +2560,24 @@ function stationCard(name, i = 0) {
 function viewHome() {
   const f = S.settings.homeFilter || 'all';
   const chips = [['all', 'Tout'], ['music', 'Musique'], ['radio', 'Radios'], ['info', 'Infos']];
-  const head = `<header class="page-head home-head"><h1 class="home-h">${greeting()}</h1>
+  const head = `<div class="brand-line home-brand"><svg><use href="#i-logo"/></svg><span>${esc(brandName().toUpperCase())}</span></div>
+    <header class="page-head home-head"><h1 class="home-h">${greeting()}</h1>
       <div class="head-btns"><a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a></div></header>
     <div class="home-chips">${chips.map(([k, l]) => `<button class="chip ${k === f ? 'on' : ''}" data-act="home-f" data-f="${k}">${l}</button>`).join('')}</div>`;
   if (f === 'radio') return head + homeRadios();
   if (f === 'info') return head + `<div class="home-info">${newsModule(false)}</div>`;
   const tracks = allTracks();
-  if (f === 'all' && !tracks.length && !ctxHist().length) return head + homeEmpty();
+  if (f === 'all' && !tracks.length && !ctxHist().length) return head + homeHero() + homeEmpty() + homeTastes(f);
   const seen = new Set();
-  return head + homeQuick(f, seen) + homeShelves(f, seen);
+  return head + (f === 'all' ? homeHero() : '') + homeQuick(f, seen) + homeShelves(f, seen) + homeTastes(f);
+}
+
+// Tes styles préférés en raccourcis (lancés sur YouTube ou en radio)
+function homeTastes(f) {
+  const tl = S.settings.tastes || [];
+  if (!tl.length || f === 'radio' || f === 'info') return '';
+  const cards = tl.map(k => { const name = TASTES.find(x => x[0] === k)?.[1] || k; return `<button class="card" data-act="taste-play" data-k="${esc(k)}"><div class="card-art"><div class="cv st-art" style="--h:${placeholderHue(k)}"><span>${esc(name)}</span></div></div><b>${esc(name)}</b><small>Un appui pour lancer</small></button>`; });
+  return shelf('Tes styles', cards);
 }
 
 function homeQuick(f, seen) {
@@ -2469,7 +2702,7 @@ function searchResults(q) {
     ${shelf('Playlists', pl.map(playlistCard))}`;
 }
 
-function viewLibrary(params) {
+function viewLibraryList(params) {
   const f = params.get('f') || S.settings.libFilter;
   S.settings.libFilter = f; saveSettings();
   const sort = S.settings.libSort;
@@ -2601,9 +2834,7 @@ function viewSettings() {
       ${isIOS ? '' : `<input type="range" class="range" id="cf" min="0" max="12" step="1" value="${S.settings.crossfade}">`}
       ${isIOS ? '' : `<label class="set-item toggle"><div><b>Visualiseur animé</b><small>Ondes autour de la pochette qui suivent la musique.</small></div><input type="checkbox" id="viz" ${S.settings.visualizer ? 'checked' : ''}><span class="sw"></span></label>`}
     </section>
-    <section class="set-group"><h3>Toi</h3>
-      <label class="set-item"><div><b>Ton prénom</b><small>Pour que l'app te parle à toi</small></div><input class="set-input" id="set-name" value="${esc(S.settings.name)}" maxlength="30" autocomplete="given-name"></label>
-    </section>
+    ${persoSettings()}
     <section class="set-group"><h3>YouTube</h3>
       <label class="set-item col"><div><b>Clé YouTube (gratuite)</b><small>Pour chercher sur YouTube et importer tes playlists. Sans clé, tu peux déjà coller un lien YouTube dans la recherche.</small></div><input class="set-input wide" id="set-yt" type="password" value="${esc(S.settings.ytKey)}" placeholder="AIza…" autocomplete="off"></label>
       <details class="set-help"><summary>Comment obtenir ma clé (5 min)</summary><ol>
@@ -2643,11 +2874,11 @@ function viewSettings() {
       <div class="set-text">
         <p><b>Android (Chrome)</b> : menu ⋮ → « Installer l'application » ou « Ajouter à l'écran d'accueil ».</p>
         <p><b>iPhone (Safari)</b> : bouton Partager → « Sur l'écran d'accueil ».</p>
-        <p>Une fois installée, Maison Chahyn s'ouvre en plein écran et fonctionne sans connexion.</p>
+        <p>Une fois installée, ${esc(brandName())} s'ouvre en plein écran et fonctionne sans connexion.</p>
         ${S.installPrompt ? `<button class="btn primary" data-act="install">${icon('import')} Installer maintenant</button>` : ''}
       </div>
     </section>
-    <p class="about">Maison Chahyn · ta maison de la musique · aucune pub, aucun pistage. Ta musique ne quitte jamais ton téléphone.</p>
+    <p class="about">${esc(brandName())} · ta maison de la musique · aucune pub, aucun pistage. Ta musique ne quitte jamais ton téléphone.</p>
     </div></div>`;
 }
 
@@ -2694,6 +2925,7 @@ function render(keepScroll = false) {
     case 'liked': html = viewLiked(); break;
     case 'all': html = viewAll(); break;
     case 'genre': html = viewGenre(r.arg); break;
+    case 'history': html = viewHistory(); break;
     case 'settings': html = viewSettings(); break;
     default: html = viewHome();
   }
@@ -2744,7 +2976,7 @@ function afterRender(view, r) {
   }
   if (r.name === 'ai') afterAI(view);
   if (r.name === 'settings') {
-    $('#set-name', view).addEventListener('change', e => { S.settings.name = e.target.value.trim(); saveSettings(); toast('Enchanté, ' + (S.settings.name || 'toi') + ' ✦'); });
+    bindPerso(view);
     $('#set-yt', view).addEventListener('change', e => { S.settings.ytKey = e.target.value.trim(); saveSettings(); toast(S.settings.ytKey ? 'Clé YouTube enregistrée ✦' : 'Clé supprimée'); });
     $('#set-vname', view)?.addEventListener('change', e => { S.settings.voiceName = e.target.value; saveSettings(); Voice.setVoicePrefs({ name: S.settings.voiceName }); });
     const vr = $('#set-vrate', view);
@@ -2861,6 +3093,11 @@ document.addEventListener('click', e => {
       case 'pc-show': return showPodcast(act.dataset.id);
       case 'sound': return soundSheet();
       case 'voice-test': return Voice.speak(`Bonjour ${S.settings.name || ''}, je suis le Concierge de ta Maison.`);
+      case 'redo-onb': return onboarding();
+      case 'lib-add': return openSheet(`<h3 class="sheet-title">Ajouter</h3>${sheetItems([{ id: 'pl', icon: 'list-add', label: 'Nouvelle playlist' }, { id: 'imp', icon: 'import', label: 'Importer des fichiers du téléphone' }])}`, { pl: () => newPlaylistSheet(), imp: () => { closeSheet(); importSheet(); } });
+      case 'hero-toggle': player.toggle(); setTimeout(() => render(true), 120); return;
+      case 'hero-route': S.pendingFwd = true; return goto(act.dataset.route);
+      case 'taste-play': { const b = act; b.classList.add('loading'); playTaste(act.dataset.k).then(r => { b.classList.remove('loading'); if (r) toast(r); else toast('Ajoute ta clé YouTube pour ça, ou essaie les radios'); }); return; }
       case 'home-f': S.settings.homeFilter = act.dataset.f; saveSettings(); return render(true);
       case 'ctx-play': { const h = ctxHist().find(x => x.key === act.dataset.k); if (h) playIds(h.ids.filter(id => S.tracks.has(id)), 0, { context: { label: h.label } }); return; }
       case 'news-flash': return playNewsFlash(+act.dataset.i || 0, act);
@@ -2953,7 +3190,9 @@ async function boot() {
     toast('Erreur de chargement de la bibliothèque');
   }
   bump();
+  applyTheme();
   render();
+  if (!S.settings.onboarded) setTimeout(onboarding, 1300);
   player.restore(new Set(S.tracks.keys()));
   updateNowPlaying();
   updateModes();

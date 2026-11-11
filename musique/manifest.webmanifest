@@ -1,7 +1,7 @@
 {
-  "name": "Maison Chahyn",
-  "short_name": "Maison Chahyn",
-  "description": "Ta maison de la musique. Sans pub, hors connexion, avec paroles et IA.",
+  "name": "Maison",
+  "short_name": "Maison",
+  "description": "Ta maison de la musique : radios, sons, infos et assistant, sans pub ajoutée.",
   "lang": "fr",
   "start_url": "./",
   "scope": "./",

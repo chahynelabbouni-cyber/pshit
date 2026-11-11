@@ -18,6 +18,22 @@ export function logListen(id, { skipped = false, ratio = 1 } = {}) {
   if (history.length > 3200) history = history.slice(-3000);
   save();
 }
+// Récap d'écoute sur N jours : écoutes, minutes, artistes les plus écoutés
+export function listenStats(tracksMap, days = 7) {
+  const since = Date.now() - days * 864e5;
+  let count = 0, sec = 0;
+  const art = new Map();
+  for (const e of history) {
+    if (e.at < since || e.s) continue;
+    const t = tracksMap.get(e.id);
+    count++;
+    if (t) {
+      sec += (t.duration || 0) * (e.r || 1);
+      if (t.artist && t.source !== 'radio') art.set(t.artist, (art.get(t.artist) || 0) + 1);
+    }
+  }
+  return { count, minutes: Math.round(sec / 60), topArtists: [...art.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]) };
+}
 export function clearHistory() { history = []; save(); }
 export const historySize = () => history.length;
 
@@ -279,11 +295,11 @@ const SCHEMA = {
   additionalProperties: false,
   required: ['reply', 'playlist_name', 'playlist_description', 'track_numbers', 'play_now'],
   properties: {
-    reply: { type: 'string', description: 'Réponse courte et chaleureuse à Chahyn, en français.' },
+    reply: { type: 'string', description: 'Réponse courte et chaleureuse à l\'utilisateur, en français.' },
     playlist_name: { type: 'string', description: 'Nom stylé de la playlist (vide si aucune playlist demandée).' },
     playlist_description: { type: 'string' },
     track_numbers: { type: 'array', items: { type: 'integer' }, description: 'Numéros des titres du catalogue, dans l\'ordre de lecture.' },
-    play_now: { type: 'boolean', description: 'true si Chahyn demande de lancer la lecture tout de suite.' },
+    play_now: { type: 'boolean', description: 'true si l\'utilisateur demande de lancer la lecture tout de suite.' },
   },
 };
 
@@ -308,7 +324,7 @@ export async function askClaude(apiKey, userText, tracks, chat = []) {
   const P = profile(tracks);
   const now = new Date();
   const system = [
-    'Tu es « le Concierge », l\'assistant musical intégré à l\'application Maison Chahyn, le lecteur de musique personnel de Chahyn.',
+    'Tu es « le Concierge », l\'assistant musical intégré au lecteur de musique personnel de l\'utilisateur.',
     'Tu connais toute sa bibliothèque (ci-dessous) et ses habitudes d\'écoute. Tu composes des playlists uniquement avec les titres du catalogue, en citant leurs numéros.',
     'Pense ambiance, énergie (E0 calme → E10 intense), tempo, genre et goûts (« aime » = souvent écouté, « heure » = écouté à cette heure-ci, ♥ = liké).',
     'Ordonne les titres pour un bel enchaînement. Vise environ 45-60 minutes sauf demande contraire. Si la demande n\'est pas une playlist, réponds simplement et laisse track_numbers vide.',
@@ -368,7 +384,7 @@ export async function runAgent(apiKey, userText, { tracks, chat = [], context = 
   const P = profile(tracks);
   const now = new Date();
   const system = [
-    'Tu es « le Concierge », l\'assistant intégré à Maison Chahyn, l\'application de musique personnelle de Chahyn. Tu parles français, avec élégance et complicité, en une ou deux phrases courtes (ta réponse est souvent lue à voix haute).',
+    'Tu es « le Concierge », l\'assistant intégré à l\'application de musique personnelle de l\'utilisateur (son prénom et le nom de l\'app sont dans le contexte). Tu parles français, avec élégance et complicité, en une ou deux phrases courtes (ta réponse est souvent lue à voix haute).',
     'Tu as la main sur toute l\'application grâce à tes outils : lancer n\'importe quel son (bibliothèque, YouTube, radios, podcasts), contrôler la lecture, le volume, l\'égaliseur, le minuteur, les infos, la file d\'attente, les playlists et la navigation. Agis directement avec les outils plutôt que de demander confirmation, sauf si la demande est vraiment ambiguë.',
     'Tu connais aussi la musique en général : tu peux parler des artistes, des albums, de l\'histoire d\'un morceau, recommander des sons similaires et les lancer.',
     'Pour un style (« de la musique classique », « du rap US des années 90 »), choisis toi-même de bons titres ou artistes et lance-les avec play (source youtube ou auto). Pour une ambiance, compose une playlist depuis le catalogue si la bibliothèque convient, sinon utilise YouTube ou une radio.',
