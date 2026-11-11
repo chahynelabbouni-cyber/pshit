@@ -60,7 +60,9 @@ function blank() {
     tombstones: [], // {gid, calId} suppressions à reporter sur Google
     chat: [],     // historique de l'assistant
     settings: {
-      name: 'Chahyn',
+      name: '',
+      lastName: '',
+      profile: '',
       about: '',
       theme: 'dark',
       hideDups: true,
@@ -79,7 +81,7 @@ function blank() {
       googleAddPrompt: true,
       meSeg: 'goals',
       // personnalisation
-      avatar: '🥊',
+      avatar: '🙂',
       palette: 'or',
       accent: '',
       textSize: 1,
@@ -90,11 +92,7 @@ function blank() {
       rules: [],
       subjectColors: {},
       travelMin: 0,
-      goals: [
-        { id: 'g-boxe', emoji: '🥊', label: 'Boxe', kind: 'count', kw: 'boxe', cat: '', target: 3 },
-        { id: 'g-rev', emoji: '🧠', label: 'Révisions', kind: 'hours', kw: '', cat: 'revision', target: 5 },
-        { id: 'g-dodo', emoji: '😴', label: 'Couché avant minuit', kind: 'check', kw: '', cat: '', target: 5 },
-      ],
+      goals: [],
       focusRun: null,
     },
     focus: [],      // séances de focus terminées {start, end, subject}

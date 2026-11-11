@@ -5,7 +5,7 @@ import {
 } from './store.js';
 import {
   DAY, MIN, startOfDay, addDays, sameDay, startOfWeek, startOfMonth, dayDiff, pad, hm, hm2, ymd, fromYmd,
-  cap, fmtDay, fmtDayShort, relDay, fmtDuration, countdown, JOURS_C, MOIS,
+  cap, fmtDay, fmtDayShort, relDay, fmtDuration, countdown, JOURS_C, MOIS, JOURS, MOIS_C,
 } from './dates.js';
 import { localAssistant, askClaude, revisionPlan, revisionTitle, spoken, readSchedulePhoto, testClaudeKey } from './ai.js';
 import {
@@ -21,7 +21,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const icon = id => `<svg><use href="#i-${id}"/></svg>`;
 const set = () => S().settings;
 const catOf = k => CATS[k] || CATS.perso;
-const colEv = e => e.color || catOf(e.cat).color;
+// chaque matière a sa propre couleur (comme dans l'agenda du téléphone) ; sinon la couleur de la catégorie
+const colEv = e => { if (e.color) return e.color; if (e.cat === 'cours' || e.cat === 'revision') { const sj = subjectOf(e); if (sj) return subjectColor(sj.key); } return catOf(e.cat).color; };
 const col = k => catOf(k).color;
 
 let tab = 'today';
@@ -46,7 +47,7 @@ const PALETTES = {
   lavande: { name: 'Lavande',    dark: false, bg: '#f5f3fb', bg2: '#ffffff', bg3: '#ebe7f7', bg4: '#ddd6f1', text: '#151225', muted: '#575273', dim: '#9590ad', accent: '#6d4dff' },
 };
 const ACCENTS = ['', '#d9b26a', '#ff8fb8', '#7aa2ff', '#3ee0a8', '#c47dff', '#ff9f43', '#ff5d6c', '#38c6f4'];
-const AVATARS = ['🥊', '🦁', '🌙', '⭐', '🔥', '🦋', '🌸', '👑', '🎧', '📚', '🐺', '🌊'];
+const AVATARS = ['🙂', '🥊', '🦁', '🌙', '⭐', '🔥', '🦋', '🌸', '👑', '🎧', '📚', '🐺', '🌊', '⚽', '🎨', '🐱'];
 
 function applyLook() {
   const s = set();
@@ -79,7 +80,8 @@ function go(t) {
   tab = t;
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
   document.querySelectorAll('.view').forEach(v => { v.hidden = v.id !== 'v-' + t; });
-  $('#fab').hidden = !['cal', 'todo', 'notes', 'rem'].includes(t);
+  $('#fab').hidden = !['todo', 'notes', 'rem'].includes(t);
+  calScrolled = false;
   $('#ai-bar').hidden = t !== 'ai';
   $('#btn-back').hidden = ROOT_TABS.includes(t);
   $('#btn-me').hidden = !ROOT_TABS.includes(t);
@@ -384,7 +386,7 @@ function renderToday() {
     ['me:goals', '🎯', 'Objectifs', g ? `${s.goals[0].emoji} ${g.done}/${s.goals[0].target} cette semaine` : 'À définir'],
   ];
   $('#v-today').innerHTML = `
-    ${!S().events.length ? `<div class="hero"><div class="ttl">Ton agenda est vide</div><div class="meta">Ouvre le lien d'import reçu, ou dis-moi quoi ajouter.</div></div>` :
+    ${!S().events.length ? `<div class="hero"><div class="ttl">Ton agenda est vide</div><div class="meta">Ajoute ton emploi du temps en 1 minute, ou dis-moi quoi programmer.</div><div class="actions"><button class="btn gold" data-a="timetable">📅 Ajouter mes cours</button></div></div>` :
       n ? `<button class="next-card" style="--c:${colEv(n.e)}" data-a="ev" data-id="${n.e.id}"><span class="nc-lbl">${n.lbl}</span><span class="nc-ttl">${esc(shortTitle(n.e))}</span>${n.e.location ? `<span class="nc-loc">${esc(n.e.location)}</span>` : ''}</button>`
         : `<div class="next-card"><span class="nc-ttl">Rien de prévu 🌿</span></div>`}
     <button class="talk" data-a="voice"><span class="talk-orb">${icon('mic')}</span><span><b>Parle-moi</b><small>« Qu'est-ce que j'ai demain ? »</small></span></button>
@@ -427,24 +429,87 @@ function calTitle(v) {
 function renderCal() {
   const v = calView();
   if (v === 'month' && calDate.getMonth() !== selDay.getMonth()) calDate = startOfMonth(selDay);
-  header(cap(fmtDay(new Date())), cap(`${MOIS[(v === 'month' ? calDate : selDay).getMonth()]} ${(v === 'month' ? calDate : selDay).getFullYear()}`));
-  const list = eventsOfDay(selDay);
-  const L = dayLoad(selDay);
+  const ref = v === 'month' ? calDate : selDay;
+  header(cap(fmtDay(new Date())), cap(`${MOIS[ref.getMonth()]}${ref.getFullYear() !== new Date().getFullYear() ? ' ' + ref.getFullYear() : ''}`));
   const isToday = sameDay(selDay, new Date());
-  const rel = relDay(selDay);
+  let body = '';
+  if (v === 'day') {
+    const allDay = eventsOfDay(selDay).filter(e => e.allDay);
+    body = weekStrip() + `
+      <div class="sd-head" id="swipe-day"><b>${selDay.getDate()}</b><span>${JOURS[selDay.getDay()]}</span>${isToday ? '<em>aujourd\'hui</em>' : relDay(selDay) === 'demain' ? '<em>demain</em>' : ''}</div>
+      ${allDay.length ? `<div class="sd-allday">${allDay.map(e => `<button class="ad-chip" style="--c:${colEv(e)}" data-a="ev" data-id="${e.id}">${esc(shortTitle(e))}</button>`).join('')}</div>` : ''}
+      ${timeGrid([selDay])}`;
+  } else if (v === 'week') {
+    const a = startOfWeek(selDay);
+    const days = [...Array(7)].map((_, i) => addDays(a, i));
+    body = `<div class="wk-nav"><button class="ws-nav" data-a="cal-prev" aria-label="Semaine précédente">${icon('left')}</button><b>${calTitle('week')}</b><button class="ws-nav" data-a="cal-next" aria-label="Semaine suivante">${icon('right')}</button></div>
+      <div class="wk-head" id="swipe">${days.map(d => {
+        const ad = eventsOfDay(d).filter(e => e.allDay);
+        return `<button class="wk-day ${sameDay(d, new Date()) ? 'today' : ''} ${d.getDay() === 0 ? 'sun' : ''}" data-a="day" data-d="${ymd(d)}">
+          <span class="wk-name">${JOURS_C[d.getDay()]}.</span><b>${d.getDate()}</b>
+          ${ad.slice(0, 3).map(e => `<i style="--c:${colEv(e)}">${esc(shortTitle(e))}</i>`).join('')}${ad.length > 3 ? `<i class="more">+${ad.length - 3}</i>` : ''}</button>`;
+      }).join('')}</div>
+      ${timeGrid(days)}`;
+  } else {
+    const list = eventsOfDay(selDay);
+    body = monthView() + `<div class="sd-head"><b>${selDay.getDate()}</b><span>${JOURS[selDay.getDay()]}</span></div><div class="day-list">${dayCards(list)}</div>`;
+  }
   $('#v-cal').innerHTML = `
     <div class="cal-top">
       <div class="seg small">${VIEWS.map(([k, l]) => `<button class="${k === v ? 'on' : ''}" data-a="view" data-v="${k}">${l}</button>`).join('')}</div>
-      ${isToday ? '' : `<button class="btn small" data-a="cal-today">Aujourd'hui</button>`}
+      ${isToday && v !== 'month' ? '' : `<button class="today-btn" data-a="cal-today" aria-label="Aujourd'hui">${new Date().getDate()}</button>`}
     </div>
-    ${v === 'month' ? monthView() : weekStrip()}
-    ${v === 'week' ? weekRows() : `<div class="day-head" id="swipe-day">
-      <div><b>${cap(['aujourd\'hui', 'demain', 'hier'].includes(rel) ? rel : fmtDay(selDay).split(' ')[0])}</b><span>${fmtDay(selDay)}</span></div>
-      <span class="day-load" style="--l:${L.c}">${list.filter(e => !e.allDay).length ? `${list.length} · ${fmtDuration(L.minutes * MIN)}` : list.length ? list.length : 'Libre'}</span>
-    </div>
-    ${S().events.length ? '' : `<div class="insight" style="--c:var(--danger)"><div class="ic">⚠️</div><div class="grow"><p><b>Ton agenda est vide sur ce téléphone.</b> Ouvre le lien d'import que tu as reçu (dans Chrome) pour récupérer tous tes événements.</p></div></div>`}
-    ${list.some(e => !e.allDay) ? `<div class="hb-wrap">${hourBar(selDay, { ticks: true })}</div>` : ''}
-    <div class="day-list">${dayCards(list)}</div>`}`;
+    ${S().events.length ? '' : `<div class="insight" style="--c:var(--danger)"><div class="ic">⚠️</div><div class="grow"><p><b>Ton agenda est vide sur ce téléphone.</b> Ajoute tes cours (Réglages → Mon emploi du temps) ou ouvre ton lien d'import.</p></div></div>`}
+    ${body}
+    <button class="add-pill" data-a="add-day">Ajouter le ${selDay.getDate()} ${MOIS_C[selDay.getMonth()]} <span>${icon('plus')}</span></button>`;
+  if (v === 'day') requestAnimationFrame(() => {
+    const target = document.querySelector('.tg-now') || document.querySelector('.tg-ev');
+    if (target && !calScrolled) { $('#main').scrollTop = Math.max(0, target.getBoundingClientRect().top + $('#main').scrollTop - 300); calScrolled = true; }
+  });
+}
+let calScrolled = false;
+
+// Grille horaire façon agenda de téléphone : une ligne par heure, blocs de couleur pleine
+function timeGrid(days) {
+  const HP = days.length === 1 ? 58 : 52;
+  const a = startOfDay(days[0]).getTime(), b = startOfDay(days[days.length - 1]).getTime() + DAY;
+  const all = eventsBetween(a, b).filter(e => !e.allDay);
+  let h0 = 8;
+  all.forEach(e => { if (e.start >= a) h0 = Math.min(h0, new Date(e.start).getHours()); });
+  const h1 = 24;
+  const now = Date.now();
+  const hours = [...Array(h1 - h0 + 1)].map((_, i) => `<span style="top:${i * HP}px">${(h0 + i) % 24}</span>`).join('');
+  const cols = days.map(d => {
+    const d0 = startOfDay(d).getTime();
+    const evs = all.filter(e => e.start < d0 + DAY && e.end > d0);
+    const blocks = layoutCols(evs).map(({ e, c, n }) => {
+      const s = Math.max(e.start, d0 + h0 * 3600000), en = Math.min(e.end, d0 + h1 * 3600000);
+      const top = (s - d0 - h0 * 3600000) / 3600000 * HP, hgt = Math.max(22, (en - s) / 3600000 * HP - 3);
+      const w = 100 / n;
+      return `<button class="tg-ev ${e.end < now ? 'past' : ''} ${days.length > 1 ? 'narrow' : ''}" style="--c:${colEv(e)};top:${top + 1}px;height:${hgt}px;left:calc(${c * w}% + 2px);width:calc(${w}% - 4px)" data-a="ev" data-id="${e.id}">
+        <b>${e.star ? '★ ' : ''}${esc(days.length > 1 ? shortTitle(e) : e.title.replace(/⚠️?\s*/g, ''))}</b>${e.location && hgt > 40 ? `<small>${esc(e.location)}</small>` : ''}${days.length === 1 && hgt > 62 ? `<small>${hm(e.start)} – ${hm(e.end)}</small>` : ''}</button>`;
+    }).join('');
+    // trous bien visibles dans la vue Jour
+    let gaps = '';
+    if (days.length === 1) {
+      const t = evs.filter(e => e.end > d0 + 8 * 3600000).sort((x, y) => x.start - y.start);
+      let last = null;
+      for (const e of t) {
+        if (last && e.start - last >= 90 * MIN) {
+          const top = (last - d0 - h0 * 3600000) / 3600000 * HP, hgt = (e.start - last) / 3600000 * HP;
+          gaps += `<button class="tg-gap" style="top:${top + 4}px;height:${hgt - 8}px" data-a="new-at" data-t="${last}">Libre ${fmtDuration(e.start - last)}</button>`;
+        }
+        last = Math.max(last || 0, e.end);
+      }
+    }
+    const nowLine = sameDay(d, new Date()) && now > d0 + h0 * 3600000 ? `<div class="tg-now" style="top:${(now - d0 - h0 * 3600000) / 3600000 * HP}px"><i></i></div>` : '';
+    return `<div class="tg-col ${sameDay(d, new Date()) ? 'today' : ''}" data-a="tslot" data-d="${ymd(d)}" data-h0="${h0}" data-hp="${HP}">${gaps}${blocks}${nowLine}</div>`;
+  }).join('');
+  const nowLbl = days.some(d => sameDay(d, new Date())) && now > startOfDay(new Date()).getTime() + h0 * 3600000 ? `<span class="tg-now-lbl" style="top:${(now - startOfDay(new Date()).getTime() - h0 * 3600000) / 3600000 * HP}px">${hm2(now).replace(':', ':')}</span>` : '';
+  return `<div class="tgrid" style="--hp:${HP}px">
+    <div class="tg-hours" style="height:${(h1 - h0) * HP}px">${hours}${nowLbl}</div>
+    <div class="tg-cols" style="grid-template-columns:repeat(${days.length},1fr);height:${(h1 - h0) * HP}px">${cols}</div>
+  </div>`;
 }
 
 function weekStrip() {
@@ -1347,32 +1412,105 @@ function addPhotoEvents() {
 }
 
 // ---------- Accueil guidé ----------
-const INTERESTS = [
-  ['brief', '☀️', 'Un résumé de ma journée'],
-  ['tomorrow', '🌙', 'Voir aussi demain'],
-  ['subjects', '📚', 'Mes cours par matière'],
-  ['goals', '🎯', 'Suivre mes objectifs (boxe, révisions…)'],
-  ['focus', '🧠', 'Un minuteur pour réviser'],
-  ['countdowns', '⌛', 'Compter les jours avant les vacances et examens'],
-  ['notes', '📌', 'Mes notes importantes'],
+const PROFILES = [['etudiant', '🎓', 'Étudiant·e'], ['lyceen', '📘', 'Lycéen·ne'], ['travail', '💼', 'Je travaille'], ['autre', '✨', 'Autre']];
+const GOAL_PRESETS = [
+  { id: 'g-sport', emoji: '🏃', label: 'Sport', kind: 'count', kw: '', cat: 'sport', target: 3, txt: 'Faire du sport 3 fois / semaine' },
+  { id: 'g-rev', emoji: '🧠', label: 'Révisions', kind: 'hours', kw: '', cat: 'revision', target: 5, txt: 'Réviser 5 h / semaine' },
+  { id: 'g-dodo', emoji: '😴', label: 'Couché avant minuit', kind: 'check', kw: '', cat: '', target: 5, txt: 'Me coucher avant minuit' },
+  { id: 'g-eau', emoji: '💧', label: 'Boire assez d\'eau', kind: 'check', kw: '', cat: '', target: 7, txt: 'Boire assez d\'eau' },
+  { id: 'g-lire', emoji: '📖', label: 'Lecture', kind: 'check', kw: '', cat: '', target: 3, txt: 'Lire 3 fois / semaine' },
+  { id: 'g-ecran', emoji: '📵', label: 'Pas d\'écran après 23h', kind: 'check', kw: '', cat: '', target: 5, txt: 'Pas d\'écran après 23h' },
 ];
-let obStep = 0;
+const OB_STEPS = 6;
+let obStep = 0, obAfter = null;
 function openOnboarding(step = 0) {
   obStep = step;
   const s = set();
-  const dots = `<div class="ob-dots">${[0, 1].map(i => `<i class="${i === step ? 'on' : ''}"></i>`).join('')}</div>`;
-  let body = '';
-  if (step === 0) body = `<div class="ob-emoji">${esc(s.avatar)}</div><h2>Salut ! Comment tu t'appelles ?</h2>
-    <input class="big-input" data-set="name" value="${esc(s.name)}" placeholder="Ton prénom">
-    <p class="muted">Choisis ton emoji :</p><div class="emoji-pick center">${AVATARS.map(a => `<button class="${s.avatar === a ? 'on' : ''}" data-a="ob-avatar" data-v="${a}">${a}</button>`).join('')}</div>`;
-  if (step === 1) body = `<h2>Ton style</h2>
-    <div class="palettes">${Object.entries(PALETTES).map(([k, p]) => `<button class="pal ${s.palette === k ? 'on' : ''}" data-a="ob-palette" data-v="${k}" style="background:${p.bg};color:${p.text};border-color:${s.palette === k ? p.accent : 'transparent'}"><i style="background:${p.accent}"></i>${p.name}</button>`).join('')}</div>
-    <p class="muted">Taille du texte :</p><div class="seg">${[[1, 'Normal'], [1.12, 'Grand'], [1.25, 'Très grand']].map(([v, l]) => `<button class="${s.textSize === v ? 'on' : ''}" data-a="ob-size" data-v="${v}">${l}</button>`).join('')}</div>`;
-  if (step === 2) body = `<h2>Sur ton écran d'accueil</h2><p class="muted">Tu auras toujours : ce qui se passe maintenant, ta journée et ce qu'il ne faut pas rater. Tu veux ajouter quoi d'autre ?</p>
-    ${INTERESTS.map(([id, e, l]) => { const on = s.homeModules.find(m => m.id === id)?.on; return `<button class="ob-opt ${on ? 'on' : ''}" data-a="ob-int" data-id="${id}"><span>${e}</span><span class="grow">${l}</span><span class="box">${on ? '✓' : ''}</span></button>`; }).join('')}
-    <p class="dim small">Tu pourras changer ça quand tu veux dans Réglages.</p>`;
+  const dots = `<div class="ob-dots">${[...Array(OB_STEPS)].map((_, i) => `<i class="${i === step ? 'on' : ''}"></i>`).join('')}</div>`;
+  let body = '', next = 'Suivant';
+  if (step === 0) {
+    body = `<div class="ob-hero"><div class="ob-logo">${icon('cal')}</div><h2>Ton agenda perso</h2>
+      <p class="muted">Ton planning, tes rappels et un assistant à qui tu parles. Tout reste sur ton téléphone.</p>
+      <ul class="ob-list"><li>📅 Ton emploi du temps, clair et coloré</li><li>🎙️ Tu parles, il programme pour toi</li><li>⏰ Des rappels pour ne rien oublier</li></ul></div>`;
+    next = 'Commencer';
+  }
+  if (step === 1) {
+    body = `<div class="ob-emoji">${esc(s.avatar)}</div><h2>Comment tu t'appelles ?</h2>
+      <input class="big-input" data-set="name" value="${esc(s.name)}" placeholder="Ton prénom" autocomplete="given-name">
+      <input class="big-input" style="margin-top:8px;font-size:17px !important" data-set="lastName" value="${esc(s.lastName || '')}" placeholder="Ton nom (facultatif)" autocomplete="family-name">
+      <p class="muted">Ton emoji :</p><div class="emoji-pick center">${AVATARS.map(a => `<button class="${s.avatar === a ? 'on' : ''}" data-a="ob-avatar" data-v="${a}">${a}</button>`).join('')}</div>`;
+  }
+  if (step === 2) {
+    body = `<h2>Ton style</h2>
+      <div class="palettes big">${Object.entries(PALETTES).map(([k, p]) => `<button class="pal-prev ${s.palette === k ? 'on' : ''}" data-a="ob-palette" data-v="${k}" style="--pb:${p.bg};--pb2:${p.bg2};--pt:${p.text};--pa:${p.accent}"><span class="pp-bar"></span><span class="pp-card"><i></i><i></i></span><b>${p.name}</b></button>`).join('')}</div>
+      <div class="size-pick" style="margin-top:12px">${[[1, 'Normal'], [1.12, 'Grand'], [1.25, 'Très grand']].map(([v, l]) => `<button class="${s.textSize === v ? 'on' : ''}" data-a="ob-size" data-v="${v}"><span style="font-size:${18 * v}px">Aa</span><small>${l}</small></button>`).join('')}</div>`;
+  }
+  if (step === 3) {
+    body = `<h2>Tu es…</h2>
+      <div class="ob-grid">${PROFILES.map(([k, e, l]) => `<button class="ob-card ${s.profile === k ? 'on' : ''}" data-a="ob-profile" data-v="${k}"><span>${e}</span>${l}</button>`).join('')}</div>
+      <input class="big-input" style="margin-top:12px;font-size:16px !important" data-set="about" value="${esc(s.about || '')}" placeholder="${s.profile === 'travail' ? 'Ton métier (ex : vendeuse, horaires en décalé…)' : 'Ta formation / ton école (facultatif)'}">`;
+  }
+  if (step === 4) {
+    body = `<h2>Ton emploi du temps</h2><p class="muted">Comment veux-tu remplir ton agenda ?</p>
+      ${[['manual', '✍️', 'Je saisis mes cours / horaires', 'Matière, jours, heures : en 1 minute'], ['photo', '📷', 'J\'envoie une photo', 'De mon emploi du temps (IA avancée)'], ['file', '📄', 'J\'importe un fichier', 'Export Google Agenda, Outlook (.ics)'], ['later', '⏭️', 'Plus tard', 'Je commence avec un agenda vide']].map(([k, e, t, d]) => `<button class="ob-opt ${obAfter === k ? 'on' : ''}" data-a="ob-after" data-v="${k}"><span>${e}</span><span class="grow"><b>${t}</b><small>${d}</small></span><span class="box">${obAfter === k ? '✓' : ''}</span></button>`).join('')}`;
+  }
+  if (step === 5) {
+    body = `<h2>Ce que tu veux suivre</h2><p class="muted">Je compte tout seul tes progrès chaque semaine.</p>
+      ${GOAL_PRESETS.map(g => { const on = s.goals.some(x => x.id === g.id); return `<button class="ob-opt ${on ? 'on' : ''}" data-a="ob-goal" data-id="${g.id}"><span>${g.emoji}</span><span class="grow">${g.txt}</span><span class="box">${on ? '✓' : ''}</span></button>`; }).join('')}`;
+    next = 'C\'est parti !';
+  }
   openSheet(`<div class="onboard">${dots}${body}
-    <div class="row" style="margin-top:18px">${step ? `<button class="btn" data-a="ob-prev">Retour</button>` : ''}<button class="btn gold grow" data-a="ob-next">${step < 1 ? 'Suivant' : 'C\'est parti !'}</button></div></div>`);
+    <div class="row" style="margin-top:18px">${step ? `<button class="btn" data-a="ob-prev">Retour</button>` : ''}<button class="btn gold grow" data-a="ob-next">${next}</button></div></div>`);
+}
+
+// ---------- Mon emploi du temps : saisie rapide des cours de la semaine ----------
+let ttDraft = [];
+const TT_TYPES = ['Cours', 'CM', 'TD', 'TP', 'Sport', 'Travail', 'Autre'];
+function openTimetable() {
+  const jours = [[1, 'L'], [2, 'M'], [3, 'M'], [4, 'J'], [5, 'V'], [6, 'S'], [0, 'D']];
+  const jn = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam'];
+  openSheet(`<form id="tt-form">${shTitle('📅 Mon emploi du temps')}
+    <p class="muted" style="margin-top:0">Ajoute chaque cours ou activité qui revient chaque semaine.</p>
+    ${ttDraft.length ? `<div class="tt-list">${ttDraft.map((x, i) => `<div class="tt-item" style="--c:${x.color}"><b>${esc(x.title)}</b><small>${x.days.map(d => jn[d]).join(', ')} · ${x.t1}–${x.t2}${x.loc ? ' · ' + esc(x.loc) : ''}</small><button type="button" class="x-mini" data-a="tt-del" data-i="${i}">✕</button></div>`).join('')}</div>` : ''}
+    <div class="tt-box">
+      <input name="name" class="big-input" placeholder="Matière ou activité (ex : Statistiques)" autocomplete="off">
+      <div class="chips wrap" style="margin-top:8px">${TT_TYPES.map((t, i) => `<button type="button" class="chip ${i === 0 ? 'on' : ''}" data-a="tt-type" data-v="${t}">${t}</button>`).join('')}</div>
+      <input type="hidden" name="type" value="Cours">
+      <div class="tt-days">${jours.map(([d, l]) => `<button type="button" data-a="tt-day" data-d="${d}">${l}</button>`).join('')}</div>
+      <input type="hidden" name="days" value="">
+      <div class="fields2"><div class="field"><label>De</label><input type="time" name="t1" value="09:00"></div><div class="field"><label>À</label><input type="time" name="t2" value="10:30"></div></div>
+      <div class="field"><input name="loc" placeholder="Salle / lieu (facultatif)"></div>
+      <button class="btn block">+ Ajouter ce créneau</button>
+    </div>
+    ${ttDraft.length ? `<div class="field" style="margin-top:14px"><label>Répéter chaque semaine pendant</label><select id="tt-weeks"><option value="4">4 semaines</option><option value="8">8 semaines</option><option value="15" selected>Tout le semestre (15 semaines)</option><option value="30">Toute l'année (30 semaines)</option></select></div>
+      <button type="button" class="btn gold block" data-a="tt-save">Mettre dans mon agenda (${ttDraft.length} créneau${ttDraft.length > 1 ? 'x' : ''})</button>` : ''}
+  </form>`);
+}
+function saveTimetable() {
+  const weeks = +($('#tt-weeks')?.value || 15);
+  const today = startOfDay(new Date());
+  let n = 0;
+  for (const x of ttDraft) {
+    for (const d of x.days) {
+      const first = addDays(today, (d - today.getDay() + 7) % 7);
+      const [h1, m1] = x.t1.split(':').map(Number), [h2, m2] = x.t2.split(':').map(Number);
+      for (let w = 0; w < weeks; w++) {
+        const day = addDays(first, 7 * w);
+        const start = new Date(day).setHours(h1, m1, 0, 0), end = new Date(day).setHours(h2, m2, 0, 0);
+        addEvent({ title: x.title, start, end: end > start ? end : start + 3600000, location: x.loc, cat: x.cat });
+        n++;
+      }
+    }
+  }
+  ttDraft = []; closeSheet(); render();
+  toast(`${n} créneaux ajoutés à ton agenda 📅`);
+}
+
+function shareApp() {
+  const url = location.origin + location.pathname;
+  const text = 'Je t\'envoie mon agenda perso avec assistant vocal : ouvre le lien, mets ton prénom et ton emploi du temps 🙂';
+  if (navigator.share) navigator.share({ title: 'Agenda perso', text, url }).catch(() => {});
+  else navigator.clipboard?.writeText(`${text}\n${url}`).then(() => toast('Lien copié ✓ Colle-le dans un message.'), () => toast(url));
 }
 
 // ---------- Réglages ----------
@@ -1389,6 +1527,8 @@ function openSettings() {
       ${T('st-voice', '🎙️', 'Voix', s.voiceSpeak !== false ? 'Répond à voix haute' : 'Muette')}
       ${T('st-ai', '✨', 'IA avancée', s.claudeKey ? '<span class="ok-badge">Activée</span>' : 'Désactivée')}
       ${T('st-google', `<svg class="g"><use href="#i-google"/></svg>`, 'Google Agenda', s.googleConnected ? 'Synchronisé' : 'Bouton « + Google »')}
+      ${T('timetable', '📅', 'Mon emploi du temps', 'Ajouter mes cours de la semaine')}
+      ${T('share', '📤', 'Partager l\'appli', 'Envoyer à un·e ami·e')}
       ${T('set-goals', '🎯', 'Objectifs', `${s.goals.length} objectif${s.goals.length > 1 ? 's' : ''}`)}
       ${T('set-cats', '🏷', 'Couleurs', 'Catégories d\'événements')}
       ${T('notif', '🔔', 'Notifications', 'Autoriser les alertes')}
@@ -1661,16 +1801,33 @@ const ACTIONS = {
   'due-more': () => { showAllDue = true; renderTodo(); },
   'g-added': el => { const e = evById(el.dataset.id); if (e) { e.addedToGoogle = true; save(); setTimeout(() => { closeSheet(); render(); toast('Ajouté dans Google Agenda ✓'); }, 400); } },
   onboard: () => openOnboarding(0),
-  'ob-avatar': el => { set().avatar = el.dataset.v; save(); render(); openOnboarding(0); },
-  'ob-palette': el => { set().palette = el.dataset.v; set().accent = ''; save(); render(); openOnboarding(1); },
-  'ob-size': el => { set().textSize = +el.dataset.v; save(); render(); openOnboarding(1); },
-  'ob-int': el => { const m = set().homeModules.find(x => x.id === el.dataset.id); if (m) { m.on = !m.on; save(); } openOnboarding(2); },
+  'ob-avatar': el => { set().avatar = el.dataset.v; save(); render(); openOnboarding(1); },
+  'ob-palette': el => { set().palette = el.dataset.v; set().accent = ''; save(); render(); keepScroll(() => openOnboarding(2)); },
+  'ob-size': el => { set().textSize = +el.dataset.v; save(); render(); keepScroll(() => openOnboarding(2)); },
+  'ob-profile': el => { set().profile = el.dataset.v; save(); openOnboarding(3); },
+  'ob-after': el => { obAfter = el.dataset.v; openOnboarding(4); },
+  'ob-goal': el => { const s = set(); const g = GOAL_PRESETS.find(x => x.id === el.dataset.id); const i = s.goals.findIndex(x => x.id === g.id); if (i >= 0) s.goals.splice(i, 1); else { const { txt, ...rest } = g; s.goals.push(rest); } save(); keepScroll(() => openOnboarding(5)); },
   'ob-prev': () => openOnboarding(Math.max(0, obStep - 1)),
   'ob-next': () => {
-    if (obStep < 1) return openOnboarding(obStep + 1);
-    set().onboarded = true; save(); closeSheet(); go('today');
-    toast(`C'est prêt, ${set().name} ✨`);
+    if (obStep === 1 && !set().name.trim()) { toast('Écris ton prénom 🙂'); return; }
+    if (obStep < OB_STEPS - 1) return openOnboarding(obStep + 1);
+    const s = set();
+    s.onboarded = true;
+    if (!s.about && s.profile) s.about = ({ etudiant: 'Étudiant·e', lyceen: 'Lycéen·ne', travail: 'Je travaille', autre: '' })[s.profile];
+    save(); closeSheet(); go('today');
+    toast(`Bienvenue ${s.name} ✨`);
+    const after = obAfter; obAfter = null;
+    if (after === 'manual') setTimeout(openTimetable, 400);
+    if (after === 'photo') setTimeout(() => ACTIONS.photo(), 400);
+    if (after === 'file') setTimeout(() => $('#file-in').click(), 400);
   },
+  timetable: () => openTimetable(),
+  share: () => shareApp(),
+  'tt-type': el => { el.parentNode.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c === el)); $('#tt-form').type.value = el.dataset.v; },
+  'tt-day': el => { el.classList.toggle('on'); $('#tt-form').days.value = [...el.parentNode.querySelectorAll('.on')].map(b => b.dataset.d).join(','); },
+  'tt-del': el => { ttDraft.splice(+el.dataset.i, 1); openTimetable(); },
+  'tt-save': () => saveTimetable(),
+
   sync: () => { saveConnect($('#set-form'), true); closeSheet(); syncNow(); },
   'g-connect': () => { saveConnect($('#set-form'), true); closeSheet(); syncNow(); },
   'g-off': () => { G.disconnect(); closeSheet(); render(); toast('Google Agenda déconnecté.'); },
@@ -1734,16 +1891,25 @@ const ACTIONS = {
   },
   'task-quick-date': el => { const f = $('#task-form'); const n = +el.dataset.n; f.date.value = n < 0 ? '' : ymd(addDays(new Date(), n)); if (n < 0) f.time.value = ''; },
   'cat-toggle': el => { const s = set(); const k = el.dataset.cat; s.hiddenCats = s.hiddenCats.includes(k) ? s.hiddenCats.filter(x => x !== k) : [...s.hiddenCats, k]; save(); render(); },
-  view: el => { set().calView = el.dataset.v; save(); renderCal(); if (el.dataset.v === 'day') scrollGridToNow(); },
-  'cal-today': () => { selDay = startOfDay(new Date()); calDate = startOfMonth(selDay); renderCal(); },
+  view: el => { set().calView = el.dataset.v; save(); calScrolled = false; renderCal(); },
+  'cal-today': () => { selDay = startOfDay(new Date()); calDate = startOfMonth(selDay); calScrolled = false; renderCal(); },
+  'add-day': () => { const d = new Date(selDay); if (sameDay(d, new Date())) { editEvent(null, {}); return; } d.setHours(10, 0, 0, 0); editEvent(null, { start: d.getTime(), end: d.getTime() + 3600000 }); },
+  tslot: (el, ev) => {
+    if (ev.target !== el) return;
+    const r = el.getBoundingClientRect();
+    const z = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--z')) || 1;
+    const h = +el.dataset.h0 + (ev.clientY - r.top) / z / +el.dataset.hp;
+    const d = fromYmd(el.dataset.d); d.setHours(Math.floor(h), Math.floor((h % 1) * 2) * 30, 0, 0);
+    editEvent(null, { start: d.getTime(), end: d.getTime() + 3600000 });
+  },
   'cal-prev': () => calShift(-1),
   'cal-next': () => calShift(1),
   'cal-today-old': () => { calDate = startOfDay(new Date()); selDay = calDate; renderCal(); scrollGridToNow(); },
   sel: el => {
-    selDay = fromYmd(el.dataset.d); renderCal();
+    selDay = fromYmd(el.dataset.d); calScrolled = false; renderCal();
     if (calView() === 'week') document.getElementById('wr-' + el.dataset.d)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
-  day: el => { selDay = fromYmd(el.dataset.d); calDate = startOfMonth(selDay); set().calView = 'day'; save(); go('cal'); },
+  day: el => { selDay = fromYmd(el.dataset.d); calDate = startOfMonth(selDay); set().calView = 'day'; save(); calScrolled = false; go('cal'); },
   'new-at': el => { const d = new Date(+el.dataset.t); d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0); editEvent(null, { start: d.getTime(), end: d.getTime() + 3600000 }); },
   slot: (el, ev) => {
     if (ev.target !== el) return;
@@ -1814,6 +1980,18 @@ document.addEventListener('submit', ev => {
   if (fid === 'task-form') return saveTaskForm(f);
   if (fid === 'note-form') return saveNoteForm(f);
   if (fid === 'set-form') return saveConnect(f);
+  if (fid === 'tt-form') {
+    const name = f.name.value.trim(), days = f.days.value ? f.days.value.split(',').map(Number) : [];
+    if (!name) return toast('Écris le nom du cours ou de l\'activité.');
+    if (!days.length) return toast('Choisis au moins un jour.');
+    const type = f.type.value;
+    const title = ['CM', 'TD', 'TP'].includes(type) ? `${type} ${name}` : name;
+    const cat = type === 'Sport' ? 'sport' : type === 'Travail' ? 'pro' : type === 'Autre' ? guessCat(name) : 'cours';
+    const colors = ['#5b8def', '#ff9f43', '#2fd1a5', '#c47dff', '#ff5d6c', '#38c6f4', '#f472b6', '#7ee081'];
+    ttDraft.push({ title, days, t1: f.t1.value || '09:00', t2: f.t2.value || '10:00', loc: f.loc.value.trim(), cat, color: colors[ttDraft.length % colors.length] });
+    openTimetable(); setTimeout(() => $('#tt-form [name=name]')?.focus(), 50);
+    return;
+  }
   if (fid === 'goal-form') {
     const s = set();
     const g = { id: f.gid.value || uid(), emoji: f.emoji.value || '⭐', label: f.label.value.trim(), kind: f.kind.value, kw: f.kw.value.trim(), cat: f.cat.value, target: +f.target.value || 1 };
