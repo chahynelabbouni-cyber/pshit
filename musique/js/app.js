@@ -1,10 +1,10 @@
-import { db } from './db.js?v=18';
-import { readTags } from './tags.js?v=18';
-import { Player, isIOS } from './player.js?v=18';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=18';
-import * as AI from './ai.js?v=18';
-import * as Voice from './voice.js?v=18';
-import * as Src from './sources.js?v=18';
+import { db } from './db.js?v=19';
+import { readTags } from './tags.js?v=19';
+import { Player, isIOS } from './player.js?v=19';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=19';
+import * as AI from './ai.js?v=19';
+import * as Voice from './voice.js?v=19';
+import * as Src from './sources.js?v=19';
 
 
 // ======================================================================
@@ -1216,7 +1216,7 @@ function viewAI() {
     <header class="ai-head">
       <div class="ai-orb"><i></i><i></i><i></i></div>
       <div><h1>${esc(S.settings.botName || 'Le Concierge')}</h1><small>${S.settings.apiKey ? 'Propulsé par Claude' : 'IA personnelle'}</small></div>
-      <button class="ib sm" data-act="ai-clear" aria-label="Nouvelle conversation">${icon('refresh')}</button>
+      <button class="ai-clear-btn" data-act="ai-clear" aria-label="Effacer la conversation">${icon('trash')}<span>Effacer</span></button>
     </header>
     <div class="ai-log" id="ai-log">${renderChat()}</div>
     <div class="ai-foot">
@@ -1394,6 +1394,12 @@ async function playYtQuery(q, label) {
   } catch { return null; }
 }
 
+function clearChat() {
+  S.chat = []; S.mixes = Object.fromEntries(Object.entries(S.mixes).filter(([k]) => !k.startsWith('chat-')));
+  saveJSON('onde.chat', S.chat);
+  if (S.route?.name === 'ai') render(true);
+}
+
 async function smartCommand(text) {
   const n = cleanAsk(text);
   const words = n.split(' ').filter(Boolean).length;
@@ -1421,6 +1427,12 @@ async function smartCommand(text) {
   // --- répétition et minuteur « off » (avant la pause : « arrête de répéter » ne met pas en pause)
   if (/(boucle|repet)/.test(n)) { player.repeat = /(arrete|plus|stop|desactive|enleve|retire|annule|coupe|sans|enlever)/.test(n) ? 'off' : 'one'; player.emit('modes'); return player.repeat === 'one' ? 'Je répète ce titre.' : 'Répétition désactivée.'; }
   if (/(annule|enleve|desactive|supprime|stop|arrete).*(minuteur|timer|mise en veille)/.test(n)) { player.setSleep(0); return 'Minuteur annulé.'; }
+
+  // --- effacer la conversation
+  if (/\b(efface|supprime|vide|nettoie|reset|reinitialise|oublie)\b.*\b(conversation|conv|discussion|chat|messages?|historique du chat|tout ce qu on s est dit)\b|^(nouvelle conversation|on recommence)$/.test(n)) {
+    setTimeout(clearChat, 900);
+    return 'C\'est fait, on repart de zéro.';
+  }
 
   // --- gestion : supprimer / annuler / renommer / retirer / ajouter
   const mg = await manageCommand(n);
@@ -2964,6 +2976,7 @@ function viewSettings() {
     <section class="set-group"><h3>Le Concierge (IA)</h3>
       <label class="set-item toggle"><div><b>Réponses à voix haute</b><small>${Voice.canListen ? 'Quand tu parles au Concierge (bouton micro), il te répond aussi à l\'oral.' : 'La commande vocale n\'est pas disponible sur ce navigateur.'}</small></div><input type="checkbox" id="set-voice" ${S.settings.voiceReply ? 'checked' : ''}><span class="sw"></span></label>
       <div class="set-item"><div><b>Analyse de ta musique</b><small id="ana-stat">…</small></div></div>
+      <div class="set-item"><div><b>Conversation avec l'assistant</b><small>${plural(S.chat.length, 'message')}</small></div><button class="link" data-act="ai-clear">Effacer</button></div>
       <div class="set-item"><div><b>Historique d'écoute</b><small>${plural(AI.historySize(), 'écoute')} mémorisée${AI.historySize() > 1 ? 's' : ''} pour apprendre tes goûts</small></div><button class="link" data-act="clear-hist">Effacer</button></div>
       <label class="set-item col"><div><b>Clé API Claude (optionnel)</b><small>Sans clé, le Concierge fonctionne déjà hors ligne. Avec une clé Anthropic, il comprend n'importe quelle demande. La clé reste sur ton téléphone ; ta liste de titres est envoyée à Anthropic seulement quand tu parles au Concierge.</small></div><input class="set-input wide" id="set-key" type="password" value="${esc(S.settings.apiKey)}" placeholder="sk-ant-…" autocomplete="off"></label>
     </section>
@@ -3210,7 +3223,7 @@ document.addEventListener('click', e => {
         S.settings.searchSrc = 'info'; S.searchQ = ''; S.pendingShow = act.dataset.q; saveSettings(); S.pendingFwd = true; return goto('#/search');
       }
       case 'yt-key': S.pendingFwd = true; return goto('#/settings');
-      case 'ai-clear': S.chat = []; saveJSON('onde.chat', S.chat); return render(true);
+      case 'ai-clear': return confirmSheet('Effacer la conversation ?', 'Tous les messages avec ton assistant seront supprimés. Tes playlists et ta musique ne sont pas touchées.', 'Effacer', async () => { clearChat(); toast('Conversation effacée'); });
       case 'ai-play': { const m = S.mixes[act.dataset.key]; if (m?.tracks.length) playIds(m.tracks.map(t => t.id), 0, { context: { label: m.name, route: '#/mix/' + m.key } }); return; }
     }
     return;

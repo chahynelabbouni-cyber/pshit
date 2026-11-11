@@ -978,3 +978,6 @@ body.npbg-theme .np-bg { background: linear-gradient(to bottom, color-mix(in srg
 .yt-slot { position: absolute; inset: 0; }
 .yt-slot iframe { width: 100% !important; height: 100% !important; border: 0; }
 .yt-slot.yt-standby { visibility: hidden; pointer-events: none; }
+
+.ai-clear-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--line); color: var(--muted); font-size: 13px; font-weight: 700; }
+.ai-clear-btn svg { width: 17px; height: 17px; }
