@@ -38,6 +38,7 @@ export class Player extends EventTarget {
     this.sleepEndOfTrack = false;
     this.gain = 1;
     this.base = 1;
+    this._seq = 0;
 
     this.els.forEach((el, i) => {
       if (i !== 2) el.preload = i === 3 ? 'none' : 'auto';
@@ -46,10 +47,20 @@ export class Player extends EventTarget {
       el.addEventListener('play', () => { if (i === this.cur) { this.emit('state'); this.setMSState('playing'); } });
       el.addEventListener('pause', () => { if (i === this.cur && !this.fading) { this.emit('state'); this.setMSState('paused'); } });
       el.addEventListener('loadedmetadata', () => i === this.cur && this.emit('time'));
+      el.addEventListener('durationchange', () => i === this.cur && this.updatePosition());
       el.addEventListener('error', () => {
-        if (i === this.cur && el.src) { this.emit('error'); }
+        if (i !== this.cur || !el.src) return;
+        if (i === 3 && this.current?.source === 'radio') return this.reconnectRadio();
+        this.emit('error', { code: i === 2 ? el.errorCode : el.error?.code });
+        this.emit('state');
       });
     });
+    // Radio : reconnexion automatique si le flux coupe (changement de réseau, serveur…)
+    const r = this.els[3];
+    this._radioTries = 0;
+    r.addEventListener('ended', () => { if (this.cur === 3 && this.current?.source === 'radio') this.reconnectRadio(); });
+    r.addEventListener('waiting', () => { clearTimeout(this._stallT); if (this.current?.source === 'radio') this._stallT = setTimeout(() => this.reconnectRadio(), 12000); });
+    r.addEventListener('playing', () => { clearTimeout(this._stallT); this._radioTries = 0; });
     this.setupMediaSession();
     setInterval(() => this.save(), 4000);
     window.addEventListener('pagehide', () => this.save());
@@ -70,17 +81,34 @@ export class Player extends EventTarget {
   get time() { return this.el.currentTime || 0; }
   get duration() { return this.el.duration || this.current?.duration || 0; }
 
-  emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
+  emit(type, detail) {
+    if (type === 'queue') this._remote = null;
+    this.dispatchEvent(new CustomEvent(type, { detail }));
+  }
+
+  reconnectRadio() {
+    const t = this.current;
+    if (this.cur !== 3 || t?.source !== 'radio' || this._radioPaused) return;
+    if (this._radioTries++ >= 6) { this._radioTries = 0; this.emit('error', { code: 'radio' }); this.emit('state'); return; }
+    clearTimeout(this._reconT);
+    this._reconT = setTimeout(() => {
+      if (this.current !== t || this._radioPaused) return;
+      const el = this.els[3];
+      el.removeAttribute('src'); el.load();
+      el.src = t.url; this.ids[3] = t.id;
+      el.play().catch(() => {});
+    }, 800 * this._radioTries);
+  }
 
   async srcFor(slot, id) {
     if (slot === 2) {
       const t = this.getTrack(id);
-      if (this.ids[2] !== id) { await this.els[2].load(t.ytId, t.duration, this._autoplay); this.ids[2] = id; }
+      if (this.ids[2] !== id) { await this.els[2].load(t.ytId, t.duration, this._autoplay, this._startAt || 0); this.ids[2] = id; }
       return;
     }
     if (slot === 3) {
       const t = this.getTrack(id);
-      if (this.ids[3] !== id) { this.els[3].src = t.url; this.ids[3] = id; }
+      if (this.ids[3] !== id || !this.els[3].getAttribute('src')) { this.els[3].src = t.url; this.ids[3] = id; }
       return;
     }
     if (this.ids[slot] === id && this.urls[slot]) return;
@@ -135,17 +163,23 @@ export class Player extends EventTarget {
     this.cancelFade();
     const id = this.currentId;
     if (!id) return;
+    const seq = ++this._seq;
     this.cur = this.slotFor(this.current);
     this.pauseOthers();
+    this._radioPaused = false; this._radioTries = 0;
     try {
       this._autoplay = autoplay;
+      this._startAt = startAt;
       await this.srcFor(this.cur, id);
     } catch (e) {
-      this.emit('error', e);
+      if (seq !== this._seq) return;
+      this.emit('error', { code: 'load', message: e.message });
+      this.emit('state');
       return;
     }
+    if (seq !== this._seq) return; // un chargement plus récent a pris la main (appuis rapides sur « suivant »)
     if (!isIOS) this.el.volume = this.gain;
-    if (startAt) {
+    if (this.cur === 2) { /* YouTube : la position de départ est déjà transmise au lecteur */ } else if (startAt) {
       const seek = () => { try { this.el.currentTime = startAt; } catch { /* ignore */ } };
       if (this.el.readyState >= 1) seek(); else this.el.addEventListener('loadedmetadata', seek, { once: true });
     } else if (this.el.currentTime) {
@@ -153,6 +187,8 @@ export class Player extends EventTarget {
     }
     this.emit('track');
     this.updateMediaSession();
+    this.updateActions();
+    this.updatePosition();
     if (autoplay) await this.play();
     else this.emit('state');
   }
@@ -161,7 +197,8 @@ export class Player extends EventTarget {
     if (this.ctx || isIOS) return;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
-      this.ctx = new AC();
+      this.ctx = new AC({ latencyHint: 'playback' });
+      this.pre = this.ctx.createGain(); // marge pour que l'égaliseur ne sature pas
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 256;
       this.analyser.smoothingTimeConstant = 0.8;
@@ -172,12 +209,13 @@ export class Player extends EventTarget {
         treble: Object.assign(this.ctx.createBiquadFilter(), { type: 'highshelf' }),
       };
       this.eq.bass.frequency.value = 120; this.eq.mid.frequency.value = 1500; this.eq.mid.Q.value = 0.9; this.eq.treble.frequency.value = 6000;
-      this.els.slice(0, 2).forEach(el => this.ctx.createMediaElementSource(el).connect(this.eq.bass));
+      this.els.slice(0, 2).forEach(el => this.ctx.createMediaElementSource(el).connect(this.pre));
+      this.pre.connect(this.eq.bass);
       this.eq.bass.connect(this.eq.mid); this.eq.mid.connect(this.eq.treble); this.eq.treble.connect(this.analyser);
       this.analyser.connect(this.ctx.destination);
       if (this.eqGains) this.setEQ(this.eqGains);
       // Si le système suspend le moteur audio (écran éteint), on le relance pour ne pas couper la musique
-      const wake = () => { if (this.ctx.state !== 'running' && this.playing) this.ctx.resume().catch(() => {}); };
+      const wake = () => { if ((this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') && this.playing) this.ctx.resume().catch(() => {}); };
       this.ctx.addEventListener('statechange', wake);
       document.addEventListener('visibilitychange', wake);
     } catch (e) {
@@ -190,19 +228,33 @@ export class Player extends EventTarget {
     this.eqGains = g;
     if (!this.eq) return;
     this.eq.bass.gain.value = g[0]; this.eq.mid.gain.value = g[1]; this.eq.treble.gain.value = g[2];
+    this.pre.gain.value = Math.pow(10, -Math.max(0, ...g) * 0.8 / 20);
   }
 
   async play() {
     if (!this.currentId) return;
     if (this.visualizer || (this.eqGains && this.eqGains.some(Boolean))) this.ensureAudioGraph();
-    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
-    try { await this.el.play(); } catch (e) { if (e.name !== 'AbortError') console.warn(e); }
+    if (this.ctx && this.ctx.state !== 'running') this.ctx.resume().catch(() => {});
+    clearInterval(this._sleepFade);
+    if (this._sleepFade) { this._sleepFade = 0; if (!isIOS) this.el.volume = this.gain; }
+    // Radio en pause : on repart du direct au lieu d'un vieux morceau en mémoire
+    if (this.cur === 3 && this._radioPaused) { this._radioPaused = false; this.ids[3] = null; await this.srcFor(3, this.currentId); }
+    if (this._sleepPendingMin) this.armSleep();
+    try { await this.el.play(); } catch (e) {
+      if (e.name !== 'AbortError') { console.warn(e); this.emit('state'); return; }
+    }
     this.markPlayed();
   }
 
   pause() {
     this.cancelFade();
     this.el.pause();
+    if (this.cur === 3 && this.current?.source === 'radio') {
+      // on coupe le flux (pas de données consommées en pause)
+      this._radioPaused = true;
+      clearTimeout(this._stallT); clearTimeout(this._reconT);
+      setTimeout(() => { if (this._radioPaused) { this.els[3].removeAttribute('src'); this.els[3].load(); } }, 50);
+    }
     this.save();
   }
 
@@ -215,14 +267,14 @@ export class Player extends EventTarget {
     this.emit('time');
   }
 
-  playList(ids, start = 0, { shuffle = false, context = null } = {}) {
+  playList(ids, start = 0, { shuffle = false, context = null, ordered = false } = {}) {
     if (!ids.length) return;
     this.context = context;
     this.queue = ids.slice();
     this.original = null;
     this.index = Math.max(0, Math.min(start, ids.length - 1));
     if (shuffle) { this.shuffle = true; this.applyShuffle(); }
-    else if (this.shuffle) this.applyShuffle();
+    else if (this.shuffle && !ordered) this.applyShuffle();
     this.emit('queue');
     this.load(true);
   }
@@ -262,12 +314,13 @@ export class Player extends EventTarget {
   }
 
   next(auto = false) {
-    if (auto && this.repeat === 'one') { this.el.currentTime = 0; this.play(); return; }
+    if (auto && this.repeat === 'one') { this.el.currentTime = 0; this.play(); this.emit('loop'); return; }
     if (auto && this.sleepEndOfTrack) { this.sleepEndOfTrack = false; this.emit('sleep'); this.el.pause(); return; }
     const n = this.nextIndex();
     if (n < 0) {
-      this.el.pause();
-      if (auto) { this.el.currentTime = 0; this.emit('state'); }
+      // Fin de la file : l'application peut enchaîner sur des sons similaires
+      if (auto) { this.el.pause(); this.el.currentTime = 0; this.emit('state'); this.emit('queueend'); }
+      else this.emit('queueend', { manual: true });
       return;
     }
     this.index = n;
@@ -292,7 +345,7 @@ export class Player extends EventTarget {
   addNext(id) {
     if (!this.queue.length) return this.playList([id], 0);
     this.queue.splice(this.index + 1, 0, id);
-    if (this.original) this.original.push(id);
+    if (this.original) { const k = this.original.indexOf(this.currentId); this.original.splice(k + 1, 0, id); }
     this.emit('queue');
   }
 
@@ -314,26 +367,33 @@ export class Player extends EventTarget {
     this.emit('queue');
   }
 
+  // Vide la suite de la file (et l'ordre d'origine du mode aléatoire)
+  clearUpcoming() {
+    this.queue.splice(this.index + 1);
+    if (this.original) { const keep = new Set(this.queue); this.original = this.original.filter(id => keep.has(id)); }
+    this.emit('queue');
+  }
+
   // Retire des morceaux supprimés de la bibliothèque
   purge(ids) {
     const set = new Set(ids);
     const cur = this.currentId;
-    if (set.has(cur)) { this.el.pause(); this.el.removeAttribute('src'); this.ids[this.cur] = null; }
+    if (set.has(cur)) {
+      this.cancelFade();
+      this.el.pause(); this.el.removeAttribute('src'); this.ids[this.cur] = null;
+      if (this.urls[this.cur]) { URL.revokeObjectURL(this.urls[this.cur]); this.urls[this.cur] = null; }
+    }
     this.queue = this.queue.filter(id => !set.has(id));
     if (this.original) this.original = this.original.filter(id => !set.has(id));
     this.index = set.has(cur) ? Math.min(this.index, this.queue.length - 1) : this.queue.indexOf(cur);
     if (set.has(cur) && this.queue.length) this.load(false);
     this.emit('queue');
-    this.emit('track');
+    if (set.has(cur)) this.emit('track');
   }
 
   onTime() {
     this.emit('time');
-    if (this.sleepAt && Date.now() >= this.sleepAt) {
-      this.sleepAt = 0;
-      this.fadeOutAndPause();
-      this.emit('sleep');
-    }
+    if (!this._posSet && this.el.duration) { this._posSet = true; this.updatePosition(); }
     const d = this.el.duration;
     if (!this.crossfade || isIOS || this.fading || this.repeat === 'one' || this.sleepEndOfTrack || !d || !isFinite(d) || this.cur > 1) return;
     const nt = this.getTrack(this.queue[this.nextIndex()]);
@@ -345,10 +405,12 @@ export class Player extends EventTarget {
   }
 
   fadeOutAndPause() {
+    this.cancelFade();
     const el = this.el;
-    if (isIOS) { el.pause(); return; }
+    if (isIOS) { this.pause(); return; }
     const v0 = el.volume;
-    this.ramp(3000, p => { el.volume = v0 * (1 - p); }, () => { el.pause(); el.volume = this.gain; this.emit('state'); });
+    clearInterval(this._sleepFade);
+    this._sleepFade = this.ramp(3000, p => { el.volume = v0 * (1 - p); }, () => { this._sleepFade = 0; this.pause(); el.volume = this.gain; this.emit('state'); });
   }
 
   async startCrossfade(len) {
@@ -392,10 +454,24 @@ export class Player extends EventTarget {
     this.emit('played', t);
   }
 
+  // Minuteur de sommeil : un vrai compte à rebours (marche aussi écran éteint, et avec les radios)
   setSleep(minutes) {
-    this.sleepEndOfTrack = minutes === 'end';
+    clearTimeout(this._sleepT);
+    this.sleepEndOfTrack = minutes === 'end' && this.current?.source !== 'radio';
+    if (minutes === 'end' && !this.sleepEndOfTrack) minutes = 0;
     this.sleepAt = typeof minutes === 'number' && minutes > 0 ? Date.now() + minutes * 60000 : 0;
+    this._sleepPendingMin = 0;
+    if (this.sleepAt) this.armSleep();
     this.emit('sleep');
+  }
+  armSleep() {
+    clearTimeout(this._sleepT);
+    if (this._sleepPendingMin) { this.sleepAt = Date.now() + this._sleepPendingMin; this._sleepPendingMin = 0; }
+    if (!this.sleepAt) return;
+    this._sleepT = setTimeout(() => {
+      if (!this.playing) { this._sleepPendingMin = 0; this.sleepAt = 0; this.emit('sleep'); return; }
+      this.sleepAt = 0; this.fadeOutAndPause(); this.emit('sleep');
+    }, Math.max(0, this.sleepAt - Date.now()));
   }
 
   // ----- Écran de verrouillage / casque Bluetooth -----
@@ -408,9 +484,22 @@ export class Player extends EventTarget {
     h('previoustrack', () => this.prev());
     h('nexttrack', () => this.next());
     h('seekto', d => this.seek(d.seekTime));
-    h('seekbackward', d => this.seek(this.time - (d.seekOffset || 10)));
-    h('seekforward', d => this.seek(this.time + (d.seekOffset || 10)));
+    h('seekbackward', d => this.seek(this.time - (d.seekOffset || (this.current?.source === 'podcast' ? 15 : 10))));
+    h('seekforward', d => this.seek(this.time + (d.seekOffset || (this.current?.source === 'podcast' ? 30 : 10))));
     h('stop', () => this.pause());
+  }
+
+  // Commandes de l'écran verrouillé adaptées à la source (pas d'avance rapide sur une radio en direct)
+  updateActions() {
+    if (!('mediaSession' in navigator)) return;
+    const live = this.current?.source === 'radio';
+    const ms = navigator.mediaSession;
+    const h = (a, f) => { try { ms.setActionHandler(a, f); } catch { /* non supporté */ } };
+    h('seekto', live ? null : d => this.seek(d.seekTime));
+    h('seekbackward', live ? null : d => this.seek(this.time - (d.seekOffset || (this.current?.source === 'podcast' ? 15 : 10))));
+    h('seekforward', live ? null : d => this.seek(this.time + (d.seekOffset || (this.current?.source === 'podcast' ? 30 : 10))));
+    h('nexttrack', live && this.nextIndex() < 0 ? null : () => this.next());
+    h('previoustrack', live && this.index === 0 ? null : () => this.prev());
   }
 
   async updateMediaSession() {
@@ -418,11 +507,13 @@ export class Player extends EventTarget {
     const t = this.current;
     if (!t) return;
     const art = await this.getCoverURL(t);
+    if (t !== this.current) return;
+    const fallback = new URL('icons/icon-512.png', location.href).href;
     navigator.mediaSession.metadata = new MediaMetadata({
       title: t.title,
-      artist: t.artist || 'Artiste inconnu',
-      album: t.album || '',
-      artwork: art ? [{ src: art, sizes: '512x512' }] : [],
+      artist: t.source === 'radio' ? 'En direct' : t.artist || 'Artiste inconnu',
+      album: t.album || this.context?.label || '',
+      artwork: art ? [{ src: art, sizes: '512x512' }, { src: fallback, sizes: '512x512', type: 'image/png' }] : [{ src: fallback, sizes: '512x512', type: 'image/png' }],
     });
   }
 
@@ -432,19 +523,26 @@ export class Player extends EventTarget {
 
   updatePosition() {
     if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
-    const d = this.el.duration;
-    if (!isFinite(d) || !d) return;
+    this._posSet = false;
+    const d = this.current?.source === 'radio' ? Infinity : this.el.duration;
     try {
-      navigator.mediaSession.setPositionState({ duration: d, playbackRate: 1, position: Math.min(this.time, d) });
+      if (!isFinite(d) || !d) { navigator.mediaSession.setPositionState(); return; }
+      this._posSet = true;
+      navigator.mediaSession.setPositionState({ duration: d, playbackRate: this.el.playbackRate || 1, position: Math.max(0, Math.min(this.time, d)) });
     } catch { /* ignore */ }
   }
 
   // ----- Sauvegarde de la session -----
   save() {
     try {
+      // les titres en ligne (YouTube, podcasts, radios) à venir sont gardés pour la reprise après redémarrage
+      if (!this._remote) {
+        this._remote = {};
+        for (const id of this.queue.slice(0, 400)) { const t = this.getTrack(id); if (t?.source) { const { lyrics, ...rest } = t; this._remote[id] = rest; } }
+      }
       localStorage.setItem('onde.session', JSON.stringify({
         queue: this.queue, original: this.original, index: this.index, time: this.time,
-        shuffle: this.shuffle, repeat: this.repeat, context: this.context,
+        shuffle: this.shuffle, repeat: this.repeat, context: this.context, remote: this._remote,
       }));
     } catch { /* ignore */ }
   }

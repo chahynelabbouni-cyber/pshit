@@ -15,7 +15,7 @@ const S = {
   playlists: new Map(),
   covers: new Map(),       // coverId -> objectURL
   colors: loadJSON('onde.colors', {}),
-  settings: Object.assign({ name: '', lastName: '', appName: '', theme: 'or', style: 'maison', tastes: [], onboarded: false, homeFilter: 'all', customColor: '#d9b26a', bgTheme: 'noir', font: 'auto', textSize: 'normal', corners: 'arrondis', motion: 'normal', coverShape: 'carree', vinyl: false, npBg: 'pochette', avatar: '', greet: '', botName: 'Concierge', botTone: 'complice', startTab: 'home', homeSections: { hero: true, quick: true, mixes: true, recent: true, radios: true, tastes: true }, crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
+  settings: Object.assign({ name: '', lastName: '', appName: '', theme: 'or', style: 'maison', tastes: [], onboarded: false, homeFilter: 'all', customColor: '#d9b26a', bgTheme: 'noir', font: 'auto', textSize: 'normal', corners: 'arrondis', motion: 'normal', coverShape: 'carree', vinyl: false, npBg: 'pochette', avatar: '', greet: '', botName: 'Concierge', botTone: 'complice', startTab: 'home', homeSections: { hero: true, quick: true, mixes: true, recent: true, radios: true, tastes: true }, crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, autoplay: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
   mixes: {},
   chat: loadJSON('onde.chat', []),
   version: 0,
@@ -28,7 +28,17 @@ const S = {
 };
 
 function loadJSON(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }
-function saveJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* plein */ } }
+const EVICT = ['onde.colors', 'onde.ctxHist', 'onde.history', 'onde.chat'];
+function saveJSON(k, v) {
+  const s = JSON.stringify(v);
+  for (let i = 0; i <= EVICT.length; i++) {
+    try { localStorage.setItem(k, s); return true; } catch {
+      const ev = EVICT[i]; if (!ev) break; if (ev !== k) localStorage.removeItem(ev);
+    }
+  }
+  try { toast('Stockage du téléphone plein : réglage non enregistré'); } catch { /* ignore */ }
+  return false;
+}
 const saveSettings = () => saveJSON('onde.settings', S.settings);
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -119,7 +129,14 @@ function bump() { S.version++; }
 // ======================================================================
 // Pochettes & couleurs
 // ======================================================================
-function coverURL(coverId) { return coverId ? S.covers.get(coverId) : null; }
+// Seules les adresses blob:, data:image et https sont acceptées, et toujours échappées (protection contre l'injection de code)
+function safeUrl(u) {
+  if (!u || typeof u !== 'string') return '';
+  if (u.startsWith('blob:') || u.startsWith('data:image/')) return u;
+  try { const x = new URL(u); return x.protocol === 'https:' ? x.href : ''; } catch { return ''; }
+}
+const rawCoverURL = id => (id ? safeUrl(S.covers.get(id)) || null : null);
+function coverURL(coverId) { const u = coverId ? S.covers.get(coverId) : null; return u ? esc(safeUrl(u)) || null : null; }
 
 function placeholderHue(seed) { return hash(seed || 'x') % 360; }
 
@@ -154,7 +171,7 @@ function colorFor(coverId, seed) {
 
 async function computeColor(coverId) {
   if (!coverId || S.colors[coverId]) return S.colors[coverId];
-  const url = coverURL(coverId);
+  const url = rawCoverURL(coverId);
   if (!url) return null;
   try {
     const img = new Image();
@@ -207,7 +224,7 @@ async function tint(el, coverId, seed, prop = '--tint') {
 // ======================================================================
 // Lecteur
 // ======================================================================
-const player = new Player(id => S.tracks.get(id), async t => coverURL(t.coverId), $('#ytbox .yt-host'));
+const player = new Player(id => S.tracks.get(id), async t => rawCoverURL(t.coverId), $('#ytbox .yt-host'));
 player.crossfade = S.settings.crossfade;
 setTimeout(() => {
   player.setEQ(EQ_PRESETS[S.settings.eq] || EQ_PRESETS.normal);
@@ -216,12 +233,13 @@ setTimeout(() => {
 });
 player.visualizer = S.settings.visualizer;
 
+const saveTrack = t => (t && S.tracks.has(t.id) ? db.put('tracks', t) : Promise.resolve());
 player.addEventListener('played', async e => {
   const t = e.detail;
   t.plays = (t.plays || 0) + 1;
   t.lastPlayed = Date.now();
   bump();
-  await db.put('tracks', t);
+  await saveTrack(t);
 });
 let listen = { id: null, max: 0 };
 player.addEventListener('track', () => { setTimeout(placeYT, 30); setTimeout(placeYT, 520);
@@ -250,15 +268,52 @@ player.addEventListener('time', updateTime);
 player.addEventListener('modes', updateModes);
 player.addEventListener('queue', () => { if (S.queueOpen) renderQueue(); });
 player.addEventListener('sleep', updateSleep);
-player.addEventListener('error', () => {
-  const src = player.current?.source;
-  toast(src === 'radio' ? 'Cette radio ne répond pas, essaie-en une autre' : src === 'podcast' ? 'Épisode indisponible' : src === 'yt' ? 'Vidéo YouTube indisponible ici' : 'Impossible de lire ce fichier');
+// Un son qui ne marche pas : on prévient et on passe au suivant (au plus 5 d'affilée)
+let errStreak = 0;
+player.addEventListener('error', e => {
+  const t = player.current, src = t?.source, code = e.detail?.code;
+  const msg = src === 'radio' ? 'Cette radio ne répond pas, essaie-en une autre' : src === 'podcast' ? 'Épisode indisponible' : src === 'yt' ? ([101, 150].includes(code) ? 'Cette vidéo ne peut pas être lue dans une autre app' : 'Vidéo YouTube indisponible') : 'Impossible de lire ce fichier';
+  if (src === 'yt' && [101, 150].includes(code) && t) { t.unplayable = true; saveTrack(t).catch(() => {}); }
+  const canSkip = src !== 'radio' && player.nextIndex() >= 0 && ++errStreak < 5;
+  toast(canSkip ? msg + ' · son suivant' : msg);
+  if (canSkip) setTimeout(() => player.next(), 700);
+});
+player.addEventListener('time', () => { if (player.time > 5) errStreak = 0; });
+player.addEventListener('loop', () => { if (sbSegs) sbSegs.forEach(sg => { sg.done = false; }); });
+
+// Fin de la file : enchaîne sur des sons du même style (comme la lecture automatique de Spotify)
+player.addEventListener('queueend', async e => {
+  if (!S.settings.autoplay || S.autoplayBusy) return;
+  const last = player.current;
+  if (!last || last.source === 'radio' || last.source === 'podcast') return;
+  S.autoplayBusy = true;
+  try {
+    const inQueue = new Set(player.queue);
+    let add = [];
+    if (last.source === 'yt' && S.settings.ytKey && !Src.ytQuotaOver()) {
+      const q = (last.artist || last.title) + (last.genre ? ' ' + last.genre : '');
+      const res = await Src.ytSearch(S.settings.ytKey, q, 15).catch(() => []);
+      add = res.map(x => remoteTrack(x, 'yt')).filter(t => !inQueue.has(t.id) && !t.unplayable && norm(t.artist) !== '' ).slice(0, 10);
+    } else {
+      add = (getMix('moment')?.tracks || []).filter(t => !inQueue.has(t.id)).slice(0, 15);
+    }
+    if (!add.length) return;
+    add.forEach(t => player.addToQueue(t.id));
+    toast(e.detail?.manual ? 'Lecture automatique : sons du même style' : 'La suite : des sons du même style');
+    player.next();
+  } finally { S.autoplayBusy = false; }
 });
 
 function playIds(ids, i = 0, opts = {}) {
+  const want = ids[i];
+  ids = ids.filter(id => S.tracks.has(id));
+  i = Math.max(0, ids.indexOf(want));
+  if (!ids.length) { toast('Ces titres ne sont plus disponibles'); return; }
   if (S.miniGone) { S.miniGone = false; mini.classList.remove('gone'); }
   try { pushCtxHist(ids, i, opts); } catch { /* ignore */ }
-  player.playList(ids, i, opts);
+  // les épisodes de podcast et les radios se lisent toujours dans l'ordre
+  const ordered = ids.every(id => ['podcast', 'radio'].includes(S.tracks.get(id)?.source));
+  player.playList(ids, i, { ...opts, ordered });
   setTimeout(() => { updateNowPlaying(); placeYT(); }, 60);
 }
 
@@ -340,8 +395,8 @@ function updateNowPlaying() {
   $('.np-ctx b', np).textContent = player.context?.label || t.album || 'Ta bibliothèque';
   tint(np, t.coverId, seed);
   const bgi = $('.np-bg-img', np);
-  const cu = coverURL(t.coverId);
-  bgi.style.backgroundImage = cu ? `url("${cu}")` : 'none';
+  const cu = rawCoverURL(t.coverId);
+  bgi.style.backgroundImage = cu ? `url("${cu.replace(/["\\]/g, '')}")` : 'none';
   bgi.classList.remove('fade'); void bgi.offsetWidth; bgi.classList.add('fade');
   $('.lyr-head', np).innerHTML = `${trackCover(t, 'xs2')}<div><b>${esc(t.title)}</b><small>${esc(artistOf(t))}</small></div>`;
   updateLike();
@@ -818,7 +873,7 @@ function queueSheet() {
   openSheet('<div class="queue"></div>', {
     jump: b => player.jump(+b.dataset.i),
     rm: (b, e) => { e.stopPropagation(); player.removeAt(+b.dataset.i); },
-    clear: () => { player.queue.splice(player.index + 1); player.emit('queue'); },
+    clear: () => { player.clearUpcoming(); },
   });
   renderQueue();
 }
@@ -855,9 +910,11 @@ function playlistSheet(p) {
     { id: 'add', icon: 'plus', label: 'Ajouter des titres' },
     { id: 'queue', icon: 'queue', label: 'Ajouter à la file d\'attente' },
     { id: 'ren', icon: 'edit', label: 'Renommer' },
+    { id: 'share', icon: 'send', label: 'Partager (envoyer à quelqu\'un)' },
     { id: 'del', icon: 'trash', label: 'Supprimer la playlist', danger: true },
   ]), {
     add: () => addTracksSheet(p),
+    share: async () => { await closeSheet(); exportPlaylist(p); },
     queue: () => { p.trackIds.forEach(id => player.addToQueue(id)); closeSheet(); toast('Ajouté à la file d\'attente'); },
     ren: () => newPlaylistSheet([], p),
     del: () => confirmSheet(`Supprimer « ${p.name} » ?`, 'Les titres resteront dans ta bibliothèque.', 'Supprimer', async () => {
@@ -869,8 +926,111 @@ function playlistSheet(p) {
   });
 }
 
+// ======================================================================
+// Sauvegarde, restauration et partage (fichier .maison.json)
+// ======================================================================
+const SHARE_FIELDS = ['id', 'source', 'title', 'artist', 'album', 'duration', 'thumb', 'ytId', 'url', 'genre', 'liked', 'saved', 'addedAt'];
+const slimTrack = t => Object.fromEntries(SHARE_FIELDS.filter(k => t[k] !== undefined && t[k] !== '').map(k => [k, t[k]]));
+const localRef = t => ({ local: true, title: t.title, artist: t.artist, duration: t.duration });
+
+async function downloadJSON(name, data, title) {
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+  const file = new File([blob], name, { type: 'application/json' });
+  // Sur Android : le menu Partager (WhatsApp, Drive, Bluetooth…) ; sinon un simple téléchargement
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function exportPlaylist(p) {
+  const tracks = p.trackIds.map(id => S.tracks.get(id)).filter(Boolean).map(t => (t.source ? slimTrack(t) : localRef(t)));
+  const from = S.settings.name || '';
+  return downloadJSON(`${(p.name || 'playlist').replace(/[^\p{L}\p{N} _-]/gu, '').trim() || 'playlist'}.maison.json`,
+    { type: 'maison-playlist', v: 1, from, name: p.name, tracks }, `Playlist « ${p.name} »`);
+}
+
+function exportBackup() {
+  const tracks = [...S.tracks.values()];
+  const keep = tracks.filter(t => t.source && (t.saved || t.liked || [...S.playlists.values()].some(p => p.trackIds.includes(t.id))));
+  const { apiKey, ytKey, ...settings } = S.settings; // les clés ne sont jamais exportées
+  const playlists = [...S.playlists.values()].map(p => ({ ...p, tracks: p.trackIds.map(id => S.tracks.get(id)).filter(Boolean).map(t => (t.source ? { id: t.id } : localRef(t))) }));
+  const likedLocal = tracks.filter(t => !t.source && t.liked).map(localRef);
+  const day = new Date().toISOString().slice(0, 10);
+  return downloadJSON(`maison-sauvegarde-${day}.maison.json`, {
+    type: 'maison-backup', v: 1, at: Date.now(), settings, tracks: keep.map(slimTrack), playlists, likedLocal,
+    history: loadJSON('onde.history', []).slice(-1500), ctxHist: loadJSON('onde.ctxHist', []),
+  }, 'Sauvegarde Maison');
+}
+
+// Retrouve un titre importé (fichier du téléphone) par son titre et son artiste
+function findLocal(ref) {
+  const k = norm(ref.title + ' ' + (ref.artist || ''));
+  for (const t of S.tracks.values()) if (!t.source && norm(t.title + ' ' + (t.artist || '')) === k) return t;
+  return null;
+}
+async function adoptTrack(x) {
+  if (!x || x.local) return x?.local ? findLocal(x) : null;
+  if (!['yt', 'radio', 'podcast'].includes(x.source)) return null;
+  let t = S.tracks.get(x.id);
+  if (!t) {
+    const thumb = safeUrl(x.thumb || '');
+    t = { ...x, thumb, coverId: thumb ? 'u:' + thumb : null, plays: 0, lastPlayed: 0, lyrics: '', addedAt: x.addedAt || Date.now() };
+    if (t.url) t.url = safeUrl(t.url);
+    if (thumb) S.covers.set(t.coverId, thumb);
+    S.tracks.set(t.id, t);
+  }
+  if (x.saved || x.liked) { t.saved = true; if (x.liked) t.liked = true; }
+  await db.put('tracks', t);
+  return t;
+}
+
+async function importDataFile(file) {
+  let d;
+  try { d = JSON.parse(await file.text()); } catch { return toast('Fichier illisible'); }
+  if (d?.type === 'maison-playlist') {
+    const ts = [];
+    for (const x of d.tracks || []) { const t = await adoptTrack({ ...x, saved: true }); if (t) ts.push(t); }
+    const miss = (d.tracks || []).length - ts.length;
+    const p = { id: uid(), name: String(d.name || 'Playlist partagée').slice(0, 80), trackIds: ts.map(t => t.id), createdAt: Date.now(), updatedAt: Date.now() };
+    S.playlists.set(p.id, p); await db.put('playlists', p); bump();
+    toast(`Playlist « ${p.name} » ajoutée${d.from ? ` (de ${String(d.from).slice(0, 30)})` : ''}${miss ? ` · ${miss} titre${miss > 1 ? 's' : ''} absent${miss > 1 ? 's' : ''} (fichiers de son téléphone)` : ''}`);
+    return goto('#/playlist/' + p.id);
+  }
+  if (d?.type === 'maison-backup') {
+    return confirmSheet('Restaurer cette sauvegarde ?', 'Tes réglages, playlists, titres likés et radios seront ajoutés à ceux de ce téléphone. Rien n\'est supprimé.', 'Restaurer', async () => {
+      for (const x of d.tracks || []) await adoptTrack(x);
+      for (const p of d.playlists || []) {
+        const ids = [];
+        for (const r of p.tracks || []) { const t = r.local ? findLocal(r) : S.tracks.get(r.id); if (t) ids.push(t.id); }
+        const np = { id: S.playlists.has(p.id) ? uid() : p.id, name: String(p.name || 'Playlist').slice(0, 80), trackIds: ids, createdAt: p.createdAt || Date.now(), updatedAt: Date.now() };
+        S.playlists.set(np.id, np); await db.put('playlists', np);
+      }
+      for (const r of d.likedLocal || []) { const t = findLocal(r); if (t) { t.liked = true; await db.put('tracks', t); } }
+      if (d.settings && typeof d.settings === 'object') {
+        const { apiKey, ytKey, ...rest } = d.settings;
+        Object.assign(S.settings, rest); saveSettings(); applyTheme();
+      }
+      if (Array.isArray(d.history) && !AI.historySize()) saveJSON('onde.history', d.history);
+      bump(); render(true);
+      toast('Sauvegarde restaurée');
+    });
+  }
+  toast('Ce fichier ne vient pas de l\'application');
+}
+function pickDataFile() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.json,application/json';
+  inp.addEventListener('change', () => { if (inp.files[0]) importDataFile(inp.files[0]); });
+  inp.click();
+}
+
 async function deleteTracks(ids) {
   const set = new Set(ids);
+  S.mixes = {};
   const coverIds = new Set();
   for (const id of ids) {
     const t = S.tracks.get(id);
@@ -916,6 +1076,10 @@ function audioDuration(file) {
 }
 
 async function importFiles(fileList) {
+  S.importing = true;
+  try { return await importFilesInner(fileList); } finally { S.importing = false; }
+}
+async function importFilesInner(fileList) {
   const lrcs = [...fileList].filter(f => /\.(lrc|txt)$/i.test(f.name));
   const files = [...fileList].filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
   if (!files.length && lrcs.length) { const n = await attachLyricsFiles(lrcs); toast(n ? `Paroles ajoutées à ${plural(n, 'titre')}` : 'Aucun titre correspondant à ces paroles'); return; }
@@ -1018,7 +1182,7 @@ async function loadLyrics(t) {
     const txt = await fetchOnline(t);
     t.lyricsChecked = Date.now();
     if (txt) { t.lyrics = txt; t.lyricsSource = 'LRCLIB'; }
-    await db.put('tracks', t);
+    await saveTrack(t);
     if (player.currentId !== t.id) return;
     S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 };
   }
@@ -1110,7 +1274,7 @@ function lyricsSheet(t) {
       t.lyrics = e.target.lyr.value.trim();
       t.lyricsSource = t.lyrics ? 'ajoutées par toi' : '';
       t.lyricsChecked = Date.now();
-      await db.put('tracks', t);
+      await saveTrack(t);
       await closeSheet();
       if (t.id === player.currentId) loadLyrics(t);
       toast(t.lyrics ? 'Paroles enregistrées' : 'Paroles supprimées');
@@ -1127,7 +1291,7 @@ async function attachLyricsFiles(files) {
     if (!t) continue;
     t.lyrics = (await f.text()).trim();
     t.lyricsSource = 'fichier .lrc';
-    await db.put('tracks', t);
+    await saveTrack(t);
     n++;
     if (t.id === player.currentId) loadLyrics(t);
   }
@@ -1233,7 +1397,7 @@ function renderChat() {
     if (m.role === 'user') return `<div class="msg me"><p>${esc(m.text)}</p></div>`;
     let mixHtml = '';
     if (m.mix) {
-      const key = 'chat-' + i;
+      const key = 'chat-' + (m.id || i);
       if (!S.mixes[key]) S.mixes[key] = { key, name: m.mix.name, desc: m.mix.desc, emoji: '✦', tracks: m.mix.ids.map(id => S.tracks.get(id)).filter(Boolean) };
       const mx = S.mixes[key];
       const dur = mx.tracks.reduce((s, t) => s + t.duration, 0);
@@ -1252,55 +1416,54 @@ function afterAI(view) {
   return log;
 }
 
+function pushChat(m) {
+  m.id ||= uid();
+  S.chat.push(m);
+  S.chat = S.chat.slice(-40);
+  saveJSON('onde.chat', S.chat);
+  return m;
+}
+
 async function aiSend(text, { navigate = true } = {}) {
   if (S.aiBusy || !text) return null;
+  // Verrou pour toute la demande : un double appui ou la voix ne lancent pas deux fois la même chose
+  S.aiBusy = true; document.body.classList.add('ai-busy');
+  try { return await aiSendInner(text, navigate); }
+  catch (e) { console.warn(e); return null; }
+  finally { S.aiBusy = false; document.body.classList.remove('ai-busy'); }
+}
+
+async function aiSendInner(text, navigate) {
   const tracks = allTracks();
   if (navigate && S.route?.name !== 'ai') { S.pendingFwd = true; goto('#/ai'); await new Promise(r => setTimeout(r, 60)); }
-  S.chat.push({ role: 'user', text });
-  // Avec une clé Claude : le Concierge-agent pilote toute l'app. Sinon : compréhension locale.
+  pushChat({ role: 'user', text });
+  // retour immédiat : la bulle et les points d'attente s'affichent tout de suite
+  $('#ai-log')?.insertAdjacentHTML('beforeend', `<div class="msg me"><p>${esc(text)}</p></div><div class="msg bot typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
+  main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+  S.lastMix = null;
+  // 1) Compréhension locale d'abord : instantanée pour « pause », « suivant », « mets Skyrock »…
   let quick = null;
-  if (S.settings.apiKey) {
-    S.aiBusy = true; document.body.classList.add('ai-busy');
-    $('#ai-log')?.insertAdjacentHTML('beforeend', `<div class="msg me"><p>${esc(text)}</p></div><div class="msg bot typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
-    main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+  try { quick = await smartCommand(text); } catch (e) { console.warn(e); }
+  // 2) Sinon, avec une clé Claude, l'agent prend la main sur toute l'app
+  if (!quick && S.settings.apiKey) {
     try {
       const hist = S.chat.slice(0, -1).slice(-8).map(m => ({ role: m.role, content: m.text || '…' }));
       quick = await AI.runAgent(S.settings.apiKey, text, { tracks, chat: hist, context: agentContext(), exec: agentExec });
     } catch (e) {
       console.warn(e);
-      toast('Claude indisponible, je passe en mode local');
+      toast(navigator.onLine === false ? 'Hors connexion : je reste en mode local' : 'Claude indisponible, je passe en mode local');
     }
-    S.aiBusy = false; document.body.classList.remove('ai-busy');
   }
-  if (!quick) { try { quick = await smartCommand(text); } catch (e) { console.warn(e); } }
   if (!quick && !tracks.length) quick = S.settings.ytKey ? 'Je n\'ai pas compris. Essaie « mets Ninho », « mets Skyrock », « mets les infos », « pause » ou « suivant ».' : 'Je n\'ai pas compris. Essaie « mets Skyrock » ou « mets les infos ». Ajoute ta clé YouTube dans les Réglages pour que je trouve n\'importe quel son.';
   if (quick) {
     const lm = S.lastMix; S.lastMix = null;
-    S.chat.push({ role: 'assistant', text: quick, mix: lm ? { name: lm.name, desc: lm.desc, ids: lm.tracks.map(t => t.id) } : null });
-    saveJSON('onde.chat', S.chat);
+    pushChat({ role: 'assistant', text: quick, mix: lm ? { name: lm.name, desc: lm.desc, ids: lm.tracks.map(t => t.id) } : null });
     if (S.route?.name === 'ai') { $('#ai-log').innerHTML = renderChat(); main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' }); }
     return { reply: quick };
   }
-  S.aiBusy = true;
-  document.body.classList.add('ai-busy');
-  const log = $('#ai-log');
-  log?.insertAdjacentHTML('beforeend', `<div class="msg me"><p>${esc(text)}</p></div><div class="msg bot typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
-  main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
-  let res;
-  const t0 = Date.now();
-  try {
-    if (S.settings.apiKey) {
-      const hist = S.chat.slice(0, -1).map(m => ({ role: m.role, content: m.role === 'assistant' && m.mix ? `${m.text} [playlist « ${m.mix.name} », ${m.mix.ids.length} titres]` : m.text }));
-      res = await AI.askClaude(S.settings.apiKey, text, tracks, hist);
-    }
-  } catch (e) {
-    console.warn(e);
-    toast('Claude indisponible, je passe en mode hors ligne');
-  }
-  if (!res) {
-    if (!AI.hasIntent(text, tracks)) {
-      res = { reply: 'Je n\'ai pas compris. Tu peux me dire par exemple : « mets du rap », « fais-moi une playlist pour la salle », « supprime cette playlist », « pause », « mets Skyrock ».' };
-    }
+  let res = null;
+  if (!AI.hasIntent(text, tracks)) {
+    res = { reply: 'Je n\'ai pas compris. Tu peux me dire par exemple : « mets du rap », « fais-moi une playlist pour la salle », « supprime cette playlist », « pause », « mets Skyrock ».' };
   }
   if (!res) {
     const u = AI.understand(text, tracks);
@@ -1320,18 +1483,13 @@ async function aiSend(text, { navigate = true } = {}) {
     };
     res = { reply: m.tracks.length ? `« ${m.name} » : ${plural(m.tracks.length, 'titre')}, ${fmtTotal(dur)}. ${lines[u.mood] || ''}` : 'Je n\'ai pas trouvé de titres qui collent, essaie autre chose.', mix: m.tracks.length ? m : null, play: u.play };
   }
-  await new Promise(r => setTimeout(r, Math.max(0, 700 - (Date.now() - t0))));
-  S.chat.push({ role: 'assistant', text: res.reply, mix: res.mix ? { name: res.mix.name, desc: res.mix.desc, ids: res.mix.tracks.map(t => t.id) } : null });
-  S.chat = S.chat.slice(-40);
-  saveJSON('onde.chat', S.chat);
-  S.aiBusy = false;
-  document.body.classList.remove('ai-busy');
+  const msg = pushChat({ role: 'assistant', text: res.reply, mix: res.mix ? { name: res.mix.name, desc: res.mix.desc, ids: res.mix.tracks.map(t => t.id) } : null });
   if (S.route?.name === 'ai') {
     $('#ai-log').innerHTML = renderChat();
     main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
   }
   if ((res.play || !navigate) && res.mix) {
-    const key = 'chat-' + (S.chat.length - 1);
+    const key = 'chat-' + msg.id;
     const mx = S.mixes[key] || res.mix;
     playIds(mx.tracks.map(t => t.id), 0, { context: { label: mx.name, route: '#/mix/' + key } });
   }
@@ -1760,7 +1918,7 @@ async function manageCommand(n) {
     await deleteTracks([cur.id]); return 'Titre supprimé.';
   }
   // vider la file d'attente
-  if (/(vide|efface|nettoie|supprime) (la )?file/.test(n)) { player.queue.splice(player.index + 1); player.emit('queue'); return 'File d\'attente vidée.'; }
+  if (/(vide|efface|nettoie|supprime) (la )?file/.test(n)) { player.clearUpcoming(); return 'File d\'attente vidée.'; }
   // renommer une playlist
   let m = n.match(/renomm\w* (?:la playlist |ma playlist |cette playlist )?(.*?)\s*(?:en|par|comme) (.+)$/);
   if (m) {
@@ -1919,12 +2077,14 @@ const podPrefs = loadJSON('onde.podprefs', {});
 const savePodPrefs = () => saveJSON('onde.podprefs', podPrefs);
 const showKey = t => norm(t?.artist || '');
 let sbSegs = null, sbFor = null, podLearn = null, autoStartDone = null;
+const endSkipped = new Set(); // épisodes dont la fin (pubs) a déjà été sautée
 
 player.addEventListener('track', async () => {
   const t = player.current;
   np.classList.toggle('pod', t?.source === 'podcast');
   sbSegs = null; sbFor = t?.id; podLearn = null;
   if (!t) return;
+  if (t.source === 'podcast') endSkipped.delete(t.id);
   if (t.source === 'yt' && S.settings.skipAds) {
     const segs = await Src.sponsorSegments(t.ytId);
     if (sbFor === t.id) sbSegs = segs.map(x => ({ ...x, done: false }));
@@ -1955,7 +2115,7 @@ player.addEventListener('time', () => {
   }
   if (t.source === 'podcast' && d && isFinite(d)) {
     const pr = podPrefs[showKey(t)];
-    if (pr?.end && d - now <= pr.end && d - now > 1 && !t._endSkipped) { t._endSkipped = true; toast('Fin de l\'émission (pubs) sautée'); player.next(true); }
+    if (pr?.end && d - now <= pr.end && d - now > 1 && !endSkipped.has(t.id)) { endSkipped.add(t.id); toast('Fin de l\'émission (pubs) sautée'); player.next(); }
   }
 });
 
@@ -1988,14 +2148,14 @@ player.addEventListener('queue', () => {
   const t = S.tracks.get(prevId);
   if (t?.source !== 'podcast' || !S._lastPodPos) return;
   const rem = (t.duration || 0) - S._lastPodPos;
-  if (rem > 25 && rem < 420 && S._lastPodPos > t.duration * 0.6 && !t._endSkipped) {
+  if (rem > 25 && rem < 420 && S._lastPodPos > (S._lastPodDur || t.duration) * 0.6 && !endSkipped.has(t.id)) {
     const k = showKey(t);
     podPrefs[k] = { ...(podPrefs[k] || {}), end: Math.round(rem - 5) };
     savePodPrefs();
     toast(`C'est noté : je couperai les ${fmt(rem)} de fin de « ${t.artist} »`);
   }
 });
-player.addEventListener('time', () => { if (player.current?.source === 'podcast') S._lastPodPos = player.time; });
+player.addEventListener('time', () => { if (player.current?.source === 'podcast') { S._lastPodPos = player.time; S._lastPodDur = player.duration; } });
 
 // ======================================================================
 // Son : volume et égaliseur
@@ -2653,7 +2813,8 @@ function pushCtxHist(ids, i, opts) {
   const c = opts.context || {};
   const radio = t.source === 'radio';
   const key = radio ? 'radio:' + t.id : c.route || 'ctx:' + (c.label || t.title);
-  const entry = { key, label: radio ? t.title : (c.label || t.title), route: radio ? null : c.route || null, ids: radio ? [t.id] : ids.slice(0, 80), coverId: t.coverId || null, kind: t.source || 'local', at: Date.now() };
+  const route = c.route?.startsWith('#/mix/chat-') ? null : c.route;
+  const entry = { key, label: radio ? t.title : (c.label || t.title), route: radio ? null : route || null, ids: radio ? [t.id] : ids.slice(0, 80), coverId: t.coverId || null, kind: t.source || 'local', at: Date.now() };
   const list = loadJSON('onde.ctxHist', []).filter(h => h.key !== key);
   list.unshift(entry);
   saveJSON('onde.ctxHist', list.slice(0, 10));
@@ -2967,6 +3128,7 @@ function viewSettings() {
         <button class="btn ghost sm" data-act="voice-test" type="button">Écouter la voix</button></label>
     </section>
     <section class="set-group"><h3>Anti-pub</h3>
+      <label class="set-item toggle"><div><b>Lecture automatique</b><small>Quand la file est finie, l'app enchaîne sur des sons du même style.</small></div><input type="checkbox" id="set-autoplay" ${S.settings.autoplay ? 'checked' : ''}><span class="sw"></span></label>
       <label class="set-item toggle"><div><b>Sauter les pubs et passages hors sujet</b><small>YouTube : sponsors, autopromo, intros (base collaborative SponsorBlock). Podcasts : quand tu sautes la pub du début ou de la fin, l'app s'en souvient pour les épisodes suivants de la même émission.</small></div><input type="checkbox" id="set-ads" ${S.settings.skipAds ? 'checked' : ''}><span class="sw"></span></label>
     </section>
     <section class="set-group"><h3>Paroles</h3>
@@ -2983,6 +3145,8 @@ function viewSettings() {
     <section class="set-group"><h3>Bibliothèque</h3>
       <button class="set-item btnlike" data-act="import"><div><b>Importer de la musique</b><small>Fichiers ou dossier depuis ton téléphone</small></div>${icon('import')}</button>
       <div class="set-item"><div><b>Stockage utilisé</b><small id="storage">Calcul…</small></div></div>
+      <button class="set-item btnlike" data-act="backup-export"><div><b>Sauvegarder mes données</b><small>Playlists, likes, radios et réglages dans un fichier (sans tes clés). Utile pour changer de téléphone.</small></div>${icon('import')}</button>
+      <button class="set-item btnlike" data-act="backup-import"><div><b>Restaurer ou ouvrir un fichier</b><small>Une sauvegarde, ou une playlist qu'on t'a envoyée</small></div>${icon('folder')}</button>
       <button class="set-item btnlike danger" data-act="wipe"><div><b>Tout effacer</b><small>Supprime toute la musique et les playlists de l'application</small></div>${icon('trash')}</button>
     </section>
     <section class="set-group"><h3>Installer l'application</h3>
@@ -2993,7 +3157,7 @@ function viewSettings() {
         ${S.installPrompt ? `<button class="btn primary" data-act="install">${icon('import')} Installer maintenant</button>` : ''}
       </div>
     </section>
-    <p class="about">${esc(brandName())} · ta maison de la musique · aucune pub, aucun pistage. Ta musique ne quitte jamais ton téléphone.</p>
+    <p class="about">${esc(brandName())} · ta maison de la musique · aucun pistage. Tes fichiers restent sur ton téléphone ; les recherches passent par YouTube, les radios et les podcasts.</p>
     </div></div>`;
 }
 
@@ -3098,6 +3262,7 @@ function afterRender(view, r) {
     vr?.style.setProperty('--p', `${(S.settings.voiceRate - 0.8) / 0.6 * 100}%`);
     vr?.addEventListener('input', () => { S.settings.voiceRate = +vr.value; saveSettings(); Voice.setVoicePrefs({ rate: +vr.value }); vr.style.setProperty('--p', `${(vr.value - 0.8) / 0.6 * 100}%`); });
     $('#set-ads', view).addEventListener('change', e => { S.settings.skipAds = e.target.checked; saveSettings(); });
+    $('#set-autoplay', view)?.addEventListener('change', e => { S.settings.autoplay = e.target.checked; saveSettings(); });
     $('#set-voice', view).addEventListener('change', e => { S.settings.voiceReply = e.target.checked; saveSettings(); });
     $('#set-lyr', view).addEventListener('change', e => { S.settings.onlineLyrics = e.target.checked; saveSettings(); });
     $('#set-key', view).addEventListener('change', e => { S.settings.apiKey = e.target.value.trim(); saveSettings(); toast(S.settings.apiKey ? 'Clé enregistrée sur ce téléphone' : 'Clé supprimée'); });
@@ -3197,6 +3362,8 @@ document.addEventListener('click', e => {
         render(true); toast('Bibliothèque effacée');
       });
       case 'install': S.installPrompt?.prompt(); return;
+      case 'backup-export': return exportBackup();
+      case 'backup-import': return pickDataFile();
       case 'clear-hist': AI.clearHistory(); S.mixes = {}; toast('Historique effacé'); return render(true);
       case 'mix-regen': S.mixes[act.dataset.key] = null; getMix(act.dataset.key); return render(true);
       case 'mix-save': return saveMixAsPlaylist(S.mixes[act.dataset.key]);
@@ -3310,6 +3477,15 @@ async function boot() {
   if ((!location.hash || location.hash === '#/' || location.hash === '#') && S.settings.startTab && S.settings.startTab !== 'home') history.replaceState(null, '', { search: '#/search', ai: '#/ai', library: '#/library' }[S.settings.startTab] || '#/');
   render();
   if (!S.settings.onboarded) setTimeout(onboarding, 1300);
+  // titres en ligne de la file précédente (YouTube, podcasts) : on les remet en mémoire avant la reprise
+  try {
+    const sess = loadJSON('onde.session', null);
+    for (const t of Object.values(sess?.remote || {})) {
+      if (!t?.id || S.tracks.has(t.id) || !['yt', 'radio', 'podcast'].includes(t.source)) continue;
+      t.thumb = safeUrl(t.thumb || ''); if (t.url) t.url = safeUrl(t.url);
+      S.tracks.set(t.id, t); if (t.thumb && t.coverId) S.covers.set(t.coverId, t.thumb);
+    }
+  } catch { /* ignore */ }
   player.restore(new Set(S.tracks.keys()));
   updateNowPlaying();
   updateModes();
@@ -3321,7 +3497,15 @@ async function boot() {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
     // nouvelle version installée → on recharge une fois pour l'afficher
     let reloaded = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded && S.hadController) { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded || !S.hadController) return;
+      // Nouvelle version : on ne coupe jamais une musique, un import ou une réponse en cours
+      const apply = () => { if (reloaded) return; reloaded = true; player.save?.(); location.reload(); };
+      const safe = () => !player.playing && !S.importing && !S.aiBusy;
+      if (safe()) return apply();
+      toast('Mise à jour prête : elle s\'appliquera à la prochaine pause');
+      const iv = setInterval(() => { if (safe()) { clearInterval(iv); apply(); } }, 5000);
+    });
     S.hadController = !!navigator.serviceWorker.controller;
   }
 }

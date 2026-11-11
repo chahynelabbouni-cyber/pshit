@@ -48,12 +48,51 @@ function officialScore(v) {
   return s;
 }
 
+// Requête réseau avec délai maximum et messages clairs en français
+export async function fetchT(url, opts = {}, ms = 9000) {
+  try { return await fetch(url, { ...opts, signal: AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined }); }
+  catch (e) {
+    if (navigator.onLine === false) throw new Error('Pas de connexion internet');
+    if (e.name === 'TimeoutError' || e.name === 'AbortError') throw new Error('Connexion trop lente, réessaie');
+    throw new Error('Service injoignable pour le moment');
+  }
+}
+// Réponse YouTube : traduit les erreurs (quota, clé…) et retient un quota épuisé jusqu'au lendemain
+let ytBlockedUntil = Number(localStorage.getItem('onde.ytBlocked') || 0);
+export const ytQuotaOver = () => Date.now() < ytBlockedUntil;
+async function ytJson(url) {
+  if (ytQuotaOver()) throw Object.assign(new Error('Quota YouTube du jour épuisé : il revient demain matin. En attendant, radios, infos et podcasts marchent.'), { reason: 'quotaExceeded' });
+  const r = await fetchT(url);
+  const j = await r.json().catch(() => ({}));
+  if (r.ok) return j;
+  const reason = j.error?.errors?.[0]?.reason || '';
+  if (/quota|dailyLimit|rateLimit/i.test(reason)) {
+    const d = new Date(); d.setUTCHours(8, 5, 0, 0); if (d <= new Date()) d.setUTCDate(d.getUTCDate() + 1);
+    ytBlockedUntil = +d; try { localStorage.setItem('onde.ytBlocked', String(ytBlockedUntil)); } catch { /* ignore */ }
+  }
+  const msg = /quota|dailyLimit|rateLimit/i.test(reason) ? 'Quota YouTube du jour épuisé : il revient demain matin. En attendant, radios, infos et podcasts marchent.'
+    : /keyInvalid|badRequest/i.test(reason) || /API key not valid/i.test(j.error?.message || '') ? 'Clé YouTube invalide : vérifie-la dans les Réglages.'
+    : /accessNotConfigured|SERVICE_DISABLED/i.test(reason + JSON.stringify(j.error?.details || '')) ? 'Active « YouTube Data API v3 » pour ta clé dans Google Cloud.'
+    : /forbidden|ipRefererBlocked|API_KEY_SERVICE_BLOCKED/i.test(reason + JSON.stringify(j.error?.details || '')) ? 'Ta clé YouTube est bloquée : retire ses restrictions dans Google Cloud.'
+    : r.status === 404 ? 'Introuvable sur YouTube (playlist privée ?)' : `YouTube indisponible (${r.status})`;
+  throw Object.assign(new Error(msg), { reason });
+}
+// Petit cache des recherches (économise le quota gratuit : 100 unités par recherche)
+const ytCache = new Map();
+
 /** Recherche YouTube. songsOnly (par défaut) : uniquement de vrais morceaux (1 à 8 min, pas de compil), sources officielles d'abord. */
 export async function ytSearch(key, q, max = 20, { songsOnly = true } = {}) {
-  const p = new URLSearchParams({ part: 'snippet', type: 'video', videoCategoryId: '10', maxResults: Math.min(50, songsOnly ? max * 2 + 10 : max), q, key, regionCode: 'FR', relevanceLanguage: 'fr' });
-  const r = await fetch(`${YT_API}/search?${p}`);
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error?.message || 'Recherche YouTube impossible');
+  const ck = [q.trim().toLowerCase(), max, songsOnly].join('|');
+  const hit = ytCache.get(ck);
+  if (hit && Date.now() - hit.at < 30 * 60e3) return hit.v;
+  const p = new URLSearchParams({ part: 'snippet', type: 'video', videoEmbeddable: 'true', videoCategoryId: '10', maxResults: Math.min(50, songsOnly ? max * 2 + 10 : max), q, key, regionCode: 'FR', relevanceLanguage: 'fr' });
+  const j = await ytJson(`${YT_API}/search?${p}`);
+  const v = await ytSearchRank(key, j, max, songsOnly);
+  ytCache.set(ck, { at: Date.now(), v });
+  if (ytCache.size > 60) ytCache.delete(ytCache.keys().next().value);
+  return v;
+}
+async function ytSearchRank(key, j, max, songsOnly) {
   const ids = j.items.map(i => i.id.videoId).filter(Boolean);
   const all = await ytVideos(key, ids, j.items);
   if (!songsOnly) return all.slice(0, max);
@@ -69,9 +108,7 @@ export async function ytSearch(key, q, max = 20, { songsOnly = true } = {}) {
 export async function ytVideos(key, ids, snippets = []) {
   if (!ids.length) return [];
   const p = new URLSearchParams({ part: 'contentDetails,snippet', id: ids.join(','), key });
-  const r = await fetch(`${YT_API}/videos?${p}`);
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error?.message || 'YouTube indisponible');
+  const j = await ytJson(`${YT_API}/videos?${p}`);
   const map = new Map(j.items.map(v => [v.id, v]));
   return ids.map(id => {
     const v = map.get(id) || snippets.find(s => s.id?.videoId === id);
@@ -89,16 +126,13 @@ export async function ytVideos(key, ids, snippets = []) {
 export async function ytPlaylist(key, listId) {
   let ids = [], token = '', name = 'Playlist YouTube';
   try {
-    const pr = await fetch(`${YT_API}/playlists?${new URLSearchParams({ part: 'snippet', id: listId, key })}`);
-    const pj = await pr.json();
+    const pj = await ytJson(`${YT_API}/playlists?${new URLSearchParams({ part: 'snippet', id: listId, key })}`);
     if (pj.items?.[0]) name = pj.items[0].snippet.title;
   } catch { /* nom par défaut */ }
   do {
     const p = new URLSearchParams({ part: 'contentDetails', playlistId: listId, maxResults: 50, key });
     if (token) p.set('pageToken', token);
-    const r = await fetch(`${YT_API}/playlistItems?${p}`);
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error?.message || 'Playlist introuvable (elle doit être publique ou non répertoriée)');
+    const j = await ytJson(`${YT_API}/playlistItems?${p}`);
     ids.push(...j.items.map(i => i.contentDetails.videoId));
     token = j.nextPageToken;
   } while (token && ids.length < 500);
@@ -110,7 +144,7 @@ export async function ytPlaylist(key, listId) {
 // Titre d'une vidéo sans clé (oEmbed public)
 export async function ytInfoNoKey(id) {
   try {
-    const r = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent('https://www.youtube.com/watch?v=' + id)}`);
+    const r = await fetchT(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent('https://www.youtube.com/watch?v=' + id)}`);
     if (r.ok) {
       const j = await r.json();
       const { artist, title } = cleanYouTubeTitle(j.title, j.author_name);
@@ -138,19 +172,23 @@ function loadYT() {
   return apiReady;
 }
 
+// N'accepte que des adresses https valides (les annuaires de radios sont publics)
+export function safeHttps(u) { try { const x = new URL(u); return x.protocol === 'https:' ? x.href : ''; } catch { return ''; } }
+
 export class YouTubeElement extends EventTarget {
-  // Deux lecteurs YouTube : l'un joue, l'autre prépare le son suivant en coulisses (changement quasi instantané)
+  // Deux lecteurs YouTube officiels : l'un joue, l'autre a déjà chargé le son suivant (changement rapide).
+  // Règles YouTube respectées : pas de lecture cachée, pas de relance forcée quand YouTube se met en pause.
   constructor(host) {
     super();
-    document.addEventListener('visibilitychange', () => { if (document.hidden) { this._hiddenAt = Date.now(); this._retries = 0; } });
     this.host = host;
-    this.slots = [0, 1].map(() => ({ el: null, player: null, videoId: null, priming: false }));
+    this.slots = [0, 1].map(() => ({ el: null, player: null, videoId: null, ready: null, failed: false }));
     this.a = 0;                 // lecteur actif
     this.videoId = null;
     this._paused = true;
     this._vol = 1;
     this._dur = 0;
     this._tick = 0;
+    this.errorCode = null;
     this.src = '';
   }
   get player() { return this.slots[this.a].player; }
@@ -159,6 +197,7 @@ export class YouTubeElement extends EventTarget {
   set currentTime(t) { try { this.player?.seekTo(t, true); } catch { /* ignore */ } }
   get duration() { try { return this.player?.getDuration?.() || this._dur; } catch { return this._dur; } }
   get readyState() { return this.player ? 4 : 0; }
+  get playbackRate() { return 1; }
   get volume() { return this._vol; }
   set volume(v) { this._vol = v; try { this.player?.setVolume(Math.round(v * 100)); } catch { /* ignore */ } }
   fire(t) { this.dispatchEvent(new Event(t)); }
@@ -167,90 +206,85 @@ export class YouTubeElement extends EventTarget {
     this.slots.forEach((s, i) => { if (s.el) s.el.classList.toggle('yt-standby', i !== this.a); });
   }
 
-  // Crée (une seule fois) le lecteur d'un emplacement
-  async ensure(i, id, autoplay) {
-    const YT = await loadYT();
+  // Crée le lecteur d'un emplacement une seule fois, même si plusieurs demandes arrivent en même temps
+  ensure(i, id, autoplay, start = 0) {
     const s = this.slots[i];
-    if (s.player) return false;
-    if (!this.host.querySelector('.yt-slot')) this.host.innerHTML = '';
-    s.el = document.createElement('div');
-    s.el.className = 'yt-slot';
-    const div = document.createElement('div');
-    s.el.appendChild(div);
-    this.host.appendChild(s.el);
-    s.videoId = id;
-    await new Promise(resolve => {
-      s.player = new YT.Player(div, {
-        videoId: id,
-        width: '100%', height: '100%',
-        playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, iv_load_policy: 3, autoplay: autoplay ? 1 : 0, origin: location.origin },
-        events: {
-          onReady: () => resolve(),
-          onStateChange: e => this.onState(e.data, i),
-          onError: () => { if (i === this.a) this.fire('error'); },
-        },
+    if (s.ready) return s.ready.then(() => false);
+    s.ready = (async () => {
+      const YT = await loadYT();
+      if (!this.host.querySelector('.yt-slot')) this.host.innerHTML = '';
+      s.el = document.createElement('div');
+      s.el.className = 'yt-slot';
+      const div = document.createElement('div');
+      s.el.appendChild(div);
+      this.host.appendChild(s.el);
+      s.videoId = id;
+      const ready = new Promise(resolve => {
+        s.player = new YT.Player(div, {
+          videoId: id,
+          width: '100%', height: '100%',
+          playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, iv_load_policy: 3, autoplay: autoplay ? 1 : 0, start: Math.floor(start) || undefined, origin: location.origin },
+          events: {
+            onReady: () => resolve(),
+            onStateChange: e => this.onState(e.data, i),
+            onError: e => {
+              if (i === this.a) { this.errorCode = e.data; clearInterval(this._tick); this._paused = true; this.fire('error'); }
+              else { s.videoId = null; s.failed = true; } // le son préparé est illisible : on ne le réutilisera pas
+            },
+          },
+        });
       });
-    });
-    this.showActive();
-    return true;
+      await Promise.race([ready, new Promise((_, rej) => setTimeout(() => rej(new Error('YouTube ne répond pas')), 15000))]);
+      this.showActive();
+    })();
+    s.ready.catch(() => { s.ready = null; s.player = null; s.el?.remove(); s.el = null; });
+    return s.ready.then(() => true);
   }
 
-  async load(id, duration = 0, autoplay = false) {
+  async load(id, duration = 0, autoplay = false, start = 0) {
     this.videoId = id;
     this.src = 'yt:' + id;
     this._dur = duration;
-    this._userPause = false;
+    this.errorCode = null;
     const standby = this.slots[1 - this.a];
-    // Le son demandé est déjà prêt dans le lecteur de coulisses : on bascule dessus
-    if (standby.player && standby.videoId === id) {
+    // Le son demandé est déjà prêt dans le second lecteur : on bascule dessus
+    let usable = standby.player && standby.videoId === id && !standby.failed;
+    try { usable = usable && standby.player.getPlayerState?.() !== undefined; } catch { usable = false; }
+    if (usable) {
       try { this.player?.pauseVideo(); } catch { /* ignore */ }
       this.a = 1 - this.a;
-      standby.priming = false;
       this.showActive();
-      try { standby.player.unMute(); standby.player.setVolume(Math.round(this._vol * 100)); } catch { /* ignore */ }
+      try { standby.player.setVolume(Math.round(this._vol * 100)); if (start) standby.player.seekTo(start, true); } catch { /* ignore */ }
       if (autoplay) standby.player.playVideo();
       return;
     }
     const s = this.slots[this.a];
-    if (await this.ensure(this.a, id, autoplay)) return;
-    s.videoId = id;
-    s.priming = false;
-    try { s.player.unMute(); } catch { /* ignore */ }
-    autoplay ? s.player.loadVideoById(id) : s.player.cueVideoById(id);
+    if (await this.ensure(this.a, id, autoplay, start)) return;
+    s.videoId = id; s.failed = false;
+    const o = { videoId: id, startSeconds: Math.floor(start) || 0 };
+    autoplay ? s.player.loadVideoById(o) : s.player.cueVideoById(o);
   }
 
-  // Prépare le son suivant : chargé en silence puis mis en pause au début
+  // Prépare le son suivant dans le second lecteur, sans le lire (« cue » : simple chargement)
   async preload(id) {
     const i = 1 - this.a;
     const s = this.slots[i];
-    if (s.videoId === id && s.player) return;
+    if (s.videoId === id && s.player && !s.failed) return;
     try {
       const created = await this.ensure(i, id, false);
       if (i === this.a) return; // la lecture a changé entre-temps
-      s.videoId = id;
-      s.priming = true;
-      s.player.mute();
-      if (created) s.player.playVideo(); else s.player.loadVideoById(id);
+      s.videoId = id; s.failed = false;
+      if (!created) s.player.cueVideoById(id);
     } catch { /* tant pis, chargement normal au moment voulu */ }
   }
 
   onState(st, i) {
-    const s = this.slots[i];
-    if (i !== this.a) {
-      // lecteur de coulisses : dès qu'il a commencé à charger, on le met en pause au début
-      if (s.priming && st === 1) { s.priming = false; try { s.player.pauseVideo(); s.player.seekTo(0, true); } catch { /* ignore */ } }
-      return;
-    }
+    if (i !== this.a) return; // le lecteur en attente ne joue jamais
     // -1 non démarré, 0 fini, 1 lecture, 2 pause, 3 chargement, 5 prêt
-    // Le navigateur met souvent la vidéo en pause quand on quitte l'app : on tente de la relancer.
-    if (st === 2 && !this._userPause && document.hidden && Date.now() - (this._hiddenAt || 0) < 4000 && (this._retries || 0) < 3) {
-      this._retries = (this._retries || 0) + 1;
-      setTimeout(() => { try { this.player.playVideo(); } catch { /* ignore */ } }, 250);
-    }
-    if (st === 1) { this._userPause = false; this._retries = 0; }
     if (st === 1) {
       if (this._paused) { this._paused = false; this.fire('play'); }
       this.fire('loadedmetadata');
+      this.fire('durationchange');
       clearInterval(this._tick);
       this._tick = setInterval(() => this.fire('timeupdate'), 400);
     } else if (st === 2 || st === 0 || st === 5 || st === -1) {
@@ -262,11 +296,9 @@ export class YouTubeElement extends EventTarget {
 
   async play() {
     if (!this.player) return;
-    this._wantPlay = true;
-    this._userPause = false;
     this.player.playVideo();
   }
-  pause() { this._userPause = true; try { this.player?.pauseVideo(); } catch { /* ignore */ } }
+  pause() { try { this.player?.pauseVideo(); } catch { /* ignore */ } }
   removeAttribute() { this.pause(); }
 }
 
@@ -279,11 +311,11 @@ async function rb(path) {
   let err;
   for (const base of RB) {
     try {
-      const r = await fetch(base + path);
+      const r = await fetchT(base + path, {}, 6000);
       if (r.ok) return await r.json();
     } catch (e) { err = e; }
   }
-  throw err || new Error('Radios indisponibles');
+  throw new Error(navigator.onLine === false ? 'Pas de connexion internet' : 'Radios indisponibles pour le moment, réessaie');
 }
 
 function mapStation(s) {
@@ -292,7 +324,7 @@ function mapStation(s) {
   const raw = s.url_resolved || s.url || '';
   return {
     radioId: s.stationuuid, title: s.name.trim(), artist: [s.country, (s.tags || '').split(',').slice(0, 2).join(', ')].filter(Boolean).join(' · '),
-    url: raw.replace(/^http:\/\//i, 'https://'), thumb: s.favicon && s.favicon.startsWith('https') ? s.favicon : '',
+    url: raw.replace(/^http:\/\//i, 'https://'), thumb: safeHttps(s.favicon),
     secure: raw.startsWith('https'),
   };
 }
@@ -415,7 +447,7 @@ export async function sponsorSegments(videoId) {
   const cats = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'music_offtopic', 'preview'];
   const p = new URLSearchParams({ videoID: videoId, categories: JSON.stringify(cats) });
   try {
-    const r = await fetch(`https://sponsor.ajay.app/api/skipSegments?${p}`);
+    const r = await fetchT(`https://sponsor.ajay.app/api/skipSegments?${p}`);
     if (!r.ok) return [];
     const j = await r.json();
     return j.filter(x => x.actionType !== 'mute' && x.actionType !== 'full').map(x => ({ start: x.segment[0], end: x.segment[1], cat: x.category }));
