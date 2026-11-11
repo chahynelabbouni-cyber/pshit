@@ -1443,7 +1443,7 @@ async function aiSendInner(text, navigate) {
   S.lastMix = null;
   // 1) Compréhension locale d'abord : instantanée pour « pause », « suivant », « mets Skyrock »…
   let quick = null;
-  try { quick = await smartCommand(text); } catch (e) { console.warn(e); }
+  try { quick = await multiCommand(text) || await smartCommand(text); } catch (e) { console.warn(e); }
   // 2) Sinon, avec une clé Claude, l'agent prend la main sur toute l'app
   if (!quick && S.settings.apiKey) {
     try {
@@ -1524,7 +1524,7 @@ const GENRES = [
   ['annees 90', /\b(annees 90|90s)\b/, '90s', 'années 90'],
   ['chanson francaise', /\b(chanson francaise|variete)\b/, 'chanson francaise', 'chanson française'],
 ];
-const MOOD_RADIO = { ecole: ['lofi', 'lofi hip hop pour étudier'], sport: ['edm', 'rap motivation muscu son'], chill: ['chill', 'chill music'], soiree: ['dance', 'musique soirée'], nuit: ['ambient', 'musique douce pour dormir'], matin: ['pop', 'musique bonne humeur'], trajet: ['hits', 'hits du moment'] };
+const MOOD_RADIO = { ecole: ['lofi', 'lofi hip hop pour étudier'], sport: ['edm', 'rap motivation muscu son'], chill: ['chill', 'chill music'], soiree: ['dance', 'musique soirée'], nuit: ['ambient', 'musique douce pour dormir'], matin: ['pop', 'musique bonne humeur'], trajet: ['hits', 'hits du moment'], triste: ['sad', 'sons tristes rap fr'] };
 
 function cleanAsk(text) {
   let n = norm(text).replace(/[.!?,;:"«»]/g, ' ').replace(/['’`-]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1532,9 +1532,18 @@ function cleanAsk(text) {
   n = n.replace(/\b(s il te plait|s il vous plait|stp|svp|please|merci)\b/g, ' ').replace(/\s+/g, ' ').trim();
   n = n.replace(/^(est ce que |est ce qu )?(tu peux|tu pourrais|peux tu|pourrais tu|tu veux bien|je veux|jveux|j veux|je voudrais|jvoudrais|j aimerais|j ai envie d ecouter|j ai envie de|j ai envie d|vas y|fais moi|on ecoute|on met)\s+/, '');
   n = n.replace(/^(?:me |m )?(mettre|lancer|jouer|passer|ecouter)\s+/, (_, v) => ({ mettre: 'mets ', lancer: 'lance ', jouer: 'joue ', passer: 'passe ', ecouter: 'ecoute ' })[v]);
-  // nombres écrits en lettres → chiffres (« avance d une minute »)
-  const NUM = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, dix: 10, quinze: 15, vingt: 20, trente: 30, quarante: 40, cinquante: 50 };
-  n = n.replace(/\b(une?|deux|trois|quatre|cinq|dix|quinze|vingt|trente|quarante|cinquante)\s+(s|sec|secondes?|min|minutes?|h|heures?)\b/g, (_, w, u) => NUM[w] + ' ' + u);
+  // erreurs de dictée : « mais / mé / mai du rap » → « mets du rap », « nan » → « non »
+  n = n.replace(/^(?:mai|mais|me|mes|mettez|metre)\s+(?!(?:non|oui|pas|c est|ca|je|tu|a|en|ou|toi|moi)\b|(?:titres?|likes?|playlists?|favoris|reglages|parametres)\b)/, 'mets ');
+  n = n.replace(/^(nan|nn|nope|naan)\b/, 'non');
+  // lettres épelées : « r f m » → rfm, « n r j » → nrj
+  n = n.replace(/\b[b-df-hj-np-tv-z](?: [b-df-hj-np-tv-z]\b)+/g, x => x.replace(/ /g, ''));
+  // durées et nombres écrits en lettres → chiffres (« minuteur une demi heure », « volume à cinquante »)
+  n = n.replace(/\b(?:une )?demi ?heure\b/g, '30 min').replace(/\btrois quarts? d heure\b/g, '45 min').replace(/\b(?:un )?quart d heure\b/g, '15 min').replace(/\bune heure et demie\b/g, '90 min');
+  const U = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6, sept: 7, huit: 8, neuf: 9, dix: 10, onze: 11, douze: 12, quinze: 15, vingt: 20, trente: 30, quarante: 40, cinquante: 50, soixante: 60, cent: 100 };
+  const W = '(?:' + Object.keys(U).join('|') + ')(?:[ ](?:et[ ])?(?:un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix))?';
+  const toN = x => x.split(/ (?:et )?/).reduce((a, w) => a + (U[w] || 0), 0);
+  n = n.replace(new RegExp(`\\b(${W})\\s+(s|sec|secondes?|min|minutes?|h|heures?|pour ?cent|%)\\b`, 'g'), (_, w, u) => toN(w) + ' ' + u);
+  n = n.replace(new RegExp(`\\b(volume|son)\\s+(a|au)\\s+(${W})\\b`, 'g'), (_, a, b, w) => `${a} ${b} ${toN(w)}`);
   return n.trim();
 }
 
@@ -1558,6 +1567,104 @@ function clearChat() {
   if (S.route?.name === 'ai') render(true);
 }
 
+// ======================================================================
+// Réglages, personnalisation et navigation à la voix
+// ======================================================================
+const COLOR_WORDS = { rubis: /rouge|rubis|bordeaux/, saphir: /bleu|saphir/, emeraude: /vert|emeraude/, amethyste: /violet|mauve|amethyste/, rose: /\brose\b/, argent: /gris|argent|blanc|silver/, corail: /orange|corail/, or: /\bor\b|dore|jaune|gold/ };
+const OFF_WORDS = /\b(enleve|retire|desactive|arrete|coupe|enlever|sans|plus de|stop|eteins|vire|supprime)\b/;
+const cap = x => x.trim().replace(/^./, c => c.toUpperCase());
+function setS(patch, msg) {
+  Object.assign(S.settings, patch);
+  saveSettings(); applyTheme();
+  Voice.setVoicePrefs({ name: S.settings.voiceName, rate: S.settings.voiceRate });
+  if (S.route?.name === 'settings') render(true);
+  return msg;
+}
+function settingsCommand(n) {
+  let m;
+  if (/^(mets?|lance|joue) (du |des |de la |le son |la musique )/.test(n) && !/\b(theme|couleur|fond|vinyle|police|egaliseur)\b/.test(n)) return null;
+  // nom de l'assistant
+  if ((m = n.match(/^(?:appelle toi|maintenant tu t appelles?|tu t appelles? (?:maintenant )?|ton (?:nouveau )?(?:nom|prenom) (?:c est|est|sera)|je vais t appeler|je t appelle(?:rai)?)\s+(?!comment|qui|quoi)(.{1,20})$/)))
+    return setS({ botName: cap(m[1]) }, `D'accord, je m'appelle ${cap(m[1])} maintenant.`);
+  // prénom de l'utilisateur
+  if ((m = n.match(/^(?:appelle moi|mon (?:pre)?nom (?:c est|est)|je m appelle)\s+(.{1,24})$/)))
+    return setS({ name: cap(m[1]) }, `Enchanté ${cap(m[1])} ! Ta Maison porte maintenant ton prénom.`);
+  // nom de l'app
+  if ((m = n.match(/(?:renomm\w*|appelle) (?:l app(?:li(?:cation)?)?|l appli)\s+(?:en |comme )?(.{1,30})$/)))
+    return setS({ appName: cap(m[1]) }, `L'app s'appelle maintenant « ${cap(m[1])} ».`);
+  // couleur
+  if (/\b(couleur|theme|teinte)\b|^(mets?|passe) (tout |l app )?en (rouge|bleu|vert|violet|rose|orange|gris|or|dore|jaune)$/.test(n)) {
+    const k = Object.keys(COLOR_WORDS).find(c => COLOR_WORDS[c].test(n));
+    if (k) return setS({ theme: k }, `Couleur ${THEMES[k].label} appliquée.`);
+    const hex = n.match(/#?([0-9a-f]{6})\b/);
+    if (hex) return setS({ theme: 'perso', customColor: '#' + hex[1] }, 'Couleur perso appliquée.');
+  }
+  // fond d'écran
+  if (/(?<!a )\bfond\b(?! sonore)|arriere plan|mode sombre|amoled|noir pur/.test(n) && !/\ba fond\b/.test(n)) {
+    const k = /amoled|noir pur|tout noir/.test(n) ? 'amoled' : /nuit|bleu/.test(n) ? 'nuit' : /ardoise|gris/.test(n) ? 'ardoise' : /chaud|marron|brun/.test(n) ? 'chaud' : /foret|vert/.test(n) ? 'foret' : /noir/.test(n) ? 'noir' : null;
+    if (k) return setS({ bgTheme: k }, `Fond ${BACKGROUNDS[k].label}.`);
+  }
+  if (/\bvinyles?\b/.test(n) && !/\b(sons?|musiques?|playlist|disques?)\b/.test(n)) return setS({ vinyl: !OFF_WORDS.test(n) }, OFF_WORDS.test(n) ? 'Mode vinyle désactivé.' : 'Mode vinyle activé : la pochette tourne comme un disque.');
+  if (/\b(texte|ecriture|police|lettres|ecrit)\b/.test(n) && /(agrandi|plus gros|plus grand|grossi|retreci|plus petit|rapetiss)/.test(n)) {
+    const L = ['petit', 'normal', 'grand', 'tresgrand']; const i = Math.max(0, L.indexOf(S.settings.textSize || 'normal'));
+    const j = Math.max(0, Math.min(3, i + (/(retreci|plus petit|rapetiss)/.test(n) ? -1 : 1)));
+    return setS({ textSize: L[j] }, 'Taille du texte ajustée.');
+  }
+  if ((m = n.match(/police (elegante|moderne|arrondie|ronde|machine|mono|normale)/))) return setS({ font: { elegante: 'serif', moderne: 'sans', arrondie: 'rond', ronde: 'rond', machine: 'mono', mono: 'mono', normale: 'auto' }[m[1]] }, 'Police changée.');
+  // voix de l'assistant
+  if (/parle (moins vite|plus lentement|doucement|lentement)/.test(n)) return setS({ voiceRate: Math.max(0.8, +((S.settings.voiceRate || 1.04) - 0.15).toFixed(2)) }, 'Je parle plus lentement.');
+  if (/parle (plus vite|plus rapidement)/.test(n)) return setS({ voiceRate: Math.min(1.4, +((S.settings.voiceRate || 1.04) + 0.15).toFixed(2)) }, 'Je parle plus vite.');
+  if (/(repond|parle|lis).*(voix haute|a l oral|a voix)|\b(ta|la) voix\b/.test(n) && /(arrete|\bne\b|plus|coupe|desactive|sans)/.test(n)) return setS({ voiceReply: false }, 'Ok, je réponds seulement par écrit.');
+  if (/(repond|parle)s?\b.*(voix haute|a l oral)/.test(n)) return setS({ voiceReply: true }, 'Je te réponds à voix haute.');
+  // ton
+  if (/parle (moi )?(comme|en mode) (un )?(pote|poto|frere|jeune)|sois (plus )?(familier|cool|detendu)/.test(n)) return setS({ botTone: 'pote' }, 'Ça marche, on se parle entre potes.');
+  if (/sois (plus )?(bref|court|concis)|fais court|reponses? (plus )?courtes?/.test(n)) return setS({ botTone: 'bref' }, 'Compris.');
+  if (/sois (plus )?(elegant|classe|poli|raffine)/.test(n)) return setS({ botTone: 'elegant' }, 'Avec plaisir.');
+  // égaliseur
+  if ((m = n.match(/(?:egaliseur|eq)\s+(?:en |mode |sur )?(normal|basses?|voix|aigus|soiree|douce)|(plus|encore plus) de (basses?|aigus)\b|^(?:mets? )?(?:le )?son (?:en mode |mode )(normal|basses?|voix|aigus|soiree|douce)$/))) {
+    let k = (m[1] || m[3] || m[4]).replace(/^basse$/, 'basses');
+    if (k === 'basses' && (m[2] === 'encore plus' || S.settings.eq === 'basses')) k = 'basses2';
+    S.settings.eq = k; saveSettings(); player.setEQ(EQ_PRESETS[k]); if (player.kind === 'local') player.ensureAudioGraph();
+    return `Égaliseur ${EQ_NAMES[k]}.` + (player.kind !== 'local' ? ' (Il agit sur tes fichiers importés.)' : '');
+  }
+  if (/\b(pubs?|sponsors?)\b/.test(n) && /(saute|zappe|vire|enleve|skip)/.test(n) && !/podcast|episode/.test(n) && !player.current) return setS({ skipAds: true }, 'Je saute les passages de pub dès que je peux (podcasts et sponsors YouTube).');
+  if (/\b(fondu|crossfade|enchainement)\b/.test(n)) return setS({ crossfade: OFF_WORDS.test(n) ? 0 : 6 }, OFF_WORDS.test(n) ? 'Fondu désactivé.' : 'Fondu enchaîné activé.');
+  if (/lecture auto(matique)?/.test(n)) return setS({ autoplay: !OFF_WORDS.test(n) }, OFF_WORDS.test(n) ? 'Lecture automatique désactivée.' : 'Lecture automatique activée.');
+  // navigation
+  if ((m = n.match(/^(?:ouvre|va (?:dans|sur|a)|vas (?:dans|sur|a)|affiche|montre(?: moi)?|emmene moi (?:dans|sur|a))\s+(?:les |la |le |l |mes |ma |mon )?(reglages|parametres|options|bibliotheque|accueil|recherche|likes|titres likes|playlists|historique)$/))) {
+    const h = { reglages: '#/settings', parametres: '#/settings', options: '#/settings', bibliotheque: '#/library', playlists: '#/library', accueil: '#/', recherche: '#/search', likes: '#/liked', 'titres likes': '#/liked', historique: '#/history' }[m[1]];
+    Promise.resolve(closeAllOverlays()).then(() => { S.pendingFwd = true; goto(h); });
+    return 'Voilà.';
+  }
+  if (/^(montre|affiche|ouvre|voir).*(file|a suivre)/.test(n)) { openNP(); setTimeout(queueSheet, 450); return 'Voici la file d\'attente.'; }
+  return null;
+}
+
+// Plusieurs demandes dans une phrase : « mets du rap et monte le son », « lance jul en aléatoire », « mets ninho puis jul »
+const CLAUSE_VERB = /^(mets?|met|lance|joue|monte|baisse|augmente|diminue|pause|stop|arrete|coupe|passe|ajoute|active|desactive|change|minuteur|reprends?|remets?|like|enleve|vide|ouvre|appelle)\b/;
+async function multiCommand(text) {
+  const n = cleanAsk(text);
+  const mod = n.match(/^(.+?) (en (?:mode )?(aleatoire|boucle|shuffle))$/);
+  if (mod && /^(mets?|lance|joue)\b/.test(mod[1])) {
+    const r = await smartCommand(mod[1]);
+    if (!r) return null;
+    if (mod[3] === 'boucle') { player.repeat = 'one'; player.emit('modes'); } else if (!player.shuffle) player.toggleShuffle();
+    return `${r} En ${mod[3] === 'boucle' ? 'boucle' : 'aléatoire'}.`;
+  }
+  const parts = n.split(/\s+(?:et puis|et apres|et ensuite|puis|ensuite|et)\s+/);
+  if (parts.length < 2) return null;
+  // « mets ninho puis jul » : la suite sans verbe va dans la file d'attente
+  if (/^(mets?|lance|joue)\b/.test(parts[0]) && /\b(puis|ensuite|apres)\b/.test(n) && parts.slice(1).every(p => !CLAUSE_VERB.test(p) && p.split(' ').length <= 4)) {
+    const out = [await smartCommand(parts[0])];
+    for (const p of parts.slice(1)) out.push(await manageCommand(`ajoute ${p} a la file`));
+    return out.filter(Boolean).join(' ') || null;
+  }
+  if (!parts.slice(1).every(p => CLAUSE_VERB.test(p))) return null; // « Bigflo et Oli » reste une seule demande
+  const out = [];
+  for (const p of parts) { const r = await smartCommand(p); if (r) out.push(r); }
+  return out.length ? out.join(' ') : null;
+}
+
 async function smartCommand(text) {
   const n = cleanAsk(text);
   const words = n.split(' ').filter(Boolean).length;
@@ -1579,9 +1686,16 @@ async function smartCommand(text) {
   if (!n) return null;
 
   // --- volume (avant la gestion des playlists : « mets le son à 30 » ne crée pas de playlist)
-  if (/(volume|son).*(au max|a fond|au maximum|a 100)|^a fond$/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; player.setVolume(1); return 'Volume à 100 %.'; }
+  if (/(volume|son).*(au max|a fond|au maximum|a 100)|^(?:mets? )?(?:le |a )?(?:a fond|au max(?:imum)?)$/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; player.setVolume(1); return 'Volume à 100 %.'; }
   let mv = n.match(/(?:volume|son)\s+(?:a\s+|au\s+)?(\d+)/);
   if (mv) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume(+mv[1] / 100); return `Volume à ${Math.round(v * 100)} %.`; }
+  // --- réglages et navigation (avant la pause : « arrête de me répondre à voix haute » ne coupe pas la musique)
+  const stc = settingsCommand(n);
+  if (stc) return stc;
+  // --- heure, météo, morceau proposé en attente
+  if (/(quelle heure|l heure qu il est|il est quelle heure)/.test(n)) return `Il est ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}.`;
+  if (/\b(meteo|quel temps|il fait (beau|froid|chaud)|il va pleuvoir)\b/.test(n)) return 'Je n\'ai pas la météo, mais dis « mets les infos » pour le dernier flash.';
+  if (S.pendingPlay && /^(oui|ouais|vas y|go|ok|lance|lance le|mets le|mets la|d accord)$/.test(n)) { const ts = S.pendingPlay; S.pendingPlay = null; playIds(ts.map(t => t.id), 0, { context: { label: ts[0].title } }); return `Je lance « ${ts[0].title} ».`; }
   // --- répétition et minuteur « off » (avant la pause : « arrête de répéter » ne met pas en pause)
   if (/(boucle|repet)/.test(n)) { player.repeat = /(arrete|plus|stop|desactive|enleve|retire|annule|coupe|sans|enlever)/.test(n) ? 'off' : 'one'; player.emit('modes'); return player.repeat === 'one' ? 'Je répète ce titre.' : 'Répétition désactivée.'; }
   if (/(annule|enleve|desactive|supprime|stop|arrete).*(minuteur|timer|mise en veille)/.test(n)) { player.setSleep(0); return 'Minuteur annulé.'; }
@@ -1601,6 +1715,14 @@ async function smartCommand(text) {
     return await playYtQuery(cur.artist, `d'autres sons de ${cur.artist}`) || `Je n'ai rien trouvé d'autre de ${cur.artist}.`;
   }
 
+  const fu = n.match(/\b(?:son|ses|leur) (dernier|derniere|nouvel|nouveau|nouvelle|premier|meilleur|plus gros) ?(album|single|son|titre|clip|projet|tube|hit|morceau)?s?\b|\bses (sons|titres|classiques|hits|tubes)\b/);
+  if (fu && cur?.artist && cur.source === 'yt') { const what = fu[0].replace(/^(son|ses|leur) /, ''); return await playYtQuery(`${cur.artist} ${what}`, `${what} de ${cur.artist}`) || `Je n'ai rien trouvé pour ${what} de ${cur.artist}.`; }
+  if (cur?.source === 'radio' && /(change|autre|une autre|suivante?|zappe) (de |la )?(radio|station)|^(radio |station )?suivante$/.test(n)) {
+    const L = Src.FR_STATIONS; const i = L.findIndex(x => norm(cur.title).includes(norm(x)));
+    const r = await playRadioByName(L[(i + 1) % L.length]); return r ? 'Radio suivante. ' + r : 'Je n\'ai pas trouvé d\'autre radio.';
+  }
+  if (cur && /^(encore|encore une fois|remets la|remets le|une deuxieme fois|bis)$/.test(n)) { player.seek(0); player.play(); return 'Encore une fois, je le remets.'; }
+
   // --- correction : « je voulais les sons officiels, pas des compils / vidéos »
   if (S.lastYtQuery && S.settings.ytKey && /(officiel|vrais? sons?|vraies? musiques?|pas (des |de |une )?(compil|mix|video|ensemble|longue)|que des sons|titre par titre|morceaux? separes?)/.test(n)) {
     try {
@@ -1616,12 +1738,17 @@ async function smartCommand(text) {
   }
 
   // --- minuteur
-  let m = n.match(/(?:arrete|coupe|stop|eteins|pause).*?(?:dans|d ici|apres)\s*(\d+)\s*(min|minute|h|heure)/);
+  if (/\breveill?e[ -]?moi\b|\b(alarme|reveil)\b.*\b(a|pour|de|vers)\s*\d|\bmets?( moi)? (un|une) (reveil|alarme)\b/.test(n))
+    return 'Je ne peux pas sonner quand l\'app est fermée : règle plutôt l\'alarme de ton téléphone. Par contre je peux arrêter la musique toute seule : dis « minuteur 30 minutes ».';
+  let m = n.match(/(?:(?:arrete|coupe|stop|eteins|pause).*?(?:dans|d ici|apres)|\b(?:minuteur|timer|mise en veille|veille)\b)\D{0,14}?(\d+)\s*(min|minute|h|heure)/);
   if (m) { const mins = m[2].startsWith('h') ? +m[1] * 60 : +m[1]; player.setSleep(mins); return `D'accord, j'arrête la musique dans ${mins} minutes.`; }
+  if (/\b(minuteur|timer)\b/.test(n) && /(combien|reste|quand)/.test(n)) return player.sleepAt ? `Il reste ${Math.ceil((player.sleepAt - Date.now()) / 60000)} minutes au minuteur.` : player.sleepEndOfTrack ? 'J\'arrête à la fin de ce titre.' : 'Aucun minuteur en cours.';
+  if (/\b(minuteur|timer|mise en veille)\b/.test(n) && !/\d/.test(n) && !/(annule|enleve|desactive|stop|arrete)/.test(n)) { sleepSheet(); return 'Dans combien de minutes ? Dis par exemple « minuteur 20 minutes ».'; }
   if (/(a la fin (du|de ce) (titre|son|morceau))/.test(n) && /(arrete|stop|coupe)/.test(n)) { player.setSleep('end'); return 'J\'arrête à la fin de ce titre.'; }
 
-  // --- contrôles de lecture
-  if (words <= 7) {
+  // --- contrôles de lecture (sauf si c'est une demande « mets X » : « mets changes », « mets i like it »)
+  const playReq = /^(?:mets?|met|lance|joue|ecoute|trouve|cherche)\s+(?!(?:en )?pause\b|plus (?:fort|bas)|moins fort|le son\b|la suite\b|le suivant|la suivante|au suivant|a fond|la lecture$|la musique$|(?:en )?(?:mode )?aleatoire$|en boucle$|(?:un |le )?(?:coeur|like)$|en favori)/.test(n);
+  if (words <= 7 && !playReq) {
     if (/\b(pause|stop|stoppe|arrete|arreter|coupe|silence|tais toi|chut)\b/.test(n) && !/\b(pas|plus de pub)\b/.test(n)) { player.pause(); S.cmdPaused = true; return 'Pause.'; }
     if (/^(reprends?|reprendre|relance|relancer|remets?|remettre|continue|continuer|play|lecture|joue|vas y|go|allez|resume)( la musique| le son| la lecture| le morceau| le titre)?$/.test(n)) { if (!cur) return 'Il n\'y a rien en cours. Dis-moi quoi écouter.'; player.play(); return 'C\'est reparti.'; }
     if (/(recommence|depuis le debut|au debut|reprends au debut)/.test(n)) { player.seek(0); player.play(); return 'Je reprends depuis le début.'; }
@@ -1633,14 +1760,26 @@ async function smartCommand(text) {
     if (m && cur) { const sec = +m[3] * (m[4].startsWith('m') ? 60 : 1); player.seek(player.time + sec); return `J'avance de ${fmtDur(sec)}.`; }
     m = n.match(/(recule|reviens|retourne)\s+(de\s+|d\s+)?(\d+)\s*(s|sec|secondes?|min|minutes?)/);
     if (m && cur) { const sec = +m[3] * (m[4].startsWith('m') ? 60 : 1); player.seek(player.time - sec); return `Je recule de ${fmtDur(sec)}.`; }
-    if (/(monte|augmente|plus fort|hausse|monter) ?(le )?(son|volume)?|^plus fort$/.test(n) && !/\b(sport|energie)\b/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) + 0.2); return `Volume à ${Math.round(v * 100)} %.`; }
-    if (/(baisse|diminue|moins fort|plus bas|baisser) ?(le )?(son|volume)?/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) - 0.25); return `Volume à ${Math.round(v * 100)} %.`; }
+    if (/^(?:mets? )?(?:monte|augmente|hausse|monter)(?: (?:le |un peu (?:le )?)?(?:son|volume))?(?: un peu)?$|\bplus fort\b/.test(n) && !/\b(sport|energie)\b/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) + 0.2); return `Volume à ${Math.round(v * 100)} %.`; }
+    if (/^(?:mets? )?(?:baisse|diminue|baisser)(?: (?:le |un peu (?:le )?)?(?:son|volume))?(?: un peu)?$|\b(moins fort|plus bas)\b/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; const v = player.setVolume((player.base ?? 1) - 0.25); return `Volume à ${Math.round(v * 100)} %.`; }
     if (/\b(aleatoire|shuffle|melange|melanger)\b/.test(n)) { player.toggleShuffle(); return player.shuffle ? 'Lecture aléatoire activée.' : 'Lecture aléatoire désactivée.'; }
     if (/\b(file d attente|a suivre|apres|ensuite|prochain)\b/.test(n) && /(quoi|qu est|c est|koi)/.test(n)) { const nx = S.tracks.get(player.queue[player.index + 1]); return nx ? `Ensuite : « ${nx.title} »${nx.artist ? ' de ' + nx.artist : ''}.` : 'Rien à suivre pour l\'instant.'; }
     if (cur && /(j ?aime|like|liker|coeur|favori|kiffe|adore|banger|love|trop bien ce son|ajoute (le |ce |aux? )?(titre |son )?(aux? )?(likes?|favoris|coups? de coeur))/.test(n) && !/(playlist|mix|pas)/.test(n)) { if (!cur.liked) toggleLike(cur); return `« ${cur.title} » est dans tes titres likés.`; }
     if (cur && /(c est quoi|cest quoi|c quoi|c koi|ckoi|quel est|qu est ce que c est|qui chante|comment (ca |il )?s appelle|c est qui|quelle (musique|chanson|radio|emission))/.test(n) && !/\b(infos?|actus?|journal|news|apres|a suivre|ensuite|prochain|meteo)\b/.test(n)) return cur.source === 'radio' ? `Tu écoutes ${cur.title} en direct.` : `C'est « ${cur.title} »${cur.artist ? ' de ' + cur.artist : ''}.`;
     if (cur && /\bparoles?\b/.test(n)) { openNP(); setTimeout(openLyrics, 450); return 'Voici les paroles.'; }
     if (/\b(file d attente|a suivre|apres)\b/.test(n) && /(quoi|qu est|c est)/.test(n)) { const nx = S.tracks.get(player.queue[player.index + 1]); return nx ? `Ensuite : « ${nx.title} »${nx.artist ? ' de ' + nx.artist : ''}.` : 'Rien à suivre pour l\'instant.'; }
+  }
+
+  // --- questions sur la musique (sans clé Claude : réponse via YouTube)
+  if (/^(c est quoi|cest quoi|c quoi|c koi|qui a (chante|fait|ecrit|sorti)|quand est sorti|il est sorti quand|quel est|quelle est|raconte moi|parle moi de)\b|\b(il|elle) a quel age\b|\bsorti quand\b/.test(n) && words >= 3 && !/\b(infos?|actus?|actualites?|journal|news|podcasts?|radios?|meteo|heure)\b/.test(n)) {
+    const tip = S.settings.apiKey ? '' : ' Pour de vraies réponses sur la musique, ajoute une clé Claude dans les Réglages.';
+    const q = n.replace(/^(c est quoi|cest quoi|c quoi|c koi|qui a (chante|fait|ecrit|sorti)|quand est sorti|il est sorti quand|quel est|quelle est|raconte moi|parle moi de)\s*/, '')
+      .replace(/\b(ce son|cette musique|ce titre|l histoire de ce son)\b/, cur ? `${cur.title} ${cur.artist || ''}` : '').replace(/\b(il a quel age|sorti quand)\b/, '').trim();
+    if (S.settings.ytKey && q) {
+      const r = await Src.ytSearch(S.settings.ytKey, q, 3).catch(() => []);
+      if (r[0]) { S.pendingPlay = r.map(x => remoteTrack(x, 'yt')); return `D'après YouTube : « ${r[0].title} »${r[0].artist ? ' de ' + r[0].artist : ''}. Dis « vas-y » pour l'écouter.${tip}`; }
+    }
+    return `Je ne peux pas répondre à ça tout seul.${tip || ' Essaie « mets » suivi d\'un artiste.'}`;
   }
 
   // --- verbe d'action « mets / joue / lance … »
@@ -1727,7 +1866,7 @@ async function smartCommand(text) {
 
   // --- ambiances quand la bibliothèque est petite : on passe par la radio / YouTube
   if (allTracks().length < 8) {
-    const mood = [['ecole', /ecole|cours|devoir|revis|travail|bosser|focus|concentr|etud/], ['sport', /sport|muscu|salle|courir|running|cardio|motiv/], ['nuit', /dormir|dodo|sommeil|nuit/], ['chill', /chill|calme|detente|relax|tranquille|pluie|triste|deprim|seum|chagrin|melancol|coup de mou/], ['soiree', /soiree|fete|danser|ambiance|apero/], ['matin', /matin|reveil/], ['trajet', /trajet|voiture|route/]].find(([, re]) => re.test(ask));
+    const mood = [['triste', /triste|pleur|\bsad\b|deprim|seum|chagrin|melancol|rupture|coeur brise|nostalg/], ['ecole', /ecole|cours|devoir|revis|travail|bosser|focus|concentr|etud/], ['sport', /sport|muscu|salle|courir|running|cardio|motiv/], ['nuit', /dormir|dodo|sommeil|nuit/], ['chill', /chill|calme|detente|relax|tranquille|pluie|triste|deprim|seum|chagrin|melancol|coup de mou/], ['soiree', /soiree|fete|danser|ambiance|apero/], ['matin', /matin|reveil/], ['trajet', /trajet|voiture|route/]].find(([, re]) => re.test(ask));
     if (mood) {
       const [tag, ytq] = MOOD_RADIO[mood[0]];
       if (S.settings.ytKey) {
@@ -1841,6 +1980,10 @@ async function agentExec(name, a) {
     case 'now_playing': {
       const nx = player.queue.slice(player.index + 1, player.index + 6).map(id => S.tracks.get(id)).filter(Boolean).map(t => `${t.title} — ${t.artist || ''}`);
       return { current: cur ? { title: cur.title, artist: cur.artist, source: cur.source || 'fichier', playing: player.playing, position: Math.round(player.time), duration: Math.round(player.duration || 0) } : null, next: nx, volume: Math.round((player.base ?? 1) * 100) };
+    }
+    case 'app_command': {
+      const c = cleanAsk(a.command || '');
+      return settingsCommand(c) || await manageCommand(c) || (/(vide|efface).*(file|conversation)/.test(c) ? await smartCommand(a.command) : null) || { error: 'Commande non comprise par l\'application' };
     }
     case 'navigate': { await closeAllOverlays(); S.pendingFwd = true; goto({ home: '#/', search: '#/search', library: '#/library', concierge: '#/ai', settings: '#/settings', liked: '#/liked' }[a.screen] || '#/'); return 'OK'; }
   }
@@ -1968,7 +2111,8 @@ function quickCommand(text) {
   const n = norm(text).replace(/[.!?,]/g, ' ').replace(/'/g, ' ').replace(/\s+/g, ' ').trim();
   const words = n.split(' ').length;
   const cur = player.current;
-  if (words <= 4) {
+  const playReq = /^(joue|jouer|mets|met|mais|lance|ecoute|ecouter|play)\s/.test(n);
+  if (words <= 4 && !playReq) {
     if (/^(pause|stop|arrete|coupe|silence|tais)/.test(n)) { player.pause(); return 'Pause.'; }
     if (/^(reprends|reprend|play|relance|continue|remets|lecture)$/.test(n)) { player.play(); return 'C\'est reparti.'; }
     if (/(suivant|suivante|next|passe|skip|zappe|change)/.test(n)) { player.next(); return 'Titre suivant.'; }
@@ -1976,7 +2120,7 @@ function quickCommand(text) {
     if (/(aleatoire|shuffle|melange)/.test(n)) { player.toggleShuffle(); return player.shuffle ? 'Lecture aléatoire activée.' : 'Lecture aléatoire désactivée.'; }
     if (/(en boucle|repete|boucle)/.test(n)) { player.repeat = 'one'; player.emit('modes'); return 'Je répète ce titre.'; }
   }
-  if (cur && words <= 7 && /(j aime|like|coeur|favori|kiffe)/.test(n) && !/playlist|mix/.test(n)) {
+  if (cur && words <= 7 && !playReq && /(j aime|like|coeur|favori|kiffe)/.test(n) && !/playlist|mix/.test(n)) {
     if (!cur.liked) toggleLike(cur);
     return `« ${cur.title} » est dans tes titres likés.`;
   }
@@ -2016,23 +2160,27 @@ async function startVoice({ navigate = false } = {}) {
     return;
   }
   if (S.voiceOn) { Voice.stopListening(); return; }
+  if (S.aiBusy) { toast('Une seconde, je finis la demande précédente'); return; }
   S.voiceOn = true;
   Voice.stopSpeaking();
+  // iPhone : la voix doit être « débloquée » pendant l'appui
+  if (Voice.canSpeak && !S.ttsUnlocked) { try { speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch { /* ignore */ } S.ttsUnlocked = true; }
   const said = $('.v-said', vbox), ans = $('.v-answer', vbox);
   said.textContent = ''; ans.textContent = '';
   vbox.className = 'voice listening';
   vbox.hidden = false;
   requestAnimationFrame(() => vbox.classList.add('open'));
-  // Pendant que tu parles, la musique se met en pause (meilleure écoute), puis reprend
+  // Pendant que tu parles, la musique se met en pause (une radio baisse juste le son), puis reprend
   S.voiceWasPlaying = player.playing;
   S.voiceTrack = player.currentId;
-  if (player.playing) player.pause();
+  if (player.playing) { if (player.current?.source === 'radio') player.duck(true); else player.pause(); }
   let text = '';
   try {
     text = await Voice.listen({ onPartial: t => { said.textContent = t; } });
   } catch (e) {
     ans.textContent = e.message === 'not-allowed' || e.message === 'service-not-allowed'
-      ? 'Autorise le micro pour cette app dans les réglages du navigateur.'
+      ? 'Micro refusé : autorise-le pour cette app (réglages du navigateur), ou utilise la dictée du clavier dans le chat.'
+      : e.message === 'audio-capture' ? 'Aucun micro détecté.'
       : e.message === 'network' ? 'La reconnaissance vocale a besoin d\'internet.' : 'Je n\'ai pas pu t\'écouter.';
   }
   if (!S.voiceOn) return;

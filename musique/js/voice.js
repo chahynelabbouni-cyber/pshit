@@ -15,7 +15,10 @@ export function listen({ onPartial, lang = 'fr-FR' } = {}) {
     rec.interimResults = true;
     rec.continuous = false;
     rec.maxAlternatives = 1;
-    let finalText = '';
+    let finalText = '', lastInterim = '', done = false;
+    const finish = () => { if (done) return; done = true; clearTimeout(guard); rec = null; resolve((finalText || lastInterim).trim()); };
+    // sécurité : certains téléphones ne signalent jamais la fin de l'écoute
+    const guard = setTimeout(() => { try { rec?.abort(); } catch { /* ignore */ } finish(); }, 15000);
     rec.onresult = e => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -23,14 +26,16 @@ export function listen({ onPartial, lang = 'fr-FR' } = {}) {
         if (r.isFinal) finalText += r[0].transcript;
         else interim += r[0].transcript;
       }
-      onPartial?.((finalText + ' ' + interim).trim());
+      lastInterim = (finalText + ' ' + interim).trim();
+      onPartial?.(lastInterim);
     };
     rec.onerror = e => {
       if (e.error === 'no-speech' || e.error === 'aborted') return;
+      done = true; clearTimeout(guard);
       reject(new Error(e.error));
     };
-    rec.onend = () => { rec = null; resolve(finalText.trim()); };
-    try { rec.start(); } catch (e) { reject(e); }
+    rec.onend = finish;
+    try { rec.start(); } catch (e) { clearTimeout(guard); reject(e); }
   });
 }
 
@@ -65,7 +70,8 @@ export function speak(text) {
     u.rate = prefs.rate || 1.04;
     u.pitch = 1;
     u.onend = u.onerror = () => resolve();
-    speechSynthesis.speak(u);
+    // petite pause après cancel() : sinon Chrome ignore parfois la phrase
+    setTimeout(() => speechSynthesis.speak(u), 60);
     // sécurité : certains navigateurs n'envoient jamais onend
     setTimeout(resolve, Math.min(20000, 1500 + text.length * 90));
   });
