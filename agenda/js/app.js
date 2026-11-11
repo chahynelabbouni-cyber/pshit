@@ -413,8 +413,8 @@ function weekChart() {
 // =====================================================================
 // CALENDRIER
 // =====================================================================
-const VIEWS = [['week', 'Semaine'], ['month', 'Mois']];
-const calView = () => (set().calView === 'month' ? 'month' : 'week');
+const VIEWS = [['day', 'Jour'], ['week', 'Semaine'], ['month', 'Mois']];
+const calView = () => (['day', 'week', 'month'].includes(set().calView) ? set().calView : 'day');
 
 function calTitle(v) {
   if (v === 'month') return cap(`${MOIS[calDate.getMonth()]} ${calDate.getFullYear()}`);
@@ -437,12 +437,12 @@ function renderCal() {
       ${isToday ? '' : `<button class="btn small" data-a="cal-today">Aujourd'hui</button>`}
     </div>
     ${v === 'month' ? monthView() : weekStrip()}
-    <div class="day-head" id="swipe-day">
+    ${v === 'week' ? weekRows() : `<div class="day-head" id="swipe-day">
       <div><b>${cap(['aujourd\'hui', 'demain', 'hier'].includes(rel) ? rel : fmtDay(selDay).split(' ')[0])}</b><span>${fmtDay(selDay)}</span></div>
       <span class="day-load" style="--l:${L.c}">${list.filter(e => !e.allDay).length ? `${list.length} · ${fmtDuration(L.minutes * MIN)}` : list.length ? list.length : 'Libre'}</span>
     </div>
     ${S().events.length ? '' : `<div class="insight" style="--c:var(--danger)"><div class="ic">⚠️</div><div class="grow"><p><b>Ton agenda est vide sur ce téléphone.</b> Ouvre le lien d'import que tu as reçu (dans Chrome) pour récupérer tous tes événements.</p></div></div>`}
-    <div class="tl day-list">${timeline(list, { gaps: true, empty: 'Rien de prévu ce jour-là 🌿<br><small>Touche + pour ajouter quelque chose</small>' })}</div>`;
+    <div class="day-list">${dayCards(list)}</div>`}`;
 }
 
 function weekStrip() {
@@ -487,18 +487,31 @@ function monthView() {
     <div class="month" id="swipe">${cells}</div>`;
 }
 
+// Carte d'un événement (style « bulle » colorée, heure en gras à gauche)
+function evCard(e, now = Date.now()) {
+  if (e.allDay) return `<div class="wr-ev allday" style="--c:${colEv(e)}" data-a="ev" data-id="${e.id}">${catOf(e.cat).emoji} ${esc(shortTitle(e))}</div>`;
+  return `<div class="wr-ev ${e.end < now ? 'past' : e.start <= now ? 'now' : ''}" style="--c:${colEv(e)}" data-a="ev" data-id="${e.id}"><b>${hm(e.start)}<small>${hm(e.end)}</small></b><span>${e.star ? '★ ' : ''}${esc(shortTitle(e))}${e.location ? `<small>${esc(e.location)}</small>` : ''}</span></div>`;
+}
+function dayCards(evs) {
+  if (!evs.length) return '<div class="empty">Rien de prévu ce jour-là 🌿<br><small>Touche + pour ajouter quelque chose</small></div>';
+  let out = '', last = null;
+  for (const e of evs) {
+    if (!e.allDay && last && e.start - last >= 90 * MIN && e.start > Date.now()) out += `<div class="wr-gap" data-a="new-at" data-t="${Math.max(last, Date.now())}">Libre ${fmtDuration(e.start - Math.max(last, Date.now()))}</div>`;
+    out += evCard(e);
+    if (!e.allDay) last = Math.max(last || 0, e.end);
+  }
+  return out;
+}
+
 function weekRows() {
-  const a = startOfWeek(calDate);
-  return `<div id="swipe" class="wrows">${[...Array(7)].map((_, i) => {
+  const a = startOfWeek(selDay);
+  return `<div class="wrows">${[...Array(7)].map((_, i) => {
     const d = addDays(a, i);
     const evs = eventsOfDay(d);
-    const L = dayLoad(d);
-    const items = evs.map(e => e.allDay
-      ? `<div class="wr-ev allday" style="--c:${colEv(e)}" data-a="ev" data-id="${e.id}">${catOf(e.cat).emoji} ${esc(e.title)}</div>`
-      : `<div class="wr-ev ${e.end < Date.now() ? 'past' : ''}" style="--c:${colEv(e)}" data-a="ev" data-id="${e.id}"><b>${hm(e.start)}</b><span>${esc(e.title)}${e.location ? `<small>${esc(e.location)}</small>` : ''}</span></div>`).join('');
-    return `<div class="wrow ${sameDay(d, new Date()) ? 'today' : ''}">
-      <div class="wr-day" data-a="day" data-d="${ymd(d)}"><span>${JOURS_C[d.getDay()]}</span><b>${d.getDate()}</b><i style="background:${L.c};opacity:${evs.length ? 1 : 0.2}"></i></div>
-      <div class="wr-list">${items || `<div class="wr-free" data-a="new-at" data-t="${new Date(d).setHours(10)}">Libre · ajouter</div>`}</div></div>`;
+    const rel = relDay(d);
+    return `<div class="wrow ${sameDay(d, new Date()) ? 'today' : ''}" id="wr-${ymd(d)}">
+      <div class="wr-day" data-a="day" data-d="${ymd(d)}"><span>${JOURS_C[d.getDay()]}</span><b>${d.getDate()}</b>${['aujourd\'hui', 'demain'].includes(rel) ? `<em>${rel === 'demain' ? 'demain' : 'auj.'}</em>` : ''}</div>
+      <div class="wr-list">${evs.map(e => evCard(e)).join('') || `<div class="wr-free" data-a="new-at" data-t="${new Date(d).setHours(10)}">Libre · ajouter</div>`}</div></div>`;
   }).join('')}</div>`;
 }
 
@@ -1592,8 +1605,11 @@ const ACTIONS = {
   'cal-prev': () => calShift(-1),
   'cal-next': () => calShift(1),
   'cal-today-old': () => { calDate = startOfDay(new Date()); selDay = calDate; renderCal(); scrollGridToNow(); },
-  sel: el => { selDay = fromYmd(el.dataset.d); renderCal(); },
-  day: el => { selDay = fromYmd(el.dataset.d); calDate = startOfMonth(selDay); go('cal'); },
+  sel: el => {
+    selDay = fromYmd(el.dataset.d); renderCal();
+    if (calView() === 'week') document.getElementById('wr-' + el.dataset.d)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+  day: el => { selDay = fromYmd(el.dataset.d); calDate = startOfMonth(selDay); set().calView = 'day'; save(); go('cal'); },
   'new-at': el => { const d = new Date(+el.dataset.t); d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0); editEvent(null, { start: d.getTime(), end: d.getTime() + 3600000 }); },
   slot: (el, ev) => {
     if (ev.target !== el) return;

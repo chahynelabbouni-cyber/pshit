@@ -644,3 +644,21 @@ body { font-size: 17px; }
 .day-list .empty { text-align: center; padding: 30px 0; }
 .day-list .empty small { color: var(--dim); }
 #fab { bottom: calc(var(--tabs-h) + var(--safe-b) + 28px); }
+
+/* v6 — journée en cartes colorées + semaine entière */
+.day-list { background: none; border: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.day-list .empty { background: var(--bg2); border-radius: 18px; }
+.wr-ev { gap: 12px; align-items: flex-start; border-radius: 14px; border-left-width: 4px; background: color-mix(in srgb, var(--c) 18%, var(--bg2)); }
+.wr-ev b { display: flex; flex-direction: column; min-width: 50px; font-size: 16px; }
+.wr-ev b small { font-weight: 500; color: var(--muted); font-size: 13px; margin-top: 1px; }
+.wr-ev span { font-weight: 600; }
+.wr-ev span small { font-weight: 400; margin-top: 2px; }
+.wr-ev.now { box-shadow: 0 0 0 2px var(--c); }
+.day-list .wr-ev { padding: 13px 14px; font-size: 17px; }
+.day-list .wr-ev.allday { font-size: 15px; padding: 11px 14px; }
+.wr-gap { font-size: 14px; color: var(--ok); padding: 2px 0 2px 16px; border-left: 2px dashed color-mix(in srgb, var(--ok) 45%, transparent); margin-left: 24px; cursor: pointer; }
+.wrows .wr-ev { font-size: 15px; padding: 9px 10px; }
+.wrows .wr-ev b { min-width: 44px; font-size: 15px; }
+.wr-day em { font-style: normal; font-size: 11px; font-weight: 800; color: var(--accent); text-transform: uppercase; }
+.wrow { scroll-margin-top: 90px; }
+.cal-top .seg button { font-size: 14px; }
