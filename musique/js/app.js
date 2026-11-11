@@ -1,10 +1,10 @@
-import { db } from './db.js?v=16';
-import { readTags } from './tags.js?v=16';
-import { Player, isIOS } from './player.js?v=16';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=16';
-import * as AI from './ai.js?v=16';
-import * as Voice from './voice.js?v=16';
-import * as Src from './sources.js?v=16';
+import { db } from './db.js?v=17';
+import { readTags } from './tags.js?v=17';
+import { Player, isIOS } from './player.js?v=17';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=17';
+import * as AI from './ai.js?v=17';
+import * as Voice from './voice.js?v=17';
+import * as Src from './sources.js?v=17';
 
 
 // ======================================================================
@@ -15,7 +15,7 @@ const S = {
   playlists: new Map(),
   covers: new Map(),       // coverId -> objectURL
   colors: loadJSON('onde.colors', {}),
-  settings: Object.assign({ name: '', lastName: '', appName: '', theme: 'or', style: 'maison', tastes: [], onboarded: false, homeFilter: 'all', crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
+  settings: Object.assign({ name: '', lastName: '', appName: '', theme: 'or', style: 'maison', tastes: [], onboarded: false, homeFilter: 'all', customColor: '#d9b26a', bgTheme: 'noir', font: 'auto', textSize: 'normal', corners: 'arrondis', motion: 'normal', coverShape: 'carree', vinyl: false, npBg: 'pochette', avatar: '', greet: '', botName: 'Concierge', botTone: 'complice', startTab: 'home', homeSections: { hero: true, quick: true, mixes: true, recent: true, radios: true, tastes: true }, crossfade: 4, visualizer: !isIOS, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
   mixes: {},
   chat: loadJSON('onde.chat', []),
   version: 0,
@@ -1208,7 +1208,7 @@ function viewAI() {
   return `<div class="ai">
     <header class="ai-head">
       <div class="ai-orb"><i></i><i></i><i></i></div>
-      <div><h1>Le Concierge</h1><small>${S.settings.apiKey ? 'Propulsé par Claude' : 'IA personnelle'}</small></div>
+      <div><h1>${esc(S.settings.botName || 'Le Concierge')}</h1><small>${S.settings.apiKey ? 'Propulsé par Claude' : 'IA personnelle'}</small></div>
       <button class="ib sm" data-act="ai-clear" aria-label="Nouvelle conversation">${icon('refresh')}</button>
     </header>
     <div class="ai-log" id="ai-log">${renderChat()}</div>
@@ -1399,7 +1399,7 @@ async function smartCommand(text) {
   const SMALL = [
     [/^(salut|slt|bonjour|bjr|coucou|hello|hey|yo|wesh|wsh|bonsoir|cc)( concierge| frere| toi| maison)?$/, () => `Salut${S.settings.name ? ' ' + S.settings.name : ''} ! Je te mets quoi ?`],
     [/^(merci|mrc|thx|merci (beaucoup|bcp)|(merci )?c (est )?(bien|cool|top|parfait|lourd|chaud)( merci)?|nickel|parfait|top|trop bien)$/, () => 'Avec plaisir !'],
-    [/^(t es qui|tes qui|tu es qui|qui es tu|c est qui toi|t es quoi)$/, () => 'Je suis le Concierge, ton assistant musique : sons, radios, podcasts, infos et playlists.'],
+    [/^(t es qui|tes qui|tu es qui|qui es tu|c est qui toi|t es quoi|comment tu t appelles)$/, () => `Je suis ${S.settings.botName || 'le Concierge'}, ton assistant musique : sons, radios, podcasts, infos et playlists.`],
     [/^(tu sais faire quoi|tu fais quoi|aide|help|qu est ce que tu sais faire|comment ca marche|tu peux faire quoi)$/, () => 'Dis-moi par exemple « mets Ninho », « mets Skyrock », « mets les infos », « lance LEGEND », « une playlist pour le sport », « pause », « suivant », « supprime cette playlist ».'],
     [/^((salut|slt|bonjour|bjr|coucou|hello|hey|yo|wesh|wsh|bonsoir|cc)( toi)? )?(ca va|cv|tu vas bien|la forme|ca va toi|comment ca va|comment tu vas)$/, () => 'Ça va bien ! Je te mets quoi ?'],
     [/^(mdr|lol|ptdr|xd|haha+|ok|okay|d accord|dac|ouais|oui|non merci)$/, () => 'Ok ! Dis-moi si tu veux autre chose.'],
@@ -1593,6 +1593,7 @@ function agentContext() {
     t ? `En cours : « ${t.title} »${t.artist ? ' de ' + t.artist : ''} (${t.source || 'fichier'}), ${player.playing ? 'en lecture' : 'en pause'}.` : 'Rien en cours.',
     `Volume ${Math.round((player.base ?? 1) * 100)} %. Égaliseur ${S.settings.eq}.`,
     `Playlists : ${pls}. Titres likés : ${liked().length}.`,
+    `Tu t'appelles « ${S.settings.botName || 'le Concierge'} ». Ton : ${({ complice: 'complice et chaleureux', elegant: 'élégant et raffiné', pote: 'comme un pote, familier et drôle, tutoiement, expressions jeunes', bref: 'ultra bref, quelques mots seulement' })[S.settings.botTone] || 'complice'}.`,
     `YouTube ${S.settings.ytKey ? 'disponible' : 'non configuré'}. Prénom : ${S.settings.name || 'inconnu'}. Nom de l'app : ${brandName()}. Styles préférés : ${(S.settings.tastes || []).join(', ') || 'non précisés'}.`,
   ].join(' ');
 }
@@ -2278,8 +2279,43 @@ function brandName() {
   return S.settings.name ? `Maison ${S.settings.name}` : 'Maison';
 }
 function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+const BACKGROUNDS = {
+  noir: { label: 'Noir', bg: '#070707', bg2: '#121110', bg3: '#1c1a17' },
+  amoled: { label: 'Noir pur', bg: '#000000', bg2: '#0c0c0c', bg3: '#171717' },
+  nuit: { label: 'Nuit', bg: '#080b14', bg2: '#10141f', bg3: '#1a1f2e' },
+  ardoise: { label: 'Ardoise', bg: '#0e1012', bg2: '#171a1d', bg3: '#22262b' },
+  chaud: { label: 'Chaud', bg: '#0d0a07', bg2: '#17120d', bg3: '#231c14' },
+  foret: { label: 'Forêt', bg: '#070b09', bg2: '#0f1612', bg3: '#18221c' },
+};
+const FONTS = { auto: 'Selon le style', serif: 'Élégante', sans: 'Moderne', rond: 'Arrondie', mono: 'Machine' };
+const TONES = { complice: 'Complice', elegant: 'Élégant', pote: 'Pote', bref: 'Ultra bref' };
+const AVATARS = ['🎧', '🎤', '🎹', '🎸', '🥁', '🎷', '👑', '🔥', '⚡', '🌙', '💎', '🦁', '🐺', '🦅', '🌹', '🍀', '⚽', '🏀', '🎮', '🚀'];
+function lighten(hex, f) { const n = parseInt(hex.slice(1), 16); const c = [n >> 16, (n >> 8) & 255, n & 255].map(v => Math.round(f > 0 ? v + (255 - v) * f : v * (1 + f))); return '#' + c.map(v => v.toString(16).padStart(2, '0')).join(''); }
+function customTheme(hex) {
+  const n = parseInt(hex.slice(1), 16); const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  return { label: 'Perso', a: hex, a2: lighten(hex, 0.55), g: [lighten(hex, 0.6), hex, lighten(hex, -0.4)], on: lum > 0.55 ? '#0b0b0b' : '#ffffff' };
+}
 function applyTheme() {
-  const t = THEMES[S.settings.theme] || THEMES.or;
+  const t = S.settings.theme === 'perso' ? customTheme(S.settings.customColor || '#d9b26a') : (THEMES[S.settings.theme] || THEMES.or);
+  const bgT = BACKGROUNDS[S.settings.bgTheme] || BACKGROUNDS.noir;
+  const st = S.settings, b = document.body.classList;
+  const root = document.documentElement.style;
+  root.setProperty('--bg', bgT.bg); root.setProperty('--bg2', bgT.bg2); root.setProperty('--bg3', bgT.bg3);
+  root.setProperty('--zoom', { petit: 0.92, normal: 1, grand: 1.1, tresgrand: 1.2 }[st.textSize] || 1);
+  const font = st.font === 'auto' ? (st.style === 'moderne' ? 'sans' : 'serif') : st.font;
+  ['serif', 'sans', 'rond', 'mono'].forEach(f => b.toggle('font-' + f, font === f));
+  b.toggle('corners-carres', st.corners === 'carres');
+  b.toggle('corners-ronds', st.corners === 'ronds');
+  b.toggle('motion-reduced', st.motion === 'reduit');
+  b.toggle('cover-ronde', st.coverShape === 'ronde');
+  b.toggle('cover-arrondie', st.coverShape === 'arrondie');
+  b.toggle('vinyl', !!st.vinyl);
+  b.toggle('npbg-couleur', st.npBg === 'couleur');
+  b.toggle('npbg-theme', st.npBg === 'theme');
+  const tabLabel = document.querySelector('#tabs [data-tab="ai"] span');
+  if (tabLabel) tabLabel.textContent = (st.botName || 'Concierge').slice(0, 12);
+  const vs = document.querySelector('.v-status .s-s');
+  if (vs) vs.textContent = st.botName || 'Le Concierge';
   const r = document.documentElement.style;
   r.setProperty('--accent', t.a); r.setProperty('--gold', t.a); r.setProperty('--accent2', t.a2);
   r.setProperty('--grad', `linear-gradient(135deg, ${t.g[0]} 0%, ${t.g[1]} 48%, ${t.g[2]} 100%)`);
@@ -2354,18 +2390,55 @@ function onboarding() {
 
 // ---------- Section Réglages « Personnalisation » ----------
 function persoSettings() {
+  const st = S.settings;
+  const opt = (key, map, cur) => `<div class="seg-pick" data-key="${key}">${Object.entries(map).map(([k, l]) => `<button class="${k === cur ? 'on' : ''}" data-val="${k}">${l}</button>`).join('')}</div>`;
+  const hs = st.homeSections || {};
+  const tog = (k, l) => `<label class="mini-tog"><input type="checkbox" data-hs="${k}" ${hs[k] !== false ? 'checked' : ''}><span class="sw"></span>${l}</label>`;
   return `<section class="set-group"><h3>Personnalisation</h3>
     <div class="set-item col perso">
-      <div class="perso-row"><label>Prénom<input class="set-input wide" id="set-name" value="${esc(S.settings.name)}" maxlength="24"></label><label>Nom<input class="set-input wide" id="set-last" value="${esc(S.settings.lastName || '')}" maxlength="30"></label></div>
-      <label>Nom de l'app<input class="set-input wide" id="set-app" value="${esc(S.settings.appName || '')}" maxlength="30" placeholder="${esc(S.settings.name ? 'Maison ' + S.settings.name : 'Maison')}"></label>
-      <b class="perso-h">Couleur</b><div class="swatches">${swatches(S.settings.theme || 'or')}</div>
+      <div class="perso-card">
+        <div class="perso-avatar">${st.avatar || esc((st.name || '?').slice(0, 1).toUpperCase())}</div>
+        <div><b>${esc(brandName())}</b><small>${esc(st.name || '')} ${esc(st.lastName || '')}</small></div>
+      </div>
+
+      <b class="perso-h">Toi</b>
+      <div class="perso-row"><label>Prénom<input class="set-input wide" id="set-name" value="${esc(st.name)}" maxlength="24"></label><label>Nom<input class="set-input wide" id="set-last" value="${esc(st.lastName || '')}" maxlength="30"></label></div>
+      <label>Nom de l'app<input class="set-input wide" id="set-app" value="${esc(st.appName || '')}" maxlength="30" placeholder="${esc(st.name ? 'Maison ' + st.name : 'Maison')}"></label>
+      <label>Message d'accueil <small>· {prenom} et {salut} sont remplacés</small><input class="set-input wide" id="set-greet" value="${esc(st.greet || '')}" maxlength="60" placeholder="ex : Wesh {prenom} 🔥  ou  {salut} {prenom}"></label>
+      <b class="perso-h">Avatar</b>
+      <div class="avatars"><button class="av ${!st.avatar ? 'on' : ''}" data-av="">${esc((st.name || '?').slice(0, 1).toUpperCase())}</button>${AVATARS.map(a => `<button class="av ${a === st.avatar ? 'on' : ''}" data-av="${a}">${a}</button>`).join('')}</div>
+
+      <b class="perso-h">Couleur principale</b>
+      <div class="swatches">${swatches(st.theme || 'or')}<label class="swatch ${st.theme === 'perso' ? 'on' : ''}" data-theme="perso"><i style="background:${esc(st.customColor || '#d9b26a')}"><input type="color" id="set-color" value="${esc(st.customColor || '#d9b26a')}"></i><span>Perso</span></label></div>
+      <b class="perso-h">Fond de l'app</b>
+      <div class="bgs">${Object.entries(BACKGROUNDS).map(([k, b]) => `<button class="bgopt ${k === (st.bgTheme || 'noir') ? 'on' : ''}" data-bg="${k}" style="--b1:${b.bg};--b2:${b.bg3}"><i></i>${b.label}</button>`).join('')}</div>
+
       <b class="perso-h">Style</b>
       <div class="style-pick">
-        <button class="style-opt ${S.settings.style !== 'moderne' ? 'on' : ''}" data-style="maison"><b class="serif">Élégant</b><small>Esprit « Maison »</small></button>
-        <button class="style-opt ${S.settings.style === 'moderne' ? 'on' : ''}" data-style="moderne"><b>Moderne</b><small>Épuré</small></button>
+        <button class="style-opt ${st.style !== 'moderne' ? 'on' : ''}" data-style="maison"><b class="serif">Élégant</b><small>Esprit « Maison »</small></button>
+        <button class="style-opt ${st.style === 'moderne' ? 'on' : ''}" data-style="moderne"><b>Moderne</b><small>Épuré</small></button>
       </div>
-      <b class="perso-h">Tes styles de musique</b><div class="chips wrap">${tasteChips(S.settings.tastes || [])}</div>
-      <button class="btn ghost sm" data-act="redo-onb">Revoir l'accueil de bienvenue</button>
+      <b class="perso-h">Police des titres</b>${opt('font', FONTS, st.font || 'auto')}
+      <b class="perso-h">Taille du texte</b>${opt('textSize', { petit: 'Petit', normal: 'Normal', grand: 'Grand', tresgrand: 'Très grand' }, st.textSize || 'normal')}
+      <b class="perso-h">Coins</b>${opt('corners', { carres: 'Carrés', arrondis: 'Arrondis', ronds: 'Très ronds' }, st.corners || 'arrondis')}
+      <b class="perso-h">Animations</b>${opt('motion', { normal: 'Normales', reduit: 'Réduites' }, st.motion || 'normal')}
+
+      <b class="perso-h">Lecteur</b>
+      <small class="perso-sub">Forme de la pochette</small>${opt('coverShape', { carree: 'Carrée', arrondie: 'Arrondie', ronde: 'Ronde' }, st.coverShape || 'carree')}
+      <small class="perso-sub">Fond du lecteur</small>${opt('npBg', { pochette: 'Pochette floutée', couleur: 'Couleur du son', theme: 'Ma couleur' }, st.npBg || 'pochette')}
+      <label class="mini-tog"><input type="checkbox" id="set-vinyl" ${st.vinyl ? 'checked' : ''}><span class="sw"></span>Mode vinyle : la pochette tourne comme un disque</label>
+
+      <b class="perso-h">Accueil</b>
+      <small class="perso-sub">Rubriques affichées</small>
+      <div class="togs">${tog('hero', 'Grande carte')}${tog('quick', 'Accès rapide')}${tog('mixes', 'Composé pour toi')}${tog('recent', 'Ajouts récents')}${tog('radios', 'Radios en direct')}${tog('tastes', 'Tes styles')}</div>
+      <small class="perso-sub">Onglet au démarrage</small>${opt('startTab', { home: 'Accueil', search: 'Rechercher', ai: 'Assistant', library: 'Bibliothèque' }, st.startTab || 'home')}
+
+      <b class="perso-h">Ton assistant</b>
+      <label>Son nom<input class="set-input wide" id="set-bot" value="${esc(st.botName || 'Concierge')}" maxlength="20" placeholder="Concierge"></label>
+      <small class="perso-sub">Son caractère (avec la clé Claude)</small>${opt('botTone', TONES, st.botTone || 'complice')}
+
+      <b class="perso-h">Tes styles de musique</b><div class="chips wrap">${tasteChips(st.tastes || [])}</div>
+      <div class="perso-actions"><button class="btn ghost sm" data-act="redo-onb">Revoir l'accueil de bienvenue</button><button class="btn ghost sm" data-act="perso-reset">Réinitialiser l'apparence</button></div>
     </div></section>`;
 }
 function bindPerso(view) {
@@ -2373,8 +2446,21 @@ function bindPerso(view) {
   $('#set-name', view).addEventListener('change', e => { S.settings.name = e.target.value.trim(); save(); $('#set-app', view).placeholder = S.settings.name ? 'Maison ' + S.settings.name : 'Maison'; toast('Enchanté, ' + (S.settings.name || 'toi') + ' ✦'); });
   $('#set-last', view).addEventListener('change', e => { S.settings.lastName = e.target.value.trim(); save(); });
   $('#set-app', view).addEventListener('change', e => { S.settings.appName = e.target.value.trim(); save(); toast('Ton app s\'appelle maintenant « ' + brandName() + ' »'); });
+  $('#set-greet', view).addEventListener('change', e => { S.settings.greet = e.target.value.trim(); save(); toast('Message d\'accueil enregistré'); });
+  $('#set-bot', view).addEventListener('change', e => { S.settings.botName = e.target.value.trim() || 'Concierge'; save(); toast(`Ton assistant s'appelle ${S.settings.botName}`); });
+  $('#set-vinyl', view).addEventListener('change', e => { S.settings.vinyl = e.target.checked; save(); });
+  const col = $('#set-color', view);
+  col.addEventListener('input', () => { S.settings.customColor = col.value; S.settings.theme = 'perso'; col.parentElement.style.background = col.value; save(); view.querySelectorAll('.perso .swatch').forEach(x => x.classList.toggle('on', x.dataset.theme === 'perso')); });
+  view.querySelectorAll('[data-hs]').forEach(c => c.addEventListener('change', () => { S.settings.homeSections = { ...(S.settings.homeSections || {}), [c.dataset.hs]: c.checked }; saveSettings(); }));
   view.querySelector('.perso').addEventListener('click', e => {
+    const av = e.target.closest('[data-av]');
+    if (av) { S.settings.avatar = av.dataset.av; save(); view.querySelectorAll('.perso .av').forEach(x => x.classList.toggle('on', x === av)); view.querySelector('.perso-avatar').textContent = av.textContent; return; }
+    const bg = e.target.closest('[data-bg]');
+    if (bg) { S.settings.bgTheme = bg.dataset.bg; save(); view.querySelectorAll('.perso .bgopt').forEach(x => x.classList.toggle('on', x === bg)); return; }
+    const sv = e.target.closest('.seg-pick [data-val]');
+    if (sv) { const key = sv.parentElement.dataset.key; S.settings[key] = sv.dataset.val; save(); sv.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === sv)); return; }
     const sw = e.target.closest('[data-theme]');
+    if (sw && sw.dataset.theme === 'perso') { S.settings.theme = 'perso'; save(); view.querySelectorAll('.perso .swatch').forEach(x => x.classList.toggle('on', x === sw)); return; }
     if (sw) { S.settings.theme = sw.dataset.theme; save(); view.querySelectorAll('.perso .swatch').forEach(x => x.classList.toggle('on', x === sw)); return; }
     const sy = e.target.closest('[data-style]');
     if (sy) { S.settings.style = sy.dataset.style; save(); view.querySelectorAll('.perso .style-opt').forEach(x => x.classList.toggle('on', x === sy)); return; }
@@ -2530,6 +2616,7 @@ function emptyState() {
 function greeting() {
   const h = new Date().getHours();
   const g = h < 5 ? 'Bonne nuit' : h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
+  if (S.settings.greet) return esc(S.settings.greet.replace(/\{prenom\}/gi, S.settings.name || '').replace(/\{salut\}/gi, g));
   return S.settings.name ? `${g}, ${esc(S.settings.name)}` : g;
 }
 
@@ -2562,14 +2649,15 @@ function viewHome() {
   const chips = [['all', 'Tout'], ['music', 'Musique'], ['radio', 'Radios'], ['info', 'Infos']];
   const head = `<div class="brand-line home-brand"><svg><use href="#i-logo"/></svg><span>${esc(brandName().toUpperCase())}</span></div>
     <header class="page-head home-head"><h1 class="home-h">${greeting()}</h1>
-      <div class="head-btns"><a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a></div></header>
+      <div class="head-btns">${S.settings.avatar ? `<a class="avatar" href="#/settings" aria-label="Mon profil">${S.settings.avatar}</a>` : `<a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a>`}</div></header>
     <div class="home-chips">${chips.map(([k, l]) => `<button class="chip ${k === f ? 'on' : ''}" data-act="home-f" data-f="${k}">${l}</button>`).join('')}</div>`;
   if (f === 'radio') return head + homeRadios();
   if (f === 'info') return head + `<div class="home-info">${newsModule(false)}</div>`;
   const tracks = allTracks();
   if (f === 'all' && !tracks.length && !ctxHist().length) return head + homeHero() + homeEmpty() + homeTastes(f);
   const seen = new Set();
-  return head + (f === 'all' ? homeHero() : '') + homeQuick(f, seen) + homeShelves(f, seen) + homeTastes(f);
+  const hs = S.settings.homeSections || {};
+  return head + (f === 'all' && hs.hero !== false ? homeHero() : '') + (hs.quick !== false ? homeQuick(f, seen) : '') + homeShelves(f, seen) + (hs.tastes !== false ? homeTastes(f) : '');
 }
 
 // Tes styles préférés en raccourcis (lancés sur YouTube ou en radio)
@@ -2602,8 +2690,9 @@ function homeQuick(f, seen) {
 
 function homeShelves(f, seen) {
   const tracks = allTracks();
+  const hs = S.settings.homeSections || {};
   let out = '';
-  if (tracks.length >= 4) {
+  if (tracks.length >= 4 && hs.mixes !== false) {
     const mixes = HOME_MIXES.filter(k => !seen.has('#/mix/' + k)).map(k => getMix(k)).filter(m => m.tracks.length).slice(0, 6);
     mixes.forEach(m => seen.add('#/mix/' + m.key));
     out += shelf(`Composé pour toi`, mixes.map(mixCard));
@@ -2613,7 +2702,7 @@ function homeShelves(f, seen) {
     ...[...albums().values()].map(a => ({ at: a.addedAt, key: '#/album/' + encodeURIComponent(a.key), html: () => albumCard(a) })),
     ...tracks.filter(t => !t.album).map(t => ({ at: t.addedAt, key: 't:' + t.id, t })),
   ].filter(x => !seen.has(x.key)).sort((a, b) => b.at - a.at).slice(0, 10);
-  if (items.length >= 3) {
+  if (items.length >= 3 && hs.recent !== false) {
     const singles = items.filter(x => x.t).map(x => x.t.id);
     const sk = registerList('home-new', singles, 'Ajouts récents');
     out += shelf('Ajouts récents', items.map(x => {
@@ -2625,7 +2714,7 @@ function homeShelves(f, seen) {
   if (f === 'music') {
     const arts = [...artists().values()].sort((a, b) => b.plays - a.plays || b.tracks.length - a.tracks.length).slice(0, 10).map(artistCard);
     out += shelf('Tes artistes', arts, '#/library?f=artists');
-  } else {
+  } else if (hs.radios !== false) {
     out += shelf('Radios en direct', radioCards(seen), '#/search?src=radio');
     if (tracks.length < 10) out += `<button class="lib-item flash-row" data-act="news-flash" data-i="0">${stationArt('franceinfo')}<div><b>Le journal franceinfo</b><small>Dernière édition · un appui pour écouter</small></div></button>`;
   }
@@ -3094,6 +3183,7 @@ document.addEventListener('click', e => {
       case 'sound': return soundSheet();
       case 'voice-test': return Voice.speak(`Bonjour ${S.settings.name || ''}, je suis le Concierge de ta Maison.`);
       case 'redo-onb': return onboarding();
+      case 'perso-reset': Object.assign(S.settings, { theme: 'or', bgTheme: 'noir', font: 'auto', textSize: 'normal', corners: 'arrondis', motion: 'normal', coverShape: 'carree', vinyl: false, npBg: 'pochette', style: 'maison' }); saveSettings(); applyTheme(); toast('Apparence réinitialisée'); return render(true);
       case 'lib-add': return openSheet(`<h3 class="sheet-title">Ajouter</h3>${sheetItems([{ id: 'pl', icon: 'list-add', label: 'Nouvelle playlist' }, { id: 'imp', icon: 'import', label: 'Importer des fichiers du téléphone' }])}`, { pl: () => newPlaylistSheet(), imp: () => { closeSheet(); importSheet(); } });
       case 'hero-toggle': player.toggle(); setTimeout(() => render(true), 120); return;
       case 'hero-route': S.pendingFwd = true; return goto(act.dataset.route);
@@ -3191,6 +3281,7 @@ async function boot() {
   }
   bump();
   applyTheme();
+  if ((!location.hash || location.hash === '#/' || location.hash === '#') && S.settings.startTab && S.settings.startTab !== 'home') history.replaceState(null, '', { search: '#/search', ai: '#/ai', library: '#/library' }[S.settings.startTab] || '#/');
   render();
   if (!S.settings.onboarded) setTimeout(onboarding, 1300);
   player.restore(new Set(S.tracks.keys()));
