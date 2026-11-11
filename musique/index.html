@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Maison Chahyn</title>
+<title>Maison</title>
 <meta name="description" content="Ta musique, sur ton téléphone. Sans pub, sans compte, sans connexion.">
 <meta name="theme-color" content="#070707">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Maison Chahyn">
+<meta name="apple-mobile-web-app-title" content="Maison">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/app.css?v=15">
+<link rel="stylesheet" href="css/app.css?v=16">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -59,7 +59,19 @@
   <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M3.5 16.5 7 20l3.5-3.5M17 20V4M13.5 7.5 17 4l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 </svg>
 
-<div id="splash"><div class="splash-in"><svg class="splash-logo"><use href="#i-logo"/></svg><div class="splash-word"><small>MAISON</small><b>CHAHYN</b></div></div></div>
+<div id="splash"><div class="splash-in"><svg class="splash-logo"><use href="#i-logo"/></svg><div class="splash-word"><small>MAISON</small><b id="splash-name"></b></div></div></div>
+<script>
+// Applique tout de suite le prénom, le nom de l'app et la couleur choisis (évite un flash)
+try {
+  var st = JSON.parse(localStorage.getItem('onde.settings') || '{}');
+  var nm = (st.appName || (st.name ? 'Maison ' + st.name : 'Maison')).toUpperCase();
+  var parts = nm.split(' ');
+  document.querySelector('.splash-word small').textContent = parts.length > 1 ? parts[0] : '';
+  document.getElementById('splash-name').textContent = parts.length > 1 ? parts.slice(1).join(' ') : parts[0];
+  var T = { or: ['#f6e3b4', '#d4a955', '#a77c37'], rubis: ['#ffb0ba', '#e5566a', '#9e1f33'], saphir: ['#c2d6ff', '#5b93ff', '#2a4fb8'], emeraude: ['#b3f5d2', '#35c47c', '#167a47'], amethyste: ['#ddd0ff', '#a07bff', '#5d3bc4'], rose: ['#ffd0e5', '#ff74b1', '#c2306f'], argent: ['#ffffff', '#c5ccd6', '#7d8794'], corail: ['#ffd2bf', '#ff8a5c', '#c24e22'] }[st.theme || 'or'];
+  if (T) { var s = document.querySelectorAll('#gold stop'); for (var i = 0; i < 3; i++) s[i].setAttribute('stop-color', T[i]); }
+} catch (e) {}
+</script>
 
 <div id="app">
   <main id="main">
@@ -158,6 +170,6 @@
 <input type="file" id="pick-files" accept="audio/*,.mp3,.m4a,.aac,.flac,.ogg,.opus,.wav,.webm" multiple hidden>
 <input type="file" id="pick-folder" webkitdirectory multiple hidden>
 
-<script type="module" src="js/app.js?v=15"></script>
+<script type="module" src="js/app.js?v=16"></script>
 </body>
 </html>
