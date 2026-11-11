@@ -1,10 +1,10 @@
-import { db } from './db.js?v=20';
-import { readTags } from './tags.js?v=20';
-import { Player, isIOS } from './player.js?v=20';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=20';
-import * as AI from './ai.js?v=20';
-import * as Voice from './voice.js?v=20';
-import * as Src from './sources.js?v=20';
+import { db } from './db.js?v=21';
+import { readTags } from './tags.js?v=21';
+import { Player, isIOS } from './player.js?v=21';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=21';
+import * as AI from './ai.js?v=21';
+import * as Voice from './voice.js?v=21';
+import * as Src from './sources.js?v=21';
 
 // ======================================================================
 // SOMMAIRE de l'application (chaque chapitre est repéré par « Chapitre N »)
@@ -46,9 +46,10 @@ const S = {
   playlists: new Map(),
   covers: new Map(),       // coverId -> objectURL
   colors: loadJSON('onde.colors', {}),
-  settings: Object.assign({ name: '', lastName: '', appName: '', theme: 'or', style: 'maison', tastes: [], onboarded: false, homeFilter: 'all', customColor: '#d9b26a', bgTheme: 'noir', font: 'auto', textSize: 'normal', corners: 'arrondis', motion: 'normal', coverShape: 'carree', vinyl: false, npBg: 'pochette', avatar: '', greet: '', botName: 'Concierge', botTone: 'complice', startTab: 'home', homeSections: { hero: true, quick: true, mixes: true, recent: true, radios: true, tastes: true }, crossfade: 4, visualizer: false, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, autoplay: true, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
+  settings: Object.assign({ name: '', lastName: '', appName: '', theme: 'or', style: 'maison', tastes: [], onboarded: false, homeFilter: 'all', customColor: '#d9b26a', bgTheme: 'noir', font: 'auto', textSize: 'normal', corners: 'arrondis', motion: 'normal', coverShape: 'carree', vinyl: false, npBg: 'pochette', avatar: '', greet: '', botName: 'Concierge', botTone: 'complice', startTab: 'home', homeSections: { hero: true, quick: true, mixes: true, recent: true, radios: true, tastes: true }, crossfade: 4, visualizer: false, libFilter: 'all', libSort: 'recent', onlineLyrics: true, apiKey: '', voiceReply: true, ytKey: '', searchSrc: 'yt', skipAds: true, autoplay: true, boost: 0, chatEphemeral: false, eq: 'normal', volume: 1, voiceName: '', voiceRate: 1.04 }, loadJSON('onde.settings', {})),
   mixes: {},
-  chat: loadJSON('onde.chat', []),
+  // « Ne pas garder la conversation » : elle repart de zéro à chaque ouverture
+  chat: loadJSON('onde.settings', {}).chatEphemeral ? [] : loadJSON('onde.chat', []),
   version: 0,
   cache: {},
   lists: {},
@@ -263,6 +264,7 @@ setTimeout(() => {
   Voice.setVoicePrefs({ name: S.settings.voiceName, rate: S.settings.voiceRate });
 });
 player.visualizer = S.settings.visualizer;
+player.boost = S.settings.boost || 0;
 
 const saveTrack = t => (t && S.tracks.has(t.id) ? db.put('tracks', t) : Promise.resolve());
 player.addEventListener('played', async e => {
@@ -1584,7 +1586,17 @@ const GENRES = [
   ['lofi', /\b(lofi|lo fi|lo-fi)\b/, 'lofi', 'lofi'],
   ['electro', /\b(electro|electronique|techno|edm)\b/, 'electronic', 'electro'],
   ['house', /\bhouse\b/, 'house', 'house music'],
-  ['soul', /\b(soul|funk|motown)\b/, 'soul', 'soul funk'],
+  // funk : toutes les façons de l'écrire ou de le dicter (« fonk », « fank », « funky »…)
+  ['funk brésilien', /\b(funk|fonk) (bresilien|brasileiro|carioca|bresil)\b|\bbaile funk\b/, 'funk carioca', 'funk brasileiro'],
+  ['phonk', /\bphonk\b/, 'phonk', 'phonk'],
+  ['funk', /\b(funk|funky|fonk|fonky|fank|fanck|funck|fonque|disco funk|g funk)\b/, 'funk', 'funk classics official audio'],
+  ['soul', /\b(soul|motown|neo soul)\b/, 'soul', 'soul music'],
+  ['disco', /\bdisco\b/, 'disco', 'disco hits'],
+  ['blues', /\bblues\b/, 'blues', 'blues'],
+  ['gospel', /\bgospel\b/, 'gospel', 'gospel'],
+  ['trap', /\btrap\b/, 'trap', 'trap music'],
+  ['dancehall', /\bdancehall\b/, 'dancehall', 'dancehall'],
+  ['country', /\bcountry\b/, 'country', 'country music'],
   ['kpop', /\b(kpop|k pop)\b/, 'k-pop', 'kpop'],
   ['annees 80', /\b(annees 80|80s|eighties)\b/, '80s', 'années 80'],
   ['annees 90', /\b(annees 90|90s)\b/, '90s', 'années 90'],
@@ -1694,6 +1706,10 @@ function settingsCommand(n) {
     return `Égaliseur ${EQ_NAMES[k]}.` + (player.kind !== 'local' ? ' (Il agit sur tes fichiers importés.)' : '');
   }
   if (/\b(pubs?|sponsors?)\b/.test(n) && /(saute|zappe|vire|enleve|skip)/.test(n) && !/podcast|episode/.test(n) && !player.current) return setS({ skipAds: true }, 'Je saute les passages de pub dès que je peux (podcasts et sponsors YouTube).');
+  if (/\bboost/.test(n) || /(monte|augmente|pousse).*(au dessus|plus que le max|encore plus)|son (plus fort que|au dela)/.test(n)) {
+    if (OFF_WORDS.test(n) || /\bnormal\b/.test(n)) return setBoost(0);
+    return setBoost(/\b(max|maximum|a fond|fort a fond)\b/.test(n) ? 3 : /\b(leger|un peu)\b/.test(n) ? 1 : /\bfort\b/.test(n) ? 2 : 3);
+  }
   if (/\b(fondu|crossfade|enchainement)\b/.test(n)) return setS({ crossfade: OFF_WORDS.test(n) ? 0 : 6 }, OFF_WORDS.test(n) ? 'Fondu désactivé.' : 'Fondu enchaîné activé.');
   if (/lecture auto(matique)?/.test(n)) return setS({ autoplay: !OFF_WORDS.test(n) }, OFF_WORDS.test(n) ? 'Lecture automatique désactivée.' : 'Lecture automatique activée.');
   // navigation
@@ -1751,6 +1767,8 @@ async function smartCommand(text) {
   for (const [re, f] of SMALL) if (re.test(raw)) return f();
   if (!n) return null;
 
+  // --- booster de son (avant le volume : « booste le son au max »)
+  if (/\bboost/.test(n)) { const r = settingsCommand(n); if (r) return r; }
   // --- volume (avant la gestion des playlists : « mets le son à 30 » ne crée pas de playlist)
   if (/(volume|son).*(au max|a fond|au maximum|a 100)|^(?:mets? )?(?:le |a )?(?:a fond|au max(?:imum)?)$/.test(n)) { if (isIOS) return 'Sur iPhone, utilise les boutons de volume du téléphone.'; player.setVolume(1); return 'Volume à 100 %.'; }
   let mv = n.match(/(?:volume|son)\s+(?:a\s+|au\s+)?(\d+)/);
@@ -1920,6 +1938,20 @@ async function smartCommand(text) {
       if (list.length) { const ts = list.map(x => remoteTrack(x, 'radio')); playIds([ts[0].id], 0, { context: { label: 'Radio ' + label } }); return `Je lance une radio ${label} : ${ts[0].title}.`; }
     } catch { /* rien */ }
     return `Je n'ai rien trouvé en ${label} pour l'instant.`;
+  }
+
+  // --- « une playlist avec de la X / de X / sur X » : on prend vraiment X (artiste ou style), jamais un mix au hasard
+  const pm = ask.match(/\bplaylists?\b.*?\b(?:avec|de|d|du|des|sur|en)\s+(?:la |le |l |les |du |des |de |d )?(?:musique |sons? |titres? )?(?:de |d |du )?(.{2,40})$/);
+  const MOODY = /\b(sport|muscu|salle|ecole|cours|devoirs?|revis|travail|bosser|dormir|dodo|nuit|chill|calme|soiree|fete|matin|reveil|trajet|voiture|route|triste|pleur|moment|favoris|decouv|incontournables?|likes?)\b/;
+  if (pm && S.settings.ytKey && !MOODY.test(ask) && !/^\d|\b(min|minutes?|heures?|h|titres?|sons?)$/.test(pm[1])) {
+    const subj = pm[1].replace(/\b(stp|svp|s il te plait|merci|un peu|please)\b/g, '').trim();
+    if (subj.length >= 2) {
+      try {
+        S.lastYtQuery = subj;
+        const res = await Src.ytSearch(S.settings.ytKey, subj, 20);
+        if (res.length) return await ytMix(subj.charAt(0).toUpperCase() + subj.slice(1), res.map(x => remoteTrack(x, 'yt')), n + ' playlist');
+      } catch { /* suite */ }
+    }
   }
 
   // --- demandes vagues : « mets un son », « un truc », « n'importe quoi »
@@ -2376,10 +2408,21 @@ player.addEventListener('time', () => { if (player.current?.source === 'podcast'
 // ======================================================================
 const EQ_PRESETS = { normal: [0, 0, 0], basses: [6, 0, 1], basses2: [10, -1, 2], voix: [-3, 4, 2], aigus: [-1, 0, 5], soiree: [6, -2, 4], douce: [2, -1, -4] };
 const EQ_NAMES = { normal: 'Normal', basses: 'Basses +', basses2: 'Basses ++', voix: 'Voix (podcasts)', aigus: 'Aigus +', soiree: 'Soirée', douce: 'Douce' };
+const BOOST_NAMES = ['Désactivé', 'Léger', 'Fort', 'Max'];
+function setBoost(k) {
+  S.settings.boost = player.setBoost(k); saveSettings();
+  if (k) player.setVolume(1);
+  const note = player.kind === 'local' ? '' : ' (actif sur tes fichiers importés ; YouTube et radios restent à leur maximum)';
+  toast(k ? `Booster ${BOOST_NAMES[k].toLowerCase()}${note}` : 'Booster désactivé');
+  return k ? `Booster de son ${BOOST_NAMES[k].toLowerCase()}.${note}` : 'Booster de son désactivé.';
+}
 function soundSheet() {
   const cur = S.settings.eq || 'normal';
   openSheet(`<h3 class="sheet-title">Son</h3>
     ${isIOS ? '<p class="sheet-text">Sur iPhone, le volume se règle avec les boutons du téléphone.</p>' : `<div class="vol-row">${icon('vol')}<input type="range" class="range" id="vol" aria-label="Volume" min="5" max="100" step="1" value="${Math.round((player.base ?? 1) * 100)}"><b id="vol-v">${Math.round((player.base ?? 1) * 100)} %</b></div>`}
+    <h4 class="sub">Booster de son</h4>
+    <div class="boost-pick">${BOOST_NAMES.map((l, k) => `<button class="chip ${k === (S.settings.boost || 0) ? 'on' : ''}" data-sa="boost" data-k="${k}">${l}</button>`).join('')}</div>
+    <p class="sheet-text">Monte le son au-delà de 100 % sans grésiller, idéal avec des écouteurs. Il agit sur tes fichiers importés : YouTube et les radios gardent leur volume maximum (leur son ne peut pas être modifié depuis une app web).</p>
     <h4 class="sub">Égaliseur</h4>
     <div class="eq-presets">${Object.keys(EQ_PRESETS).map(k => `<button class="chip ${k === cur ? 'on' : ''}" data-sa="eq" data-k="${k}">${EQ_NAMES[k]}</button>`).join('')}</div>
     <p class="sheet-text">${isIOS ? 'L\'égaliseur n\'est pas disponible sur iPhone.' : 'L\'égaliseur s\'applique à tes musiques importées. YouTube et les radios utilisent leur propre son.'}</p>`, {
@@ -2389,6 +2432,10 @@ function soundSheet() {
       if (player.kind === 'local' && EQ_PRESETS[b.dataset.k].some(Boolean)) player.ensureAudioGraph();
       $$('.eq-presets .chip').forEach(c => c.classList.toggle('on', c === b));
       toast(`Égaliseur : ${EQ_NAMES[b.dataset.k]}`);
+    },
+    boost: b => {
+      setBoost(+b.dataset.k);
+      $$('.boost-pick .chip').forEach(c => c.classList.toggle('on', c === b));
     },
   }, {
     onOpen: body => {
@@ -3386,6 +3433,7 @@ function viewSettings() {
       <label class="set-item toggle"><div><b>Réponses à voix haute</b><small>${Voice.canListen ? 'Quand tu parles au Concierge (bouton micro), il te répond aussi à l\'oral.' : 'La commande vocale n\'est pas disponible sur ce navigateur.'}</small></div><input type="checkbox" id="set-voice" ${S.settings.voiceReply ? 'checked' : ''}><span class="sw"></span></label>
       <div class="set-item"><div><b>Analyse de ta musique</b><small id="ana-stat">…</small></div></div>
       <div class="set-item"><div><b>Conversation avec l'assistant</b><small>${plural(S.chat.length, 'message')}</small></div><button class="link" data-act="ai-clear">Effacer</button></div>
+      <label class="set-item toggle"><div><b>Ne pas garder la conversation</b><small>Elle s'efface toute seule à chaque fois que tu rouvres l'app.</small></div><input type="checkbox" id="set-ephemeral" ${S.settings.chatEphemeral ? 'checked' : ''}><span class="sw"></span></label>
       <div class="set-item"><div><b>Historique d'écoute</b><small>${plural(AI.historySize(), 'écoute')} mémorisée${AI.historySize() > 1 ? 's' : ''} pour apprendre tes goûts</small></div><button class="link" data-act="clear-hist">Effacer</button></div>
       <label class="set-item col"><div><b>Clé API Claude (optionnel)</b><small>Sans clé, le Concierge fonctionne déjà hors ligne. Avec une clé Anthropic, il comprend n'importe quelle demande. La clé reste sur ton téléphone ; ta liste de titres est envoyée à Anthropic seulement quand tu parles au Concierge.</small></div><input class="set-input wide" id="set-key" type="password" value="${esc(S.settings.apiKey)}" placeholder="sk-ant-…" autocomplete="off"></label>
     </section>
@@ -3512,6 +3560,7 @@ function afterRender(view, r) {
     vr?.addEventListener('input', () => { S.settings.voiceRate = +vr.value; saveSettings(); Voice.setVoicePrefs({ rate: +vr.value }); vr.style.setProperty('--p', `${(vr.value - 0.8) / 0.6 * 100}%`); });
     $('#set-ads', view).addEventListener('change', e => { S.settings.skipAds = e.target.checked; saveSettings(); });
     $('#set-autoplay', view)?.addEventListener('change', e => { S.settings.autoplay = e.target.checked; saveSettings(); });
+    $('#set-ephemeral', view)?.addEventListener('change', e => { S.settings.chatEphemeral = e.target.checked; saveSettings(); toast(e.target.checked ? 'La conversation s\'effacera à chaque ouverture' : 'La conversation sera gardée'); });
     $('#set-voice', view).addEventListener('change', e => { S.settings.voiceReply = e.target.checked; saveSettings(); });
     $('#set-lyr', view).addEventListener('change', e => { S.settings.onlineLyrics = e.target.checked; saveSettings(); });
     $('#set-key', view).addEventListener('change', e => { S.settings.apiKey = e.target.value.trim(); saveSettings(); toast(S.settings.apiKey ? 'Clé enregistrée sur ce téléphone' : 'Clé supprimée'); });
@@ -3641,7 +3690,13 @@ document.addEventListener('click', e => {
         S.settings.searchSrc = 'info'; S.searchQ = ''; S.pendingShow = act.dataset.q; saveSettings(); S.pendingFwd = true; return goto('#/search');
       }
       case 'yt-key': S.pendingFwd = true; return goto('#/settings');
-      case 'ai-clear': return confirmSheet('Effacer la conversation ?', 'Tous les messages avec ton assistant seront supprimés. Tes playlists et ta musique ne sont pas touchées.', 'Effacer', async () => { clearChat(); toast('Conversation effacée'); });
+      case 'ai-clear': {
+        // effacement immédiat, avec « Annuler » pendant 5 secondes
+        if (!S.chat.length) return toast('La conversation est déjà vide');
+        const old = S.chat.slice();
+        clearChat();
+        return undoToast('Conversation effacée', () => { S.chat = old; saveJSON('onde.chat', S.chat); if (S.route?.name === 'ai') render(true); });
+      }
       case 'ai-play': { const m = S.mixes[act.dataset.key]; if (m?.tracks.length) playIds(m.tracks.map(t => t.id), 0, { context: { label: m.name, route: '#/mix/' + m.key } }); return; }
     }
     return;

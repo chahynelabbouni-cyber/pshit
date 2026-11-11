@@ -998,3 +998,8 @@ body.npbg-theme .np-bg { background: linear-gradient(to bottom, color-mix(in srg
 .toast .undo-btn { color: var(--accent2); font-weight: 800; padding: 6px 4px; }
 /* animations réduites si le téléphone le demande */
 @media (prefers-reduced-motion: reduce) { .marquee.run span, .vinyl .np-art .cv { animation: none !important; } }
+
+/* L'en-tête de l'assistant (avec « Effacer ») reste visible même en bas d'une longue conversation */
+.ai-head { position: sticky; top: 0; z-index: 6; background: linear-gradient(var(--bg) 80%, transparent); margin: calc(-1 * (var(--safe-t) + 14px)) -16px 0; padding: calc(var(--safe-t) + 14px) 16px 16px; }
+.ai-clear-btn { min-height: 44px; }
+.boost-pick { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 4px; }
