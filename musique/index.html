@@ -13,7 +13,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/app.css?v=16">
+<link rel="stylesheet" href="css/app.css?v=17">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -70,6 +70,8 @@ try {
   document.getElementById('splash-name').textContent = parts.length > 1 ? parts.slice(1).join(' ') : parts[0];
   var T = { or: ['#f6e3b4', '#d4a955', '#a77c37'], rubis: ['#ffb0ba', '#e5566a', '#9e1f33'], saphir: ['#c2d6ff', '#5b93ff', '#2a4fb8'], emeraude: ['#b3f5d2', '#35c47c', '#167a47'], amethyste: ['#ddd0ff', '#a07bff', '#5d3bc4'], rose: ['#ffd0e5', '#ff74b1', '#c2306f'], argent: ['#ffffff', '#c5ccd6', '#7d8794'], corail: ['#ffd2bf', '#ff8a5c', '#c24e22'] }[st.theme || 'or'];
   if (T) { var s = document.querySelectorAll('#gold stop'); for (var i = 0; i < 3; i++) s[i].setAttribute('stop-color', T[i]); }
+  var BG = { noir: '#070707', amoled: '#000000', nuit: '#080b14', ardoise: '#0e1012', chaud: '#0d0a07', foret: '#070b09' }[st.bgTheme || 'noir'];
+  if (BG) document.documentElement.style.setProperty('--bg', BG);
 } catch (e) {}
 </script>
 
@@ -170,6 +172,6 @@ try {
 <input type="file" id="pick-files" accept="audio/*,.mp3,.m4a,.aac,.flac,.ogg,.opus,.wav,.webm" multiple hidden>
 <input type="file" id="pick-folder" webkitdirectory multiple hidden>
 
-<script type="module" src="js/app.js?v=16"></script>
+<script type="module" src="js/app.js?v=17"></script>
 </body>
 </html>
