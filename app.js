@@ -336,9 +336,6 @@ $("#copyBtn").addEventListener("click",function(){var t=$("#codeTxt").textConten
 
 /* ---------- chiffres ---------- */
 $$("#rings .ring").forEach(function(r){onView(r,function(){var a=$(".arc",r);a.style.strokeDashoffset=String(327*(1-parseFloat(a.dataset.v)/100));countUp($(".val",r))},.4)});
-var YI=["Au lancement : 3 bornes à Dijon, place Darcy, place de la République et Toison d'Or. Les disponibilités sont suivies en direct.","Année 1, objectif du dossier : 8 bornes à Dijon, 18 pshits par borne et par jour, point mort vers le 224e jour, résultat net d'environ 17 400 €.","Année 2 : 20 bornes avec Besançon, 22 pshits par borne et par jour, un technicien salarié prend la tournée.","Année 3 : 35 bornes avec Lyon, 25 pshits par borne et par jour, 493 k€ de chiffre d'affaires."];
-function yPaint(i){$$("#cols .col").forEach(function(c,k){c.classList.toggle("on",k===i)});$("#yinfo").textContent=YI[i]}
-$$("#cols .col").forEach(function(c,i){c.addEventListener("click",function(){yPaint(i)})});yPaint(0);
 $$("[data-count]").forEach(function(el){if(!el.closest(".ring"))onView(el,function(){countUp(el)},.6)});
 }
 })();

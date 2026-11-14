@@ -395,3 +395,23 @@ body.lock{overflow:hidden}
   .ch .cta-row{display:flex;flex-wrap:wrap;gap:8px}
   .scroll-cue{display:none}
 }
+
+/* ---- v25 : sondage et coûts ---- */
+.survey{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+.sv-card{padding:22px 22px 24px;border:1px solid var(--line);border-radius:20px;background:rgba(255,255,255,.03);min-width:0}
+.sv-card h3{font-size:1.2rem;margin-bottom:2px}
+.bars{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:12px}
+.bars li{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"l v" "t t";gap:4px 12px;align-items:baseline}
+.bars .bl{grid-area:l;color:var(--cream);font-size:.95rem;min-width:0}
+.bars b{grid-area:v;font-family:var(--f-ui);font-weight:800;color:var(--gold-pale);font-size:.95rem}
+.bars .bt{grid-area:t;display:block;height:8px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+.bars .bt i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,var(--violet),var(--lilac) 55%,var(--gold));transition:width 1.3s cubic-bezier(.2,.7,.2,1) .15s}
+.in .bars .bt i,.bars.in .bt i{width:var(--w)}
+.sv-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:18px}
+.deploy{align-items:start}
+.costs .bt{height:6px}
+.costs{gap:10px;margin-top:0}
+.costs .bl{font-size:.9rem}
+.road.r3{grid-template-columns:repeat(3,1fr)}
+@media(max-width:860px){.survey,.sv-facts{grid-template-columns:1fr}.road.r3{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){.bars .bt i{width:var(--w);transition:none}}

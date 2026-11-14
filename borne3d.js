@@ -144,6 +144,8 @@ function createInner(canvas,box,opts,P){
   var pc=document.createElement("canvas");pc.width=SCW;pc.height=SCH;var pctx=pc.getContext("2d");
   var ptex=new THREE.CanvasTexture(pc);ptex.flipY=false;ptex.encoding=THREE.sRGBEncoding;ptex.anisotropy=8;
   var M={},cones=[];
+  setTimeout(function(){if(!api.ready&&!api.dead){api.dead=true;fail(box,"modèle 3D non chargé, recharge la page (Ctrl+Maj+R)")}},9000);
+  canvas.addEventListener("webglcontextlost",function(ev){ev.preventDefault();api.dead=true;fail(box,"contexte WebGL perdu")});
   var loader=new THREE.GLTFLoader();
   loader.load("assets/borne.glb?v=8",function(g){
     try{
