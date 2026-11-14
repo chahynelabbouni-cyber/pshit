@@ -25,8 +25,11 @@ var API={scents:SCENTS,state:state};
 function scentLabel(s){return s.marque+" · "+s.nom}
 
 /* ---------- vidéo (bulle) ---------- */
-(function(){try{var m=$("#vModal"),v=$("#vPlayer");if(!m||!v)return;
-function open(e){if(e)e.preventDefault();m.hidden=false;document.body.style.overflow="hidden";var p=v.play();if(p&&p.catch)p.catch(function(){})}
+(function(){try{var m=$("#vModal"),v=$("#vPlayer"),f=$("#vFail");if(!m||!v)return;
+function fail(){if(f)f.hidden=false}
+v.addEventListener("error",fail);var s=v.querySelector("source");if(s)s.addEventListener("error",fail);
+function open(e){if(e)e.preventDefault();if(f)f.hidden=true;m.hidden=false;document.body.style.overflow="hidden";
+ var p=v.play();if(p&&p.catch)p.catch(function(){v.muted=true;var q=v.play();if(q&&q.catch)q.catch(fail)})}
 function close(){v.pause();m.hidden=true;document.body.style.overflow=""}
 var o=$("#vOpen");if(o)o.addEventListener("click",open);$$("[data-vid]").forEach(function(n){n.addEventListener("click",open)});
 $("#vClose").addEventListener("click",close);
