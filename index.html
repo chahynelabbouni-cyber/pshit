@@ -15,12 +15,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Source+Sans+3:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<link rel="stylesheet" href="style.css?v=28">
+<link rel="stylesheet" href="style.css?v=30">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="bottle" viewBox="0 0 24 32"><rect x="3.5" y="12" width="17" height="18" rx="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="9" y="7" width="6" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="7.5" y="2" width="9" height="5" rx="1.5" fill="currentColor"/><path d="M7 21h10" stroke="currentColor" stroke-width="1.4" opacity=".6"/></symbol>
   <symbol id="play" viewBox="0 0 14 14"><path d="M3 1.5v11l9-5.5z" fill="currentColor"/></symbol>
+  <symbol id="grid" viewBox="0 0 20 20"><path d="M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z" fill="currentColor"/></symbol>
+  <symbol id="euro" viewBox="0 0 20 20"><path d="M15 5a6 6 0 100 10M3 8.5h9M3 11.5h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
   <symbol id="tick" viewBox="0 0 20 20"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
   <symbol id="pin" viewBox="0 0 24 24"><path d="M12 22s7-6.2 7-12a7 7 0 10-14 0c0 5.8 7 12 7 12z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="10" r="2.6" fill="currentColor"/></symbol>
 </svg>
@@ -90,7 +92,8 @@
 <div class="vmodal" id="vModal" role="dialog" aria-modal="true" aria-label="Vidéo de présentation" hidden>
   <div class="vbox">
     <button type="button" class="vclose" id="vClose" aria-label="Fermer la vidéo">×</button>
-    <video id="vPlayer" controls playsinline preload="none" poster="assets/video-poster.jpg"><source src="assets/video.mp4" type="video/mp4"></video>
+    <video id="vPlayer" controls playsinline preload="none" poster="assets/video-poster.jpg"><source src="assets/video.mp4" type="video/mp4" onerror="document.getElementById('vFail').hidden=false"></video>
+    <p class="vfail" id="vFail" hidden>La vidéo n'a pas pu se charger. <a href="https://drive.google.com/file/d/1Ct14dJTl0Yts5vX9u2iIJwi9mKUnZFki/view" target="_blank" rel="noopener">Ouvrir la vidéo sur Drive</a></p>
   </div>
 </div>
 
@@ -324,11 +327,18 @@
 </main>
 <div class="toast" id="toast" role="status"></div>
 
+<nav class="tabbar" aria-label="Navigation rapide">
+  <a href="#essayer"><svg><use href="#bottle"/></svg>Essayer</a>
+  <a href="#parfums"><svg><use href="#grid"/></svg>Parfums</a>
+  <a href="#formules"><svg><use href="#euro"/></svg>Prix</a>
+  <a href="#carte"><svg><use href="#pin"/></svg>Carte</a>
+  <button type="button" class="gold" data-vid><svg><use href="#play"/></svg>Vidéo</button>
+</nav>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="assets/GLTFLoader.js?v=28"></script>
-<script src="borne3d.js?v=28"></script>
-<script src="app.js?v=28"></script>
+<script src="assets/GLTFLoader.js?v=30"></script>
+<script src="borne3d.js?v=30"></script>
+<script src="app.js?v=30"></script>
 </body>
 </html>

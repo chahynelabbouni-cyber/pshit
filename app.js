@@ -28,7 +28,7 @@ function scentLabel(s){return s.marque+" · "+s.nom}
 (function(){try{var m=$("#vModal"),v=$("#vPlayer");if(!m||!v)return;
 function open(e){if(e)e.preventDefault();m.hidden=false;document.body.style.overflow="hidden";var p=v.play();if(p&&p.catch)p.catch(function(){})}
 function close(){v.pause();m.hidden=true;document.body.style.overflow=""}
-var o=$("#vOpen"),n=$("#vNav");if(o)o.addEventListener("click",open);if(n)n.addEventListener("click",open);
+var o=$("#vOpen");if(o)o.addEventListener("click",open);$$("[data-vid]").forEach(function(n){n.addEventListener("click",open)});
 $("#vClose").addEventListener("click",close);
 m.addEventListener("click",function(e){if(e.target===m)close()});
 document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!m.hidden)close()})}catch(err){}})();
@@ -80,7 +80,7 @@ var KEYS=[
  {rot:-.45,x:0,y:.2,z:9.6,lx:0,ly:0,off:2.4,c:GOLD,w:0}];
 var STEPS=[0,0,1,2,0];
 var tp=0,curCh=-1,vh=window.innerHeight,cycTimer=null,cycI=0,showFlat=false;
-function setVH(){vh=window.innerHeight;document.documentElement.style.setProperty("--vh",vh+"px");if(!showFlat)showEl.style.height=Math.round(vh*(1+(NCH-1)*.85))+"px"}
+function setVH(){vh=window.innerHeight;document.documentElement.style.setProperty("--vh",vh+"px");if(!showFlat)showEl.style.height=Math.round(vh*(1+(NCH-1)*(window.innerWidth<=860?.55:.85)))+"px"}
 var lastW=window.innerWidth,lastH=window.innerHeight;
 window.addEventListener("resize",function(){if(window.innerWidth!==lastW||Math.abs(window.innerHeight-lastH)>150){lastW=window.innerWidth;lastH=window.innerHeight;setVH()}});
 function cycPaint(){var s=SCENTS[cycI],n=$("#cycName");n.querySelector("b").textContent=s.nom;n.querySelector("span").textContent=s.marque}
@@ -342,4 +342,14 @@ $("#copyBtn").addEventListener("click",function(){var t=$("#codeTxt").textConten
 $$("#rings .ring").forEach(function(r){onView(r,function(){var a=$(".arc",r);a.style.strokeDashoffset=String(327*(1-parseFloat(a.dataset.v)/100));countUp($(".val",r))},.4)});
 $$("[data-count]").forEach(function(el){if(!el.closest(".ring"))onView(el,function(){countUp(el)},.6)});
 }
+/* ---------- mobile : onglets du sondage, textes repliables ---------- */
+(function(){try{
+var sv=$(".survey");if(sv){var cards=$$(".sv-card",sv),names=["Où","Confiance","Format"];
+var bar=document.createElement("div");bar.className="sv-tabs";bar.setAttribute("role","tablist");
+cards.forEach(function(cd,i){var b=document.createElement("button");b.type="button";b.textContent=names[i]||("Q"+(i+1));b.setAttribute("role","tab");
+b.addEventListener("click",function(){cards.forEach(function(x,k){x.classList.toggle("on",k===i);x.classList.add("in")});$$("button",bar).forEach(function(y,k){y.classList.toggle("on",k===i)})});bar.appendChild(b)});
+sv.parentNode.insertBefore(bar,sv);$$("button",bar)[0].click()}
+$$(".sec-head p").forEach(function(p){var b=document.createElement("button");b.type="button";b.className="more-btn";b.textContent="Lire la suite";
+b.addEventListener("click",function(){var o=p.classList.toggle("open");b.textContent=o?"Réduire":"Lire la suite"});p.parentNode.appendChild(b)});
+}catch(e){}})();
 })();
