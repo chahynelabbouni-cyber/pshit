@@ -24,17 +24,11 @@ var state={scent:0};
 var API={scents:SCENTS,state:state};
 function scentLabel(s){return s.marque+" · "+s.nom}
 
-/* ---------- vidéo (bulle) ---------- */
-(function(){try{var m=$("#vModal"),v=$("#vPlayer"),f=$("#vFail");if(!m||!v)return;
+/* ---------- vidéo ---------- */
+(function(){try{var v=$("#vPlayer"),f=$("#vFail");if(!v)return;
 function fail(){if(f)f.hidden=false}
 v.addEventListener("error",fail);var s=v.querySelector("source");if(s)s.addEventListener("error",fail);
-function open(e){if(e)e.preventDefault();if(f)f.hidden=true;m.hidden=false;document.body.style.overflow="hidden";
- var p=v.play();if(p&&p.catch)p.catch(function(){v.muted=true;var q=v.play();if(q&&q.catch)q.catch(fail)})}
-function close(){v.pause();m.hidden=true;document.body.style.overflow=""}
-var o=$("#vOpen");if(o)o.addEventListener("click",open);$$("[data-vid]").forEach(function(n){n.addEventListener("click",open)});
-$("#vClose").addEventListener("click",close);
-m.addEventListener("click",function(e){if(e.target===m)close()});
-document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!m.hidden)close()})}catch(err){}})();
+$$("[data-vid]").forEach(function(n){n.addEventListener("click",function(e){e.preventDefault();var t=$("#video");if(t)t.scrollIntoView({behavior:"smooth",block:"center"});setTimeout(function(){var p=v.play();if(p&&p.catch)p.catch(function(){})},700)})})}catch(err){}})();
 
 /* ---------- apparitions, nav ---------- */
 var rvs=$$(".rv");
@@ -354,5 +348,10 @@ b.addEventListener("click",function(){cards.forEach(function(x,k){x.classList.to
 sv.parentNode.insertBefore(bar,sv);$$("button",bar)[0].click()}
 $$(".sec-head p").forEach(function(p){var b=document.createElement("button");b.type="button";b.className="more-btn";b.textContent="Lire la suite";
 b.addEventListener("click",function(){var o=p.classList.toggle("open");b.textContent=o?"Réduire":"Lire la suite"});p.parentNode.appendChild(b)});
+}catch(e){}})();
+(function(){try{
+var ct=$("#calcToggle"),cw=$(".calc-wrap");if(ct&&cw)ct.addEventListener("click",function(){var o=cw.classList.toggle("open");ct.textContent=o?"Masquer le calculateur":"Calculer mes économies Pshit Club"});
+var mp=$("#moreParf"),nu2=$("#nuancier");if(mp&&nu2)mp.addEventListener("click",function(){var o=nu2.classList.toggle("all");mp.textContent=o?"Voir moins":"Voir les 12 parfums"});
+$$("#road li").forEach(function(li,i){li.addEventListener("click",function(){var was=li.classList.contains("open");$$("#road li").forEach(function(x){x.classList.remove("open")});if(!was)li.classList.add("open")});if(i===0)li.classList.add("open")});
 }catch(e){}})();
 })();

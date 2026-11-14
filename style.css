@@ -562,3 +562,46 @@ html{-webkit-text-size-adjust:100%}
   footer p,.foot p{font-size:.85rem}
 }
 .vfail{position:absolute;left:0;right:0;bottom:0;margin:0;padding:12px;text-align:center;background:rgba(15,11,26,.9);font-size:.9rem}.vfail[hidden]{display:none}.vfail a{color:var(--gold)}
+
+/* v32 refonte mobile (directives) */
+.vbox2{position:relative;width:min(820px,100%);margin-inline:auto;border-radius:18px;overflow:hidden;border:1px solid rgba(226,182,74,.45);background:#000;box-shadow:0 24px 60px rgba(0,0,0,.45)}
+.vbox2 video{display:block;width:100%;aspect-ratio:16/9;background:#000}
+.skip,.calc-toggle,.more-parf{display:none}
+@media (max-width:860px){
+  body{font-size:16px;line-height:1.45}
+  .small{font-size:.82rem}
+  .sec{padding-block:44px}
+  /* 3D : texte court + passer */
+  .ch .in>p:not(.lede),.ch .sname,.scroll-cue{display:none}
+  .ch p.lede{font-size:1rem;max-width:30ch}
+  .skip{display:block;position:absolute;top:70px;right:16px;z-index:5;padding:8px 14px;border-radius:99px;background:rgba(15,11,26,.7);border:1px solid var(--line);color:#e8e1f8;font:700 .8rem var(--f-ui);text-decoration:none}
+  /* plus de carrousels horizontaux */
+  .formules{display:grid;grid-template-columns:1fr;overflow:visible;margin:0;padding:0;gap:12px}
+  .formules>.fiche{flex:none;padding:14px 16px;display:grid;grid-template-columns:auto 1fr;gap:2px 14px;align-items:center}
+  .fiche .glyph{grid-row:1/3;height:auto;width:34px}.fiche .glyph svg{max-height:46px;width:auto}
+  .fiche p{display:none}
+  .fiche .nom{font-size:1.05rem}.fiche .px{font-size:1.9rem;grid-column:2}.fiche .usage{grid-column:2;margin:0}
+  .formules>.fiche:nth-child(2){border-color:var(--gold)}
+  .recharge p:nth-child(2){display:none}
+  .calc-toggle{display:block;width:100%;margin-top:14px;min-height:50px}
+  .calc-wrap{display:none}.calc-wrap.open{display:block}
+  .calc-wrap .sub-h{display:none}
+  .sv-facts{display:grid;grid-template-columns:1fr;overflow:visible;margin:12px 0 0;padding:0;gap:8px}
+  .sv-facts>*{flex:none}
+  .sv-facts>*{padding:10px 14px}.sv-facts b{font-size:1.6rem}
+  .borne-list{display:grid;grid-template-columns:1fr;overflow:visible;margin:0;padding:0;gap:10px}
+  .borne-list>.bc{flex:none}
+  .bc .eta{grid-template-columns:1fr 1fr}.bc .eta>div:nth-child(n+3){display:none}
+  .leaflet-container{touch-action:pan-y!important}
+  .road{display:grid;grid-template-columns:1fr;overflow:visible;margin:0;padding:0;gap:8px}
+  .road>li{flex:none;cursor:pointer}
+  .road>li p{display:none}.road>li.open p{display:block}
+  /* parfums : 6 par défaut */
+  .nuancier:not(.all) button:nth-child(n+7){display:none}
+  .more-parf{display:block;width:100%;margin:12px 0;min-height:48px;justify-content:center}
+  .result .why{display:none}
+  /* textes secondaires réduits */
+  .maquette .small,.sb p{display:none}
+  .club li:nth-child(4){display:none}
+  .tabbar a,.tabbar button{min-height:48px;font-size:.7rem}
+}
