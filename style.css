@@ -454,3 +454,13 @@ body{overflow-x:hidden}
 .vbox video{width:100%;height:100%;display:block;background:#000}
 .vclose{position:absolute;top:8px;right:8px;z-index:2;width:40px;height:40px;border-radius:50%;border:0;background:rgba(15,11,26,.75);color:#fff;font-size:1.6rem;line-height:1;cursor:pointer}
 @media(max-width:560px){.vtease{flex-direction:column;align-items:stretch;gap:14px}.vthumb{flex:none;width:100%}}
+
+/* v28 vidéo simple */
+.vsec{padding-block:48px 56px}
+.vtitle{text-align:center;margin:0 0 20px;font-size:clamp(1.5rem,4.5vw,2.1rem)}
+.vbtn{position:relative;display:block;width:min(820px,100%);aspect-ratio:16/9;margin-inline:auto;padding:0;border:1px solid var(--line);border-radius:20px;overflow:hidden;cursor:pointer;background:radial-gradient(120% 120% at 50% 0%,#2a1b57,#0a0714 70%);box-shadow:0 24px 60px rgba(0,0,0,.45)}
+.vbtn img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.vbtn .pb{position:absolute;inset:0;margin:auto;width:76px;height:76px;border-radius:50%;background:var(--gold);color:#1b1534;display:grid;place-items:center;box-shadow:0 10px 30px rgba(0,0,0,.5);transition:transform .2s}
+.vbtn:hover .pb,.vbtn:focus-visible .pb{transform:scale(1.08)}
+.vbtn .pb svg{width:28px;height:28px;margin-left:4px}
+@media(max-width:560px){.vsec{padding-block:36px 40px}.vbtn{border-radius:16px}.vbtn .pb{width:60px;height:60px}}
