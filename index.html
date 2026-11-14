@@ -15,7 +15,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Source+Sans+3:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<link rel="stylesheet" href="style.css?v=25">
+<link rel="stylesheet" href="style.css?v=27">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -31,7 +31,7 @@
     <nav aria-label="Navigation principale"><ul id="navList">
       <li><a href="#idee">Le concept</a></li><li><a href="#essayer">Essayer</a></li><li><a href="#parfums">Parfums</a></li><li><a href="#formules">Prix</a></li><li><a href="#carte">Où nous trouver</a></li><li><a href="#club">Application</a></li><li><a href="#projet">Le projet</a></li>
     </ul></nav>
-    <a class="btn btn-gold video-link" href="#video"><svg><use href="#play"/></svg>Voir la vidéo</a>
+    <a class="btn btn-gold" href="#video" data-vid id="vNav"><svg><use href="#play"/></svg>Voir la vidéo</a>
   </div>
 </header>
 
@@ -77,6 +77,22 @@
     <div class="chap-no" id="chapNo"><b>01</b> / 05</div>
   </div>
 </section>
+
+<!-- VIDEO -->
+<section id="video" class="sec band band-dark vsec">
+  <div class="wrap">
+    <button type="button" class="vtease rv" id="vOpen" aria-haspopup="dialog">
+      <span class="vthumb"><img src="assets/video-poster.jpg" alt="" loading="lazy"><span class="pb"><svg><use href="#play"/></svg></span></span>
+      <span class="vtxt"><span class="kicker">La vidéo</span><b>Le projet en 80 secondes</b><span class="small">Touche pour lancer la vidéo</span></span>
+    </button>
+  </div>
+</section>
+<div class="vmodal" id="vModal" role="dialog" aria-modal="true" aria-label="Vidéo de présentation" hidden>
+  <div class="vbox">
+    <button type="button" class="vclose" id="vClose" aria-label="Fermer la vidéo">×</button>
+    <video id="vPlayer" controls playsinline preload="none" poster="assets/video-poster.jpg"><source src="assets/video.mp4" type="video/mp4"></video>
+  </div>
+</div>
 
 <!-- ESSAYER -->
 <section id="essayer" class="sec band band-deep">
@@ -255,21 +271,7 @@
 <section id="projet" class="sec band band-dark">
   <div class="wrap">
     <div class="sec-head rv"><span class="kicker">Le projet</span><h2>Un petit nombre de bornes à Dijon, <em>d'abord.</em></h2>
-      <p>Nous commençons par quelques bornes à Dijon pour tester la demande et maîtriser nos déplacements avant de nous étendre. Voici ce que coûte une borne, selon notre dossier.</p></div>
-    <h3 class="sub-h rv">Le coût d'une borne</h3>
-    <div class="deploy">
-      <div class="rv">
-        <p class="small" style="margin-bottom:12px">Charges fixes par mois</p>
-        <ul class="bars costs"><li><span class="bl">Amortissement du matériel (9 200 € sur 5 ans)</span><span class="bt"><i style="--w:100%"></i></span><b>155,33 €</b></li><li><span class="bl">Emplacement (loyer ou commission)</span><span class="bt"><i style="--w:97%"></i></span><b>150 €</b></li><li><span class="bl">Maintenance, réassort, déplacements</span><span class="bt"><i style="--w:64%"></i></span><b>100 €</b></li><li><span class="bl">Comptabilité et frais divers</span><span class="bt"><i style="--w:32%"></i></span><b>50 €</b></li><li><span class="bl">Électricité (≈ 150 W en continu)</span><span class="bt"><i style="--w:17%"></i></span><b>27 €</b></li><li><span class="bl">Assurance</span><span class="bt"><i style="--w:16%"></i></span><b>25 €</b></li><li><span class="bl">Amortissement des frais d'établissement (1 350 € sur 5 ans)</span><span class="bt"><i style="--w:14%"></i></span><b>22,50 €</b></li><li><span class="bl">Nettoyage et pièces d'usure</span><span class="bt"><i style="--w:13%"></i></span><b>20 €</b></li><li><span class="bl">Télémétrie, carte SIM, logiciel</span><span class="bt"><i style="--w:13%"></i></span><b>20 €</b></li><li><span class="bl">Impôts et taxes (CFE, etc.)</span><span class="bt"><i style="--w:10%"></i></span><b>15 €</b></li></ul>
-      </div>
-      <div class="kpis rv d1">
-        <div class="kpi"><b>9 200 €</b><span>pour une borne, amortie sur 5 ans (155,33 € par mois)</span></div>
-        <div class="kpi"><b>≈ 583 €</b><span>de charges fixes par mois, soit environ 6 994 € par an, sans local</span></div>
-        <div class="kpi"><b>150 €</b><span>par mois pour l'emplacement, en loyer ou en commission. Nous prenons en charge l'installation, le réassort et la maintenance.</span></div>
-      </div>
-    </div>
-    <p class="small rv" style="margin-top:14px">Ce tableau ne comprend pas la rémunération des fondateurs.</p>
-
+      <p>Nous commençons par quelques bornes à Dijon pour tester la demande et maîtriser nos déplacements avant de nous étendre.</p></div>
     <h3 class="sub-h rv">Notre stratégie de communication</h3>
     <ol class="road r3 rv" id="road">
       <li><b>Le lancement</b><span>0 à 6 mois</span><p>Créer la curiosité et la notoriété.</p></li>
@@ -305,14 +307,6 @@
   </div>
 </section>
 
-<!-- VIDEO -->
-<section id="video" class="sec band band-dark">
-  <div class="wrap vidcta rv">
-    <div><span class="kicker">La vidéo</span><h2>Le projet <em>en vidéo.</em></h2></div>
-    <a class="btn btn-gold video-link" href="#video" target="_blank" rel="noopener"><svg><use href="#play"/></svg>Voir la vidéo</a>
-  </div>
-</section>
-
 <section class="sec band band-deep">
   <div class="wrap final">
     <h2 class="rv">Sentir bon au bon moment, <em>sans rien porter.</em></h2>
@@ -333,8 +327,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="assets/GLTFLoader.js?v=25"></script>
-<script src="borne3d.js?v=25"></script>
-<script src="app.js?v=25"></script>
+<script src="assets/GLTFLoader.js?v=27"></script>
+<script src="borne3d.js?v=27"></script>
+<script src="app.js?v=27"></script>
 </body>
 </html>

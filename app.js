@@ -24,10 +24,14 @@ var state={scent:0};
 var API={scents:SCENTS,state:state};
 function scentLabel(s){return s.marque+" · "+s.nom}
 
-/* ---------- vidéo ---------- */
-var vid=SJ.videoId;
-var viewUrl=vid?"https://drive.google.com/file/d/"+vid+"/view":"#video";
-$$(".video-link").forEach(function(a){a.href=viewUrl;if(vid){a.target="_blank";a.rel="noopener"}});
+/* ---------- vidéo (bulle) ---------- */
+(function(){var m=$("#vModal"),v=$("#vPlayer");if(!m||!v)return;
+function open(e){if(e)e.preventDefault();m.hidden=false;document.body.style.overflow="hidden";var p=v.play();if(p&&p.catch)p.catch(function(){})}
+function close(){v.pause();m.hidden=true;document.body.style.overflow=""}
+var o=$("#vOpen"),n=$("#vNav");if(o)o.addEventListener("click",open);if(n)n.addEventListener("click",open);
+$("#vClose").addEventListener("click",close);
+m.addEventListener("click",function(e){if(e.target===m)close()});
+document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!m.hidden)close()})})();
 
 /* ---------- apparitions, nav ---------- */
 var rvs=$$(".rv");
