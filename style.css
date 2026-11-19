@@ -605,3 +605,35 @@ html{-webkit-text-size-adjust:100%}
   .club li:nth-child(4){display:none}
   .tabbar a,.tabbar button{min-height:48px;font-size:.7rem}
 }
+
+/* v35 : prix par gamme, plan sur trois ans, mention "dès" */
+.stat .from{font-family:var(--f-ui);font-size:.9rem;font-weight:700;color:var(--gold);margin-right:8px;letter-spacing:.04em}
+.fiche .nom small{font-family:var(--f-ui);font-size:.72em;font-weight:700;color:var(--gold);margin-left:6px;letter-spacing:.06em}
+.gam{list-style:none;padding:0;margin:0;display:grid;gap:6px}
+.gam li{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 12px;border-radius:12px;background:rgba(255,255,255,.05)}
+.gam span{font-family:var(--f-ui);font-size:.8rem;font-weight:700;color:#c3bbdc}
+.gam b{font-family:var(--f-ui);font-weight:800;font-size:1.5rem;letter-spacing:-.03em;color:#fff}
+.plan{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:6px}
+.plan article{padding:20px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.03);display:grid;gap:8px;align-content:start}
+.plan .yr{font-family:var(--f-ui);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--gold)}
+.plan article>b{font-family:var(--f-ui);font-size:1.6rem;font-weight:800;letter-spacing:-.03em}
+.plan p{color:var(--muted);font-size:.9rem}
+.plan dl{margin:4px 0 0;display:grid;gap:4px}.plan dl div{display:flex;justify-content:space-between;gap:10px;font-size:.88rem;border-top:1px solid var(--line);padding-top:6px}
+.plan dt{color:var(--muted)}.plan dd{margin:0;font-family:var(--f-ui);font-weight:700}
+@media(max-width:860px){
+  .plan{grid-template-columns:1fr;gap:10px}.plan article{padding:14px 16px}.plan article>b{font-size:1.3rem}.plan p{display:none}
+  .gam{grid-template-columns:repeat(3,1fr);gap:6px}.gam li{flex-direction:column;align-items:center;gap:2px;padding:6px 4px}.gam b{font-size:1.15rem}.gam span{font-size:.68rem}
+  .formules>.fiche{grid-template-columns:1fr;gap:8px;padding:14px 16px}
+  .fiche .glyph{display:none}.fiche .usage{grid-column:1}
+}
+
+/* v35 : trois gammes bien distinctes (Discount = vert, Standard = violet, Premium = or) */
+:root{--gd:#4fd1a5;--gs:#a98bff;--gp:#e2b64a}
+.g-d{--gc:var(--gd)}.g-s{--gc:var(--gs)}.g-p{--gc:var(--gp)}
+.gam li{border-left:4px solid var(--gc)}
+.gam li span{color:var(--gc)}
+.gam li.g-p{background:linear-gradient(90deg,rgba(226,182,74,.18),rgba(255,255,255,.05))}
+.filters button.g-d,.filters button.g-s,.filters button.g-p{border-color:var(--gc);color:var(--gc)}
+.filters button.g-d.on,.filters button.g-s.on,.filters button.g-p.on{background:var(--gc);color:#1b1534}
+.nuancier button.g-d,.nuancier button.g-s,.nuancier button.g-p{border-left:4px solid var(--gc)}
+.gtag{display:inline-block;font-style:normal;font-family:var(--f-ui);font-size:.66rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:99px;background:var(--gc);color:#1b1534;margin-bottom:4px}

@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Le Dernier Pshit · Ton parfum, partout</title>
-<meta name="description" content="Le Dernier Pshit : des bornes de parfum en libre-service à Dijon. Douze parfums de marque, un pshit à 2 €, sans flacon à porter. Place Darcy, place de la République, Toison d'Or.">
+<meta name="description" content="Le Dernier Pshit : des bornes de parfum en libre-service à Dijon. Neuf parfums de marque en trois gammes, un pshit dès 1 €, sans flacon à porter. Salsapelpa, place Darcy, Toison d'Or.">
 <meta name="theme-color" content="#14101F">
 <meta property="og:title" content="Le Dernier Pshit · Ton parfum, partout">
-<meta property="og:description" content="Une borne, douze parfums de marque. Dès 2 €, à Dijon.">
+<meta property="og:description" content="Une borne, neuf parfums de marque. Dès 1 €, à Dijon.">
 <meta property="og:image" content="assets/borne-detouree.png">
 <link rel="icon" type="image/png" sizes="128x128" href="assets/favicon.png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
@@ -15,7 +15,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Source+Sans+3:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<link rel="stylesheet" href="style.css?v=34">
+<link rel="stylesheet" href="style.css?v=36">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -50,20 +50,20 @@
     <div class="chs" id="chs">
       <article class="ch l on" data-ch="0"><div class="in">
         <h1>Ton parfum, <em>partout.</em></h1>
-        <p class="lede">Des bornes en libre-service au cœur de Dijon : place Darcy, place de la République et Toison d'Or.</p>
+        <p class="lede">Des bornes en libre-service au cœur de Dijon : Salsapelpa, place Darcy et Toison d'Or.</p>
         <div class="cta-row"><a class="btn btn-gold" href="#carte"><svg><use href="#pin"/></svg>Trouver une borne</a><a class="btn btn-line" href="#essayer">Essayer la borne</a></div>
         <div class="scroll-cue"><i></i>Fais défiler</div>
       </div></article>
       <article class="ch r" data-ch="1"><div class="in">
-        <div class="stat"><b data-to="12" data-dec="0">12</b></div>
-        <h2>Douze parfums. <em>De vraies marques.</em></h2>
+        <div class="stat"><b data-to="9" data-dec="0">9</b></div>
+        <h2>Neuf parfums. <em>Trois gammes.</em></h2>
         <div class="sname" id="cycName"><b></b><span></span></div>
-        <p>Dior, Chanel, Yves Saint Laurent, Lancôme, Paco Rabanne, Mugler… des parfums que tu connais déjà, choisis sur l'écran tactile.</p>
+        <p>Azzaro, Yves Saint Laurent, Paco Rabanne, Davidoff, Parfums de Marly, Byredo… du Discount au Premium, choisis sur l'écran tactile.</p>
       </div></article>
       <article class="ch l" data-ch="2"><div class="in">
-        <div class="stat"><b data-to="2" data-dec="0">2</b><u>€</u></div>
+        <div class="stat"><small class="from">dès</small><b data-to="1" data-dec="0">1</b><u>€</u></div>
         <h2>Le prix d'un pshit, <em>pas d'un flacon.</em></h2>
-        <p>Paiement sans contact : carte, Apple Pay ou Google Pay. Pas de compte à créer.</p>
+        <p>1, 2 ou 3 € selon la gamme. Paiement sans contact ou en pièces, sans compte à créer.</p>
       </div></article>
       <article class="ch r" data-ch="3"><div class="in">
         <div class="stat"><b data-to="0.1" data-dec="1">0,1</b><u>ml</u></div>
@@ -105,14 +105,14 @@
         </ol>
         <div class="sb on" data-s="0">
           <h3>Choisis ton parfum</h3>
-          <p>Douze parfums défilent sur l'écran tactile, trois par page. Touche celui du moment.</p>
+          <p>Neuf parfums défilent sur l'écran tactile, de la gamme Discount à la gamme Premium. Touche celui du moment.</p>
           <div class="swatches" id="swatches" role="group" aria-label="Choisir un parfum"></div>
           <div class="sname" id="sname" aria-live="polite"><b></b><span></span></div>
           <button class="btn btn-gold" type="button" data-next>Continuer</button>
         </div>
         <div class="sb" data-s="1">
           <h3>Paie sans contact</h3>
-          <p>Carte bancaire, Apple Pay ou Google Pay. 2 € le pshit.</p>
+          <p>Carte bancaire, Apple Pay, Google Pay ou pièces. Le pshit coûte 1, 2 ou 3 € selon la gamme.</p>
           <button class="btn btn-gold" type="button" id="payBtn">Approcher ma carte</button>
         </div>
         <div class="sb" data-s="2">
@@ -143,7 +143,7 @@
       <div class="rv">
         <span class="kicker">Le concept</span>
         <h2>Se parfumer en sortant, <em>sans acheter un flacon.</em></h2>
-        <p class="lead">Le parfum du matin disparaît quand on en a le plus besoin, et on n'emporte pas un flacon fragile et cher. Notre borne propose douze parfums de marque, vaporisés à la demande dans les lieux de passage de Dijon.</p>
+        <p class="lead">Le parfum du matin disparaît quand on en a le plus besoin, et on n'emporte pas un flacon fragile et cher. Notre borne propose neuf parfums de marque en trois gammes, vaporisés à la demande ou emportés en petit flacon, dans les lieux de passage de Dijon.</p>
         <div class="rings" id="rings"><div class="ring rv"><div class="rg"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="bg" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" data-v="74"/></svg><div class="val" data-count="74" data-suffix=" %">74 %</div></div><p>ont envie de se reparfumer dans la journée</p></div>
           <div class="ring rv d1"><div class="rg"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="bg" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" data-v="60"/></svg><div class="val" data-count="60" data-suffix=" %">60 %</div></div><p>estiment que leur parfum tient moins de 4 heures</p></div>
           <div class="ring rv d2"><div class="rg"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="bg" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" data-v="56"/></svg><div class="val" data-count="56" data-suffix=" %">56 %</div></div><p>pensent utiliser la borne</p></div>
@@ -175,7 +175,7 @@
       </div>
     </div>
     <div class="sv-facts rv">
-      <div class="kpi"><b>47 %</b><span>des répondants ont entre 18 et 24 ans, dont 63 % de femmes</span></div>
+      <div class="kpi"><b>47 %</b><span>des répondants ont entre 18 et 24 ans (63 % de femmes au total)</span></div>
       <div class="kpi"><b>51 %</b><span>donnent 4 ou 5 sur 5 au concept de la borne</span></div>
       <div class="kpi"><b>49 %</b><span>donnent 4 ou 5 sur 5 au nom « Le Dernier Pshit »</span></div>
     </div>
@@ -185,27 +185,27 @@
 <!-- PARFUMS -->
 <section id="parfums" class="sec band band-deep">
   <div class="wrap">
-    <div class="sec-head rv"><span class="kicker">Les 12 parfums</span><h2>Des marques que <em>tu connais déjà.</em></h2>
-      <p>Les parfums que nos répondants demandent le plus, pour homme, pour femme et mixtes. Touches-en un pour voir où il est disponible, en ce moment, dans les bornes.</p></div>
-    <div class="filters rv" id="genreBtns" role="group" aria-label="Filtrer par genre">
-      <button type="button" class="on" data-g="Tous">Tous</button><button type="button" data-g="Homme">Homme</button><button type="button" data-g="Femme">Femme</button><button type="button" data-g="Mixte">Mixte</button>
+    <div class="sec-head rv"><span class="kicker">Les 9 parfums</span><h2>Des marques que <em>tu connais déjà.</em></h2>
+      <p>Trois parfums par gamme, pour homme, pour femme et mixtes. Touches-en un pour voir où il est disponible, en ce moment, dans les bornes.</p></div>
+    <div class="filters rv" id="genreBtns" role="group" aria-label="Filtrer par gamme">
+      <button type="button" class="on" data-g="Tous">Tous</button><button type="button" data-g="Discount" class="g-d">Discount</button><button type="button" data-g="Standard" class="g-s">Standard</button><button type="button" data-g="Premium" class="g-p">Premium</button>
     </div>
     <div class="nuancier rv d1" id="nuancier" role="list"></div>
-    <button type="button" class="btn btn-line more-parf" id="moreParf">Voir les 12 parfums</button>
+    <button type="button" class="btn btn-line more-parf" id="moreParf">Voir les 9 parfums</button>
     <div class="result rv" id="result" aria-live="polite">
       <div class="orb" id="orb"></div>
       <div class="r-main"><h3 id="rName"></h3><p class="why" id="rWhy"></p></div>
       <div class="r-avail" id="rAvail"></div>
     </div>
-    <p class="small rv" style="margin-top:20px">Marques citées de façon factuelle, sans partenariat officiel. Le parfum est vaporisé depuis le flacon d'origine ; la composition figure sur l'étiquette des échantillons.</p>
+    <p class="small rv" style="margin-top:20px">Marques citées de façon factuelle, sans partenariat officiel. Les parfums sont des produits finis et scellés ; la liste des allergènes (INCI) figure sur l'étiquette de chaque flacon.</p>
   </div>
 </section>
 
 <!-- CARTE -->
 <section id="carte" class="sec band band-dark">
   <div class="wrap">
-    <div class="sec-head rv"><span class="kicker">Où nous trouver</span><h2>Trois places, <em>trois bornes.</em></h2>
-      <p>Place Darcy, place de la République et Toison d'Or. Active ta position pour connaître le temps de trajet, ou touche la carte pour simuler un point de départ.</p></div>
+    <div class="sec-head rv"><span class="kicker">Où nous trouver</span><h2>Trois bornes <em>à Dijon.</em></h2>
+      <p>Salsapelpa, place Darcy et Toison d'Or pour la première année. Active ta position pour connaître le temps de trajet, ou touche la carte pour simuler un point de départ.</p></div>
     <div class="demo-banner rv" id="demoBanner" hidden><i></i><span><b>Aperçu.</b> Les bornes ne sont pas encore installées : les emplacements sont ceux envisagés pour le lancement, et les disponibilités sont simulées.</span></div>
     <div class="mapgrid">
       <div class="mapbox rv d1">
@@ -228,29 +228,29 @@
     <div class="formules rv d1">
       <article class="fiche">
         <div class="glyph"><svg width="34" height="44" viewBox="0 0 34 44" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 4v8M10 8l7 5 7-5" opacity=".5"/><circle cx="17" cy="26" r="2" fill="currentColor"/><circle cx="10" cy="32" r="1.4" fill="currentColor"/><circle cx="24" cy="32" r="1.4" fill="currentColor"/><circle cx="17" cy="38" r="1.2" fill="currentColor"/></svg></div>
-        <h3 class="nom">Le Pshit</h3><div class="px">2 €<small>0,1 ML</small></div>
-        <p>Une pulvérisation de 0,1 ml sur le torse, sans contact.</p><span class="usage">Retouche immédiate</span>
+        <h3 class="nom">Le Pshit <small>0,1 ml</small></h3><ul class="gam"><li class="g-d"><span>Discount</span><b>1 €</b></li><li class="g-s"><span>Standard</span><b>2 €</b></li><li class="g-p"><span>Premium</span><b>3 €</b></li></ul>
+        <p>Une pulvérisation instantanée sur le torse, sans contact.</p><span class="usage">Retouche immédiate</span>
       </article>
       <article class="fiche">
         <div class="glyph"><svg width="40" height="56" viewBox="0 0 24 32"><use href="#bottle"/></svg></div>
-        <h3 class="nom">L'échantillon 3 ml</h3><div class="px">5 €<small>3 ML</small></div>
+        <h3 class="nom">Petit flacon <small>3 ml</small></h3><ul class="gam"><li class="g-d"><span>Discount</span><b>3 €</b></li><li class="g-s"><span>Standard</span><b>7 €</b></li><li class="g-p"><span>Premium</span><b>20 €</b></li></ul>
         <p>Environ 30 pulvérisations, dans un flacon de voyage à glisser dans la poche.</p><span class="usage">Pour la journée</span>
       </article>
       <article class="fiche">
         <div class="glyph"><svg width="52" height="74" viewBox="0 0 24 32"><use href="#bottle"/></svg></div>
-        <h3 class="nom">L'échantillon 5 ml</h3><div class="px">7,99 €<small>5 ML</small></div>
+        <h3 class="nom">Moyen flacon <small>5 ml</small></h3><ul class="gam"><li class="g-d"><span>Discount</span><b>5 €</b></li><li class="g-s"><span>Standard</span><b>10 €</b></li><li class="g-p"><span>Premium</span><b>30 €</b></li></ul>
         <p>Environ 50 pulvérisations, assez pour tester un parfum avant de choisir un flacon complet.</p><span class="usage">Pour tester</span>
       </article>
     </div>
     <div class="recharge rv">
-      <p><b>Pshit Club</b> : le 11e pshit est offert, et le code <code>BIENVENUE</code> offre le premier.</p>
-      <p>Prix de l'offre Standard. Trois offres existent selon la classe de parfum : Discount, Standard et Premium. Seul le prix change, avec des parfums pour homme, femme et mixtes.</p>
+      <p><b>Pshit Club</b> : le 11e pshit est offert, et le code <code>BIENVENUE</code> offre le premier. Points de fidélité cumulés dans l'application.</p>
+      <p>Prix TTC. Seul le prix change d'une gamme à l'autre, avec des parfums pour homme, femme et mixtes. 65 % de nos répondants acceptent le petit flacon Standard à 7 €.</p>
     </div>
     <button type="button" class="btn btn-gold calc-toggle" id="calcToggle">Calculer mes économies Pshit Club</button>
     <div class="calc-wrap"><h3 class="sub-h rv">Calcule ton mois avec le Pshit Club</h3>
     <div class="calc rv">
       <div>
-        <label for="perWeek"><span>Pshits par semaine</span><output id="perWeekOut">6</output></label>
+        <label for="perWeek"><span>Pshits Standard par semaine</span><output id="perWeekOut">6</output></label>
         <input type="range" id="perWeek" min="1" max="14" value="6">
         <p class="small" style="margin-top:14px">Un pshit sur onze est offert : plus tu en prends, plus il y en a d'offerts.</p>
       </div>
@@ -270,7 +270,14 @@
 <section id="projet" class="sec band band-dark">
   <div class="wrap">
     <div class="sec-head rv"><span class="kicker">Le projet</span><h2>Un petit nombre de bornes à Dijon, <em>d'abord.</em></h2>
-      <p>Nous commençons par quelques bornes à Dijon pour tester la demande et maîtriser nos déplacements avant de nous étendre.</p></div>
+      <p>Nous commençons par trois bornes à Dijon pour tester la demande et maîtriser nos déplacements avant de nous étendre. Deux acteurs proposent déjà des distributeurs en France (PerfumeXpress, Mikalya), mais aucun ne vend de format à emporter.</p></div>
+    <h3 class="sub-h rv">Le déploiement sur trois ans</h3>
+    <div class="plan rv">
+      <article><span class="yr">Année 1</span><b>3 bornes</b><p>Dijon, installées en janvier 2027 pour valider les emplacements.</p><dl><div><dt>Chiffre d'affaires</dt><dd>57 510 €</dd></div><div><dt>Résultat net</dt><dd>11 272 €</dd></div><div><dt>Investissement</dt><dd>16 950 €</dd></div></dl></article>
+      <article><span class="yr">Année 2</span><b>6 bornes</b><p>Achats échelonnés pour ménager la trésorerie.</p><dl><div><dt>Chiffre d'affaires</dt><dd>127 800 €</dd></div><div><dt>Résultat net</dt><dd>28 414 €</dd></div><div><dt>Investissement</dt><dd>15 600 €</dd></div></dl></article>
+      <article><span class="yr">Année 3</span><b>10 bornes</b><p>Recrutement d'un préparateur-technicien au-delà de 10 bornes.</p><dl><div><dt>Chiffre d'affaires</dt><dd>244 418 €</dd></div><div><dt>Résultat net</dt><dd>50 236 €</dd></div><div><dt>Investissement</dt><dd>20 800 €</dd></div></dl></article>
+    </div>
+    <p class="small rv" style="margin:14px 0 26px">Financé par 25 000 € de capital (5 associés × 5 000 €) et 5 000 € de subvention ou sponsoring en années 1 et 2, sans emprunt. Une borne installée coûte 5 200 € ; le point mort est à environ 204 ventes par mois et par borne, contre 300 prévues la première année. Ce sont des hypothèses d'équipe, pas des certitudes.</p>
     <h3 class="sub-h rv">Notre stratégie de communication</h3>
     <ol class="road r3 rv" id="road">
       <li><b>Le lancement</b><span>0 à 6 mois</span><p>Créer la curiosité et la notoriété.</p></li>
@@ -297,7 +304,7 @@
     <div class="phone rv d1" aria-label="Maquette de l'application">
       <div class="screen">
         <h4>Bonsoir Léa</h4>
-        <div class="near"><div><b id="phName">Place Darcy</b><span id="phSub">À 6 min à pied</span></div><i>OUVERTE</i></div>
+        <div class="near"><div><b id="phName">Salsapelpa</b><span id="phSub">À 6 min à pied</span></div><i>OUVERTE</i></div>
         <svg class="minimap" viewBox="0 0 240 130" aria-hidden="true"><rect width="240" height="130" rx="10" fill="#1a1433"/><path d="M0 90 C60 70 110 100 240 60" stroke="#2c2350" stroke-width="10" fill="none"/><path d="M40 0 C70 50 120 60 150 130" stroke="#2c2350" stroke-width="7" fill="none"/><g id="phPins"></g></svg>
         <div class="card"><span class="lab">Ta carte Pshit Club</span><div class="pips" id="pips"></div><span class="sub" id="pipSub">7 pshits avant le prochain offert</span></div>
         <button class="btn btn-gold club-btn" id="addPshit" type="button">Ajouter un pshit</button>
@@ -333,8 +340,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="assets/GLTFLoader.js?v=34"></script>
-<script src="borne3d.js?v=34"></script>
-<script src="app.js?v=34"></script>
+<script src="assets/GLTFLoader.js?v=36"></script>
+<script src="borne3d.js?v=36"></script>
+<script src="app.js?v=36"></script>
 </body>
 </html>

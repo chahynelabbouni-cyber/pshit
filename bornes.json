@@ -1,40 +1,70 @@
 {
-  "_aide": "Pour mettre à jour une borne : modifier les niveaux de stock (de 0 à 100, en % du flacon). 0 = en rupture, 20 ou moins = bientôt vide. statut : en_service, hors_service ou bientot (ouverture prévue). Quand les vraies bornes seront installées, passer demo à false et corriger la date dans maj.",
-  "demo": true,
-  "maj": "2026-11-14T18:00:00+01:00",
-  "bornes": [
-    {
-      "id": "darcy",
-      "nom": "Place Darcy",
-      "lieu": "Centre-ville, à côté de la gare et du jardin Darcy",
-      "adresse": "Place Darcy, 21000 Dijon",
-      "lat": 47.3235,
-      "lng": 5.0341,
-      "horaires": "24 h/24",
-      "statut": "en_service",
-      "stock": {"sauvage": 86, "bleu": 64, "million": 72, "azzaro": 41, "blackopium": 58, "vieestbelle": 90, "missdior": 0, "ladymillion": 33, "ckone": 77, "jazzclub": 49, "angel": 62, "terre": 81}
-    },
-    {
-      "id": "republique",
-      "nom": "Place de la République",
-      "lieu": "Quartier République, passage étudiant et soirées",
-      "adresse": "Place de la République, 21000 Dijon",
-      "lat": 47.32695,
-      "lng": 5.04517,
-      "horaires": "24 h/24",
-      "statut": "en_service",
-      "stock": {"sauvage": 55, "bleu": 78, "million": 0, "azzaro": 69, "blackopium": 84, "vieestbelle": 47, "missdior": 66, "ladymillion": 71, "ckone": 12, "jazzclub": 88, "angel": 35, "terre": 59}
-    },
-    {
-      "id": "toison",
-      "nom": "Toison d'Or",
-      "lieu": "Centre commercial de la Toison d'Or",
-      "adresse": "Centre commercial de la Toison d'Or, 21000 Dijon",
-      "lat": 47.3569,
-      "lng": 5.0517,
-      "horaires": "Aux heures d'ouverture du centre",
-      "statut": "en_service",
-      "stock": {"sauvage": 92, "bleu": 53, "million": 61, "azzaro": 74, "blackopium": 15, "vieestbelle": 68, "missdior": 79, "ladymillion": 57, "ckone": 83, "jazzclub": 0, "angel": 44, "terre": 70}
-    }
-  ]
+ "_aide": "Pour mettre à jour une borne : modifier les niveaux de stock (de 0 à 100, en % du flacon). 0 = en rupture, 20 ou moins = bientôt vide. statut : en_service, hors_service ou bientot (ouverture prévue). Quand les vraies bornes seront installées, passer demo à false et corriger la date dans maj.",
+ "demo": true,
+ "maj": "2026-11-19T18:00:00+01:00",
+ "bornes": [
+  {
+   "id": "salsapelpa",
+   "nom": "Salsapelpa",
+   "lieu": "Centre-ville, rue Marceau : soirées étudiantes",
+   "adresse": "1 rue Marceau, 21000 Dijon",
+   "lat": 47.3243,
+   "lng": 5.0415,
+   "horaires": "Aux heures d'ouverture",
+   "statut": "en_service",
+   "stock": {
+    "yara": 82,
+    "coolwater": 64,
+    "blueseduction": 71,
+    "wanted": 45,
+    "libre": 58,
+    "invictus": 90,
+    "layton": 33,
+    "hacivat": 77,
+    "gypsywater": 49
+   }
+  },
+  {
+   "id": "darcy",
+   "nom": "Place Darcy",
+   "lieu": "Centre-ville, à côté de la gare : emplacement à confirmer",
+   "adresse": "Place Darcy, 21000 Dijon",
+   "lat": 47.3235,
+   "lng": 5.0341,
+   "horaires": "24 h/24",
+   "statut": "en_service",
+   "stock": {
+    "yara": 55,
+    "coolwater": 78,
+    "blueseduction": 0,
+    "wanted": 69,
+    "libre": 84,
+    "invictus": 47,
+    "layton": 66,
+    "hacivat": 12,
+    "gypsywater": 88
+   }
+  },
+  {
+   "id": "toison",
+   "nom": "Toison d'Or",
+   "lieu": "Centre commercial de la Toison d'Or",
+   "adresse": "Centre commercial de la Toison d'Or, 21000 Dijon",
+   "lat": 47.3569,
+   "lng": 5.0517,
+   "horaires": "Aux heures d'ouverture du centre",
+   "statut": "en_service",
+   "stock": {
+    "yara": 92,
+    "coolwater": 53,
+    "blueseduction": 61,
+    "wanted": 74,
+    "libre": 15,
+    "invictus": 68,
+    "layton": 79,
+    "hacivat": 0,
+    "gypsywater": 44
+   }
+  }
+ ]
 }

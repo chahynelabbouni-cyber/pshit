@@ -19,7 +19,7 @@ Promise.all([getJSON("data/parfums.json"),getJSON("data/bornes.json"),getJSON("d
 
 function start(PJ,BJ,SJ){
 var P=PJ.parfums;
-var SCENTS=P.map(function(p){return{id:p.id,marque:p.marque,nom:p.nom,genre:p.genre,f:p.famille,c:p.couleur,c1:mixHex(p.couleur,.25,255),c2:mixHex(p.couleur,.45,0)}});
+var SCENTS=P.map(function(p){return{id:p.id,marque:p.marque,nom:p.nom,genre:p.genre,g:p.gamme,f:p.famille,c:p.couleur,c1:mixHex(p.couleur,.25,255),c2:mixHex(p.couleur,.45,0)}});
 var state={scent:0};
 var API={scents:SCENTS,state:state};
 function scentLabel(s){return s.marque+" · "+s.nom}
@@ -130,7 +130,7 @@ var step=0,stepBtns=$$("#steps button"),sbs=$$(".sb"),note=$("#demoNote"),sprayT
 var sw=$("#swatches");
 SCENTS.forEach(function(s,i){var b=document.createElement("button");b.type="button";b.style.setProperty("--c1",s.c1);b.style.setProperty("--c2",s.c2);b.title=scentLabel(s);b.setAttribute("aria-label",scentLabel(s));b.setAttribute("aria-pressed",i===state.scent?"true":"false");
   b.addEventListener("click",function(){setScent(i)});sw.appendChild(b)});
-function snamePaint(){var s=SCENTS[state.scent],n=$("#sname");n.querySelector("b").textContent=scentLabel(s);n.querySelector("span").textContent=s.f+" · "+s.genre}
+function snamePaint(){var s=SCENTS[state.scent],n=$("#sname");n.querySelector("b").textContent=scentLabel(s);n.querySelector("span").textContent=s.g+" · "+s.genre+" · "+s.f}
 function setScent(i){state.scent=i;$$("#swatches button").forEach(function(b,k){b.setAttribute("aria-pressed",k===i?"true":"false")});snamePaint();redraw3d()}
 snamePaint();
 function setStep(n){
@@ -145,16 +145,16 @@ $("#payBtn").addEventListener("click",function(){toast("Paiement accepté");setS
 $("#sprayBtn").addEventListener("click",function(){if(demo){demo.spray=true;demo.sprayT=0}toast("Pshit !");sprayTimer=setTimeout(function(){setStep(3)},1900)});
 $("#againBtn").addEventListener("click",function(){setStep(0)});
 
-/* ---------- les 12 parfums ---------- */
+/* ---------- les 9 parfums ---------- */
 var genre="Tous",selPerfume=null;
 var nu=$("#nuancier");
 function bottleSvg(c){return'<svg viewBox="0 0 24 32" aria-hidden="true"><rect x="3.5" y="12" width="17" height="18" rx="4.5" fill="'+c+'"/><rect x="9" y="7" width="6" height="5" fill="'+c+'"/><rect x="7.5" y="2" width="9" height="5" rx="1.5" fill="#e2b64a"/><rect x="6.5" y="15" width="2.6" height="11" rx="1.3" fill="#fff" opacity=".3"/></svg>'}
 function paintNuancier(){
   nu.innerHTML="";
   SCENTS.forEach(function(s,i){
-    if(genre!=="Tous"&&s.genre!==genre)return;
-    var b=document.createElement("button");b.type="button";b.setAttribute("role","listitem");b.setAttribute("aria-pressed",selPerfume===i?"true":"false");
-    b.innerHTML='<span class="fl" style="--c:'+s.c+'">'+bottleSvg(s.c)+'</span><span><small>'+esc(s.marque)+'</small><b>'+esc(s.nom)+'</b><i>'+esc(s.f)+'</i></span>';
+    if(genre!=="Tous"&&s.g!==genre)return;
+    var b=document.createElement("button");b.type="button";b.setAttribute("role","listitem");b.className="g-"+s.g.charAt(0).toLowerCase();b.setAttribute("aria-pressed",selPerfume===i?"true":"false");
+    b.innerHTML='<span class="fl" style="--c:'+s.c+'">'+bottleSvg(s.c)+'</span><span><em class="gtag">'+esc(s.g)+'</em><small>'+esc(s.marque)+'</small><b>'+esc(s.nom)+'</b><i>'+esc(s.genre)+'</i></span>';
     b.addEventListener("click",function(){selectPerfume(i,true)});nu.appendChild(b);
   });
 }
@@ -164,7 +164,7 @@ function lvl(v){return v<=0?"out":(v<=20?"low":"ok")}
 function paintResult(){
   var i=selPerfume==null?0:selPerfume,s=SCENTS[i];
   $("#orb").style.setProperty("--c1",s.c1);$("#orb").style.setProperty("--c2",s.c2);
-  $("#rName").textContent=scentLabel(s);$("#rWhy").textContent=s.f+" · "+s.genre;
+  $("#rName").textContent=scentLabel(s);$("#rWhy").textContent=s.g+" · "+s.genre+" · "+s.f;
   $("#rAvail").innerHTML=BORNES.map(function(b){var v=stockOf(b,s.id),l=lvl(v);return'<span class="pill '+l+'"><i></i>'+esc(b.nom)+" · "+(l==="out"?"en rupture":(l==="low"?"bientôt vide":"disponible"))+"</span>"}).join("");
 }
 function selectPerfume(i,fromGrid){
@@ -351,7 +351,7 @@ b.addEventListener("click",function(){var o=p.classList.toggle("open");b.textCon
 }catch(e){}})();
 (function(){try{
 var ct=$("#calcToggle"),cw=$(".calc-wrap");if(ct&&cw)ct.addEventListener("click",function(){var o=cw.classList.toggle("open");ct.textContent=o?"Masquer le calculateur":"Calculer mes économies Pshit Club"});
-var mp=$("#moreParf"),nu2=$("#nuancier");if(mp&&nu2)mp.addEventListener("click",function(){var o=nu2.classList.toggle("all");mp.textContent=o?"Voir moins":"Voir les 12 parfums"});
+var mp=$("#moreParf"),nu2=$("#nuancier");if(mp&&nu2)mp.addEventListener("click",function(){var o=nu2.classList.toggle("all");mp.textContent=o?"Voir moins":"Voir les 9 parfums"});
 $$("#road li").forEach(function(li,i){li.addEventListener("click",function(){var was=li.classList.contains("open");$$("#road li").forEach(function(x){x.classList.remove("open")});if(!was)li.classList.add("open")});if(i===0)li.classList.add("open")});
 }catch(e){}})();
 })();
