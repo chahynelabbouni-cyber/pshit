@@ -36,7 +36,9 @@ h1, h2, h3, h4 { margin: 0; letter-spacing: -.02em; }
 [hidden] { display: none !important; }
 
 /* ---------- Structure ---------- */
-#app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+#app { position: fixed; inset: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* Navigateurs dont la barre du bas apparaît/disparaît (Brave…) : l'app suit la hauteur réellement visible */
+@supports (height: 100dvh) { #app { bottom: auto; height: 100dvh; } }
 #main {
   flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
   padding-bottom: calc(var(--tabs-h) + var(--safe-b) + 24px);

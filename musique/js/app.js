@@ -1,10 +1,10 @@
-import { db } from './db.js?v=23';
-import { readTags } from './tags.js?v=23';
-import { Player, isIOS } from './player.js?v=23';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=23';
-import * as AI from './ai.js?v=23';
-import * as Voice from './voice.js?v=23';
-import * as Src from './sources.js?v=23';
+import { db } from './db.js?v=24';
+import { readTags } from './tags.js?v=24';
+import { Player, isIOS } from './player.js?v=24';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=24';
+import * as AI from './ai.js?v=24';
+import * as Voice from './voice.js?v=24';
+import * as Src from './sources.js?v=24';
 
 // ======================================================================
 // SOMMAIRE de l'application (chaque chapitre est repéré par « Chapitre N »)
@@ -168,7 +168,13 @@ function safeUrl(u) {
   try { const x = new URL(u); return x.protocol === 'https:' ? x.href : ''; } catch { return ''; }
 }
 const rawCoverURL = id => (id ? safeUrl(S.covers.get(id)) || null : null);
-function coverURL(coverId) { const u = coverId ? S.covers.get(coverId) : null; return u ? esc(safeUrl(u)) || null : null; }
+function coverURL(coverId) {
+  let u = coverId ? S.covers.get(coverId) : null;
+  if (!u) return null;
+  // petites vignettes YouTube (320 px) au lieu des grandes : l'accueil et les listes chargent bien plus vite
+  if (u.includes('i.ytimg.com/')) u = u.replace(/\/(hqdefault|sddefault|maxresdefault|hq720)\.jpg/, '/mqdefault.jpg');
+  return esc(safeUrl(u)) || null;
+}
 
 function placeholderHue(seed) { return hash(seed || 'x') % 360; }
 
@@ -3311,7 +3317,10 @@ function homeShelves(f, seen) {
   }
   if (f === 'music') {
     const arts = [...artists().values()].sort((a, b) => b.plays - a.plays || b.tracks.length - a.tracks.length).slice(0, 10).map(artistCard);
-    out += shelf('Tes artistes', arts, '#/library?f=artists');
+    if (arts.length) out += shelf('Tes artistes', arts, '#/library?f=artists');
+    // des styles à lancer en un appui (YouTube, sinon radio) : l'onglet Musique n'est jamais vide
+    const styles = ['rap fr', 'drill', 'rnb', 'afro', 'funk', 'pop', 'reggaeton', 'rai', 'electro', 'soul', 'rock', 'classique', 'lofi', 'jazz'];
+    out += shelf('Explorer par style', styles.map(k => `<button class="card" data-act="genre-play" data-g="${esc(k)}"><div class="card-art"><div class="cv st-art" style="--h:${placeholderHue(k)}"><span>${esc(k.slice(0, 2).toUpperCase())}</span></div></div><b>${esc(k.charAt(0).toUpperCase() + k.slice(1))}</b><small>Lancer une sélection</small></button>`));
   } else if (hs.radios !== false) {
     out += shelf('Radios en direct', radioCards(seen), '#/search?src=radio');
     if (tracks.length < 10) out += `<button class="lib-item flash-row" data-act="news-flash" data-i="0">${stationArt('franceinfo')}<div><b>Le journal franceinfo</b><small>Dernière édition · un appui pour écouter</small></div></button>`;
@@ -3567,6 +3576,7 @@ function viewSettings() {
         <p><b>Android (Chrome)</b> : menu ⋮ → « Installer l'application » ou « Ajouter à l'écran d'accueil ».</p>
         <p><b>iPhone (Safari)</b> : bouton Partager → « Sur l'écran d'accueil ».</p>
         <p>Une fois installée, ${esc(brandName())} s'ouvre en plein écran et fonctionne sans connexion.</p>
+        ${navigator.brave && !matchMedia('(display-mode: standalone)').matches ? `<p class="hint"><b>Tu es sur Brave</b> : Brave ne sait créer qu'un raccourci (avec son logo et sa barre), pas une vraie application. Seuls Chrome et Samsung Internet installent une vraie app. Pour alléger Brave : Paramètres de Brave → Apparence → désactive la barre d'outils du bas ; la barre d'adresse se cache quand tu fais défiler.</p>` : ''}
         ${S.installPrompt ? `<button class="btn primary" data-act="install">${icon('import')} Installer maintenant</button>` : ''}
       </div>
     </section>
@@ -3799,6 +3809,11 @@ document.addEventListener('click', e => {
           act.previousElementSibling?.insertAdjacentHTML('beforeend', ts.map((t, i) => onlineRow(t, start + i, m.key)).join(''));
           if (next) { act.disabled = false; act.textContent = 'Plus de résultats'; } else act.remove();
         } catch (e) { act.disabled = false; act.textContent = 'Plus de résultats'; toast(e.message); } })();
+        return;
+      }
+      case 'genre-play': {
+        toast('Je prépare ta sélection…');
+        smartCommand(`mets du ${act.dataset.g}`).then(r => r && toast(r)).catch(() => toast('Indisponible pour le moment'));
         return;
       }
       case 'search-hist-clear': saveJSON('onde.searchHist', []); return render(true);
