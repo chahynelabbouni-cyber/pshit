@@ -1,10 +1,10 @@
-import { db } from './db.js?v=22';
-import { readTags } from './tags.js?v=22';
-import { Player, isIOS } from './player.js?v=22';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=22';
-import * as AI from './ai.js?v=22';
-import * as Voice from './voice.js?v=22';
-import * as Src from './sources.js?v=22';
+import { db } from './db.js?v=23';
+import { readTags } from './tags.js?v=23';
+import { Player, isIOS } from './player.js?v=23';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=23';
+import * as AI from './ai.js?v=23';
+import * as Voice from './voice.js?v=23';
+import * as Src from './sources.js?v=23';
 
 // ======================================================================
 // SOMMAIRE de l'application (chaque chapitre est repéré par « Chapitre N »)
@@ -815,6 +815,7 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     !fromNP && { id: 'next', icon: 'next-up', label: 'Lire ensuite' },
     !fromNP && { id: 'queue', icon: 'queue', label: 'Ajouter à la file d\'attente' },
     { id: 'pl', icon: 'list-add', label: 'Ajouter à une playlist' },
+    { id: 'share', icon: 'send', label: 'Partager ce son' },
     inPlaylist && { id: 'unpl', icon: 'close', label: 'Retirer de cette playlist' },
     t.album && { id: 'album', icon: 'album', label: 'Voir l\'album' },
     (!t.source || t.saved) && !['radio', 'podcast'].includes(t.source) && { id: 'artist', icon: 'user', label: 'Voir l\'artiste' },
@@ -828,6 +829,7 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     !t.source && { id: 'del', icon: 'trash', label: 'Supprimer du téléphone', danger: true },
   ]), {
     like: () => { toggleLike(t); closeSheet(); },
+    share: async () => { await closeSheet(); shareTrack(t); },
     dl: async () => { await closeSheet(); t.offline ? removeDownload(t) : downloadEpisode(t); },
     ytdl: () => infoSheet('Télécharger depuis YouTube', 'YouTube interdit aux autres apps d\'enregistrer ses vidéos : c\'est réservé à YouTube Premium (bouton « Télécharger » dans l\'app YouTube). Pour écouter sans connexion dans Maison : importe tes propres fichiers MP3 (bouton + de la Bibliothèque), ou télécharge des épisodes de podcasts (menu ⋯ d\'un épisode).'),
     sound: () => soundSheet(),
@@ -1013,11 +1015,13 @@ function playlistSheet(p) {
     { id: 'add', icon: 'plus', label: 'Ajouter des titres' },
     { id: 'queue', icon: 'queue', label: 'Ajouter à la file d\'attente' },
     { id: 'ren', icon: 'edit', label: 'Renommer' },
-    { id: 'share', icon: 'send', label: 'Partager (envoyer à quelqu\'un)' },
+    { id: 'share', icon: 'send', label: 'Partager (lien WhatsApp, SMS…)' },
+    { id: 'sharefile', icon: 'import', label: 'Exporter en fichier' },
     { id: 'del', icon: 'trash', label: 'Supprimer la playlist', danger: true },
   ]), {
     add: () => addTracksSheet(p),
-    share: async () => { await closeSheet(); exportPlaylist(p); },
+    share: async () => { await closeSheet(); sharePlaylist(p); },
+    sharefile: async () => { await closeSheet(); exportPlaylist(p); },
     queue: () => { p.trackIds.forEach(id => player.addToQueue(id)); closeSheet(); toast('Ajouté à la file d\'attente'); },
     ren: () => newPlaylistSheet([], p),
     del: () => confirmSheet(`Supprimer « ${p.name} » ?`, 'Les titres resteront dans ta bibliothèque.', 'Supprimer', async () => {
@@ -1091,9 +1095,83 @@ async function adoptTrack(x) {
   return t;
 }
 
+// ---------- Partage par lien (WhatsApp, SMS, Snap…) : la personne ouvre le lien, et ça s'ouvre dans l'app ----------
+// Le contenu (titres, liens YouTube, radios) voyage dans le lien lui-même, compressé : aucun serveur.
+const b64u = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+async function packShare(obj) {
+  const raw = new TextEncoder().encode(JSON.stringify(obj));
+  if (!window.CompressionStream) return '0' + b64u(raw);
+  const z = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+  let bin = ''; for (let i = 0; i < z.length; i += 8192) bin += String.fromCharCode(...z.subarray(i, i + 8192));
+  return '1' + btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+async function unpackShare(code) {
+  const bytes = unb64u(code.slice(1));
+  if (code[0] === '0') return JSON.parse(new TextDecoder().decode(bytes));
+  const out = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+  return JSON.parse(out);
+}
+// un titre réduit à l'essentiel pour tenir dans un lien
+const tinyTrack = t => t.source === 'yt' ? { s: 'y', i: t.ytId, t: t.title, a: t.artist || '', d: t.duration || 0 }
+  : t.source === 'radio' ? { s: 'r', i: t.id, t: t.title, u: t.url, h: t.thumb || '' }
+  : t.source === 'podcast' ? { s: 'p', i: t.id, t: t.title, a: t.artist || '', u: t.url, d: t.duration || 0, h: t.thumb || '' }
+  : { s: 'l', t: t.title, a: t.artist || '', d: t.duration || 0 };
+function fromTiny(x) {
+  if (x.s === 'y') return { id: 'yt-' + x.i, source: 'yt', ytId: x.i, title: x.t, artist: x.a, duration: x.d, thumb: `https://i.ytimg.com/vi/${encodeURIComponent(x.i)}/mqdefault.jpg` };
+  if (x.s === 'r') return { id: x.i, source: 'radio', title: x.t, artist: '', url: x.u, thumb: x.h };
+  if (x.s === 'p') return { id: x.i, source: 'podcast', title: x.t, artist: x.a, url: x.u, duration: x.d, thumb: x.h };
+  return { local: true, title: x.t, artist: x.a, duration: x.d };
+}
+const shareBase = () => location.href.split('#')[0];
+async function shareLink(title, text, payload) {
+  const url = `${shareBase()}#/recu/${await packShare(payload)}`;
+  if (navigator.share) {
+    try { await navigator.share({ title, text, url }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(`${text}\n${url}`); toast('Lien copié : colle-le dans WhatsApp, SMS…'); }
+  catch { prompt('Copie ce lien :', url); }
+}
+function sharePlaylist(p) {
+  const tracks = p.trackIds.map(id => S.tracks.get(id)).filter(Boolean);
+  const local = tracks.filter(t => !t.source).length;
+  if (local) toast(`${plural(local, 'titre')} de ton téléphone : la personne devra les avoir aussi`);
+  return shareLink(`Playlist « ${p.name} »`, `🎧 Écoute ma playlist « ${p.name} » (${plural(tracks.length, 'titre')}) sur ${brandName()}`,
+    { k: 'pl', n: p.name, f: S.settings.name || '', t: tracks.slice(0, 200).map(tinyTrack) });
+}
+function shareTrack(t) {
+  const who = t.artist ? ` de ${t.artist}` : '';
+  if (t.source === 'yt' && !navigator.share) return shareLink(t.title, `🎧 « ${t.title} »${who}`, { k: 'tr', f: S.settings.name || '', t: [tinyTrack(t)] });
+  if (!t.source) toast('C\'est un fichier de ton téléphone : la personne devra l\'avoir aussi');
+  return shareLink(t.title, `🎧 Écoute « ${t.title} »${who}${t.source === 'yt' ? ` · https://youtu.be/${t.ytId}` : ''}`, { k: 'tr', f: S.settings.name || '', t: [tinyTrack(t)] });
+}
+// Ouverture d'un lien reçu
+async function receiveShared(code) {
+  let d;
+  try { d = await unpackShare(code); } catch { return toast('Ce lien de partage est abîmé'); }
+  const items = (d.t || []).map(fromTiny);
+  const from = d.f ? String(d.f).slice(0, 30) : '';
+  if (d.k === 'tr') {
+    const t = await adoptTrack({ ...items[0], saved: false });
+    if (!t) return toast(`« ${items[0]?.title || 'Ce son'} » est un fichier : il faut l'avoir sur ton téléphone`);
+    playIds([t.id], 0, { context: { label: from ? `Partagé par ${from}` : 'Son partagé' } });
+    return toast(from ? `${from} t'a partagé « ${t.title} »` : `Son partagé : « ${t.title} »`);
+  }
+  if (d.k === 'pl') {
+    const name = String(d.n || 'Playlist partagée').slice(0, 80);
+    return confirmSheet(`Ajouter « ${name} » ?`, `${from ? from + ' te partage' : 'On te partage'} une playlist de ${plural(items.length, 'titre')}. Elle sera ajoutée à ta bibliothèque.`, 'Ajouter', async () => {
+      await importData({ type: 'maison-playlist', name, from, tracks: items });
+    });
+  }
+  toast('Lien de partage inconnu');
+}
+
 async function importDataFile(file) {
   let d;
   try { d = JSON.parse(await file.text()); } catch { return toast('Fichier illisible'); }
+  return importData(d);
+}
+async function importData(d) {
   if (d?.type === 'maison-playlist') {
     const ts = [];
     for (const x of d.tracks || []) { const t = await adoptTrack({ ...x, saved: true }); if (t) ts.push(t); }
@@ -3403,7 +3481,7 @@ function viewPlaylist(id) {
     kind: 'playlist', title: p.name, sub: 'Playlist',
     coverHtml: playlistCover(p), ids: p.trackIds, listKey: 'pl:' + p.id, label: p.name,
     color: colorFor(firstCover, p.name),
-    actions: `<button class="ib" data-act="pl-add" data-id="${p.id}" aria-label="Ajouter des titres">${icon('plus')}</button><button class="ib" data-act="pl-more" data-id="${p.id}" aria-label="Options">${icon('more')}</button>`,
+    actions: `<button class="ib" data-act="pl-add" data-id="${p.id}" aria-label="Ajouter des titres">${icon('plus')}</button><button class="ib" data-act="pl-share" data-id="${p.id}" aria-label="Partager la playlist">${icon('send')}</button><button class="ib" data-act="pl-more" data-id="${p.id}" aria-label="Options">${icon('more')}</button>`,
     emptyMsg: `Ta playlist est vide.<br><button class="btn primary" data-act="pl-add" data-id="${p.id}">${icon('plus')} Ajouter des titres</button>`,
   });
 }
@@ -3525,6 +3603,13 @@ function render(keepScroll = false) {
   if (prev && !keepScroll) S.scroll[prev.key] = main.scrollTop;
   const sameView = keepScroll && prev && prev.key === r.key;
   const scrollTop = main.scrollTop;
+  if (r.name === 'recu' && r.arg) {
+    // lien de partage reçu : on l'ouvre, puis on revient à l'accueil
+    const code = r.arg;
+    location.replace('#/');
+    setTimeout(() => receiveShared(code), 600);
+    return;
+  }
   S.route = r;
   S.lists = {};
   let html;
@@ -3691,6 +3776,7 @@ document.addEventListener('click', e => {
       }
       case 'pl-add': return addTracksSheet(S.playlists.get(act.dataset.id));
       case 'pl-more': return playlistSheet(S.playlists.get(act.dataset.id));
+      case 'pl-share': return sharePlaylist(S.playlists.get(act.dataset.id));
       case 'sort': S.settings.libSort = S.settings.libSort === 'az' ? 'recent' : 'az'; saveSettings(); return render(true);
       case 'wipe': return confirmSheet('Tout effacer ?', 'Toute la musique importée et tes playlists seront supprimées de l\'application. Tes fichiers d\'origine ne sont pas touchés.', 'Tout effacer', async () => {
         await deleteTracks([...S.tracks.keys()]);
