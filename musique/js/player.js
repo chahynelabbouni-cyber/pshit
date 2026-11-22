@@ -1,7 +1,7 @@
 // Moteur de lecture : deux lecteurs audio pour les fondus enchaînés entre morceaux,
 // file d'attente, aléatoire, répétition, écran de verrouillage (Media Session).
-import { db } from './db.js?v=21';
-import { YouTubeElement } from './sources.js?v=21';
+import { db } from './db.js?v=22';
+import { YouTubeElement } from './sources.js?v=22';
 
 export const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -71,6 +71,7 @@ export class Player extends EventTarget {
   get kind() { return this.cur === 2 ? 'yt' : this.cur === 3 ? 'radio' : 'local'; }
   pauseOthers() { this.els.forEach((e, i) => { if (i !== this.cur && !e.paused) e.pause(); }); }
   slotFor(t) {
+    if (t?.offline) return this.cur < 2 ? this.cur : 0; // épisode téléchargé : lu depuis le téléphone
     if (t?.source === 'yt') return 2;
     if (t?.source === 'radio' || t?.source === 'podcast') return 3;
     return this.cur < 2 ? this.cur : 0;
@@ -499,8 +500,6 @@ export class Player extends EventTarget {
     h('previoustrack', () => this.prev());
     h('nexttrack', () => this.next());
     h('seekto', d => this.seek(d.seekTime));
-    h('seekbackward', d => this.seek(this.time - (d.seekOffset || (this.current?.source === 'podcast' ? 15 : 10))));
-    h('seekforward', d => this.seek(this.time + (d.seekOffset || (this.current?.source === 'podcast' ? 30 : 10))));
     h('stop', () => this.pause());
   }
 
@@ -510,11 +509,14 @@ export class Player extends EventTarget {
     const live = this.current?.source === 'radio';
     const ms = navigator.mediaSession;
     const h = (a, f) => { try { ms.setActionHandler(a, f); } catch { /* non supporté */ } };
+    // En voiture, l'écran n'affiche QUE des boutons « ±10 s » si on les déclare : pour la musique on ne garde
+    // donc que « titre précédent / suivant » ; les sauts de 15 / 30 s restent pour les podcasts.
+    const pod = this.current?.source === 'podcast';
     h('seekto', live ? null : d => this.seek(d.seekTime));
-    h('seekbackward', live ? null : d => this.seek(this.time - (d.seekOffset || (this.current?.source === 'podcast' ? 15 : 10))));
-    h('seekforward', live ? null : d => this.seek(this.time + (d.seekOffset || (this.current?.source === 'podcast' ? 30 : 10))));
-    h('nexttrack', live && this.nextIndex() < 0 ? null : () => this.next());
-    h('previoustrack', live && this.index === 0 ? null : () => this.prev());
+    h('seekbackward', pod ? d => this.seek(this.time - (d.seekOffset || 15)) : null);
+    h('seekforward', pod ? d => this.seek(this.time + (d.seekOffset || 30)) : null);
+    h('nexttrack', () => this.next());
+    h('previoustrack', () => this.prev());
   }
 
   async updateMediaSession() {

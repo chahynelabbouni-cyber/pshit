@@ -1,10 +1,10 @@
-import { db } from './db.js?v=21';
-import { readTags } from './tags.js?v=21';
-import { Player, isIOS } from './player.js?v=21';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=21';
-import * as AI from './ai.js?v=21';
-import * as Voice from './voice.js?v=21';
-import * as Src from './sources.js?v=21';
+import { db } from './db.js?v=22';
+import { readTags } from './tags.js?v=22';
+import { Player, isIOS } from './player.js?v=22';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=22';
+import * as AI from './ai.js?v=22';
+import * as Voice from './voice.js?v=22';
+import * as Src from './sources.js?v=22';
 
 // ======================================================================
 // SOMMAIRE de l'application (chaque chapitre est repéré par « Chapitre N »)
@@ -493,7 +493,8 @@ function updateSleep() {
 
 function markPlaying() {
   const id = player.currentId;
-  $$('[data-tid]').forEach(r => r.classList.toggle('playing', r.dataset.tid === id));
+  $$('.playing[data-tid]').forEach(r => { if (r.dataset.tid !== id) r.classList.remove('playing'); });
+  if (id) $$(`[data-tid="${CSS.escape(id)}"]`).forEach(r => r.classList.add('playing'));
 }
 
 // --- ouverture/fermeture avec gestion du bouton retour Android ---
@@ -726,6 +727,39 @@ function recentSearches() {
   return `<div class="shelf-head"><h2>Recherches récentes</h2><button class="link" data-act="search-hist-clear">Effacer</button></div>
     <div class="chips wrap recent-q">${h.map(x => `<button class="chip" data-act="search-again" data-q="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
 }
+// Petite fenêtre d'explication
+function infoSheet(title, text) {
+  openSheet(`<h3 class="sheet-title">${esc(title)}</h3><p class="sheet-text">${esc(text)}</p><button class="btn primary" data-sa="ok" style="margin:8px auto 4px;display:flex">Compris</button>`, { ok: () => closeSheet() });
+}
+
+// Épisodes de podcasts téléchargés : le fichier est gardé sur le téléphone et lu comme un fichier importé
+async function downloadEpisode(t) {
+  if (!t?.url) return;
+  if (navigator.onLine === false) return toast('Il faut une connexion pour télécharger');
+  toast('Téléchargement de l\'épisode…');
+  try {
+    const r = await fetch(t.url, { mode: 'cors' });
+    if (!r.ok) throw new Error(String(r.status));
+    const blob = await r.blob();
+    if (!blob.size) throw new Error('vide');
+    await db.put('audio', blob, t.id);
+    t.offline = true; t.saved = true; t.offlineSize = blob.size;
+    await saveTrack(t); bump();
+    toast(`Épisode téléchargé (${blob.size >= 1e7 ? Math.round(blob.size / 1e6) : (blob.size / 1e6).toFixed(1).replace('.', ',')} Mo) : il marche sans connexion`);
+    if (['library', 'search'].includes(S.route?.name)) render(true);
+  } catch (e) {
+    console.warn(e);
+    toast(/quota|space/i.test(String(e)) ? 'Plus de place sur le téléphone' : 'Ce podcast n\'autorise pas le téléchargement depuis une autre app');
+  }
+}
+async function removeDownload(t) {
+  if (player.currentId === t.id && player.kind === 'local') player.pause();
+  await db.del('audio', t.id);
+  t.offline = false; delete t.offlineSize;
+  await saveTrack(t); bump();
+  toast('Téléchargement supprimé');
+}
+
 // Message d'erreur réseau clair, avec « Réessayer »
 function netErr(title, e, src) {
   const off = navigator.onLine === false;
@@ -785,6 +819,8 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     t.album && { id: 'album', icon: 'album', label: 'Voir l\'album' },
     (!t.source || t.saved) && !['radio', 'podcast'].includes(t.source) && { id: 'artist', icon: 'user', label: 'Voir l\'artiste' },
     !['radio', 'podcast'].includes(t.source) && { id: 'lyrics', icon: 'mic', label: t.lyrics ? 'Voir / modifier les paroles' : 'Ajouter les paroles' },
+    t.source === 'podcast' && { id: 'dl', icon: 'import', label: t.offline ? 'Supprimer le téléchargement' : 'Télécharger (écouter sans connexion)' },
+    t.source === 'yt' && { id: 'ytdl', icon: 'import', label: 'Télécharger' },
     t.source === 'podcast' && podPrefs[showKey(t)] && { id: 'podreset', icon: 'refresh', label: 'Ne plus sauter automatiquement le début / la fin' },
     t.source && !t.saved && { id: 'save', icon: 'plus', label: t.source === 'radio' ? 'Ajouter à mes radios' : t.source === 'podcast' ? 'Garder cet épisode' : 'Ajouter à ma bibliothèque' },
     { id: 'edit', icon: 'edit', label: 'Modifier les infos' },
@@ -792,6 +828,8 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     !t.source && { id: 'del', icon: 'trash', label: 'Supprimer du téléphone', danger: true },
   ]), {
     like: () => { toggleLike(t); closeSheet(); },
+    dl: async () => { await closeSheet(); t.offline ? removeDownload(t) : downloadEpisode(t); },
+    ytdl: () => infoSheet('Télécharger depuis YouTube', 'YouTube interdit aux autres apps d\'enregistrer ses vidéos : c\'est réservé à YouTube Premium (bouton « Télécharger » dans l\'app YouTube). Pour écouter sans connexion dans Maison : importe tes propres fichiers MP3 (bouton + de la Bibliothèque), ou télécharge des épisodes de podcasts (menu ⋯ d\'un épisode).'),
     sound: () => soundSheet(),
     next: () => { player.addNext(t.id); toast('Sera lu ensuite'); closeSheet(); },
     queue: () => { player.addToQueue(t.id); toast('Ajouté à la file d\'attente'); closeSheet(); },
@@ -2495,7 +2533,7 @@ function onlineRow(t, i, listKey) {
   const live = t.source === 'radio';
   return `<div class="row ${t.id === player.currentId ? 'playing' : ''}" role="button" tabindex="0" aria-label="${esc(t.title)}${t.artist ? ', ' + esc(t.artist) : ''}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
     ${trackCover(t, live ? 'radio-cv' : 'wide')}
-    <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${live ? '<span class="live-dot">EN DIRECT</span> ' : t.source === 'podcast' ? '<span class="src-pc">PODCAST</span> ' : '<span class="src-yt">YouTube</span> '}${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}</small></div>
+    <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${live ? '<span class="live-dot">EN DIRECT</span> ' : t.offline ? '<span class="src-pc">TÉLÉCHARGÉ</span> ' : t.source === 'podcast' ? '<span class="src-pc">PODCAST</span> ' : '<span class="src-yt">YouTube</span> '}${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}</small></div>
     <button class="ib sm more" aria-label="Options">${icon('more')}</button>
   </div>`;
 }
@@ -2559,11 +2597,13 @@ async function onlineSearch(q) {
     }
     if (!q) return show(recentSearches() + (savedOnline() || `<div class="no-res"><b>Cherche un artiste ou un titre</b><p>Tout YouTube est là.</p></div>`));
     show('<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>');
-    const res = await Src.ytSearch(S.settings.ytKey, q);
-    const ts = res.map(x => remoteTrack(x, 'yt'));
+    // jusqu'à 50 résultats comme sur YouTube, puis « Plus de résultats »
+    const { items, next } = await Src.ytSearchAll(S.settings.ytKey, q);
+    const ts = items.map(x => remoteTrack(x, 'yt'));
     const key = registerList('yt-q', ts.map(t => t.id), `YouTube « ${q} »`);
     if (ts.length) rememberSearch(q);
-    show(ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>` : `<div class="no-res"><b>Aucun résultat</b></div>`);
+    S.ytMore = { q, next, key, ids: ts.map(t => t.id) };
+    show(ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>${next ? '<button class="btn ghost more-res" data-act="yt-more">Plus de résultats</button>' : ''}` : `<div class="no-res"><b>Aucun résultat</b></div>`);
   } catch (e) {
     show(netErr('Impossible de charger', e, S.settings.searchSrc));
   }
@@ -3661,6 +3701,20 @@ document.addEventListener('click', e => {
       });
       case 'install': S.installPrompt?.prompt(); return;
       case 'backup-export': return exportBackup();
+      case 'yt-more': {
+        const m = S.ytMore; if (!m?.next) return;
+        act.disabled = true; act.textContent = 'Chargement…';
+        (async () => { try {
+          const { items, next } = await Src.ytSearchAll(S.settings.ytKey, m.q, m.next);
+          const ts = items.map(x => remoteTrack(x, 'yt')).filter(t => !m.ids.includes(t.id));
+          const start = m.ids.length;
+          m.ids.push(...ts.map(t => t.id)); m.next = next;
+          registerList('yt-q', m.ids, `YouTube « ${m.q} »`);
+          act.previousElementSibling?.insertAdjacentHTML('beforeend', ts.map((t, i) => onlineRow(t, start + i, m.key)).join(''));
+          if (next) { act.disabled = false; act.textContent = 'Plus de résultats'; } else act.remove();
+        } catch (e) { act.disabled = false; act.textContent = 'Plus de résultats'; toast(e.message); } })();
+        return;
+      }
       case 'search-hist-clear': saveJSON('onde.searchHist', []); return render(true);
       case 'search-again': { const qi = $('#q'); if (qi) { qi.value = act.dataset.q; S.searchQ = act.dataset.q; } return onlineSearch(act.dataset.q); }
       case 'backup-import': return pickDataFile();
@@ -3678,7 +3732,12 @@ document.addEventListener('click', e => {
       case 'redo-onb': return onboarding();
       case 'perso-reset': Object.assign(S.settings, { theme: 'or', bgTheme: 'noir', font: 'auto', textSize: 'normal', corners: 'arrondis', motion: 'normal', coverShape: 'carree', vinyl: false, npBg: 'pochette', style: 'maison' }); saveSettings(); applyTheme(); toast('Apparence réinitialisée'); return render(true);
       case 'lib-add': return openSheet(`<h3 class="sheet-title">Ajouter</h3>${sheetItems([{ id: 'pl', icon: 'list-add', label: 'Nouvelle playlist' }, { id: 'imp', icon: 'import', label: 'Importer des fichiers du téléphone' }])}`, { pl: () => newPlaylistSheet(), imp: () => { closeSheet(); importSheet(); } });
-      case 'hero-toggle': player.toggle(); setTimeout(() => render(true), 120); return;
+      case 'hero-toggle': {
+        player.toggle();
+        // mise à jour de la carte sans tout redessiner
+        setTimeout(() => $$('.hero').forEach(h => { const p = player.playing; h.querySelector('.hero-btn use')?.setAttribute('href', p ? '#i-pause' : '#i-play'); const k = h.querySelector('.hero-txt small'); if (k) k.textContent = p ? 'En cours' : 'En pause'; }), 150);
+        return;
+      }
       case 'hero-route': S.pendingFwd = true; return goto(act.dataset.route);
       case 'taste-play': { const b = act; b.classList.add('loading'); playTaste(act.dataset.k).then(r => { b.classList.remove('loading'); if (r) toast(r); else toast('Ajoute ta clé YouTube pour ça, ou essaie les radios'); }); return; }
       case 'home-f': S.settings.homeFilter = act.dataset.f; saveSettings(); return render(true);
@@ -3802,6 +3861,8 @@ async function boot() {
   // écran d'accueil plus court : l'app est prête bien avant
   setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.parentNode?.removeChild(sp), 600); }, 450);
   setTimeout(queueAnalysis, 4000);
+  // lecteur YouTube prêt d'avance : le premier son démarre sans attente
+  if (S.settings.ytKey || [...S.tracks.values()].some(t => t.source === 'yt')) setTimeout(() => player.els[2].warm(), 1200);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
     // nouvelle version installée → on recharge une fois pour l'afficher
