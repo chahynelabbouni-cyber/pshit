@@ -77,6 +77,24 @@ async function ytJson(url) {
     : r.status === 404 ? 'Introuvable sur YouTube (playlist privée ?)' : `YouTube indisponible (${r.status})`;
   throw Object.assign(new Error(msg), { reason });
 }
+// Recherche « comme sur YouTube » : toutes les vidéos (pas seulement la catégorie musique), 50 par page,
+// dans l'ordre de pertinence de YouTube ; next = jeton pour la page suivante
+const ytPageCache = new Map();
+export async function ytSearchAll(key, q, pageToken = '') {
+  const ck = q.trim().toLowerCase() + '|' + pageToken;
+  const hit = ytPageCache.get(ck);
+  if (hit && Date.now() - hit.at < 30 * 60e3) return hit.v;
+  const p = new URLSearchParams({ part: 'snippet', type: 'video', videoEmbeddable: 'true', maxResults: 50, q, key, regionCode: 'FR', relevanceLanguage: 'fr' });
+  if (pageToken) p.set('pageToken', pageToken);
+  const j = await ytJson(`${YT_API}/search?${p}`);
+  const ids = (j.items || []).map(i => i.id.videoId).filter(Boolean);
+  const all = await ytVideos(key, ids, j.items || []);
+  const v = { items: all.filter(x => !x.duration || x.duration >= 30), next: j.nextPageToken || '' };
+  ytPageCache.set(ck, { at: Date.now(), v });
+  if (ytPageCache.size > 40) ytPageCache.delete(ytPageCache.keys().next().value);
+  return v;
+}
+
 // Petit cache des recherches (économise le quota gratuit : 100 unités par recherche)
 const ytCache = new Map();
 
@@ -118,7 +136,7 @@ export async function ytVideos(key, ids, snippets = []) {
     return {
       ytId: id, title, artist, rawTitle: sn.title || '', channel: sn.channelTitle || '',
       duration: isoDuration(v.contentDetails?.duration),
-      thumb: sn.thumbnails?.high?.url || sn.thumbnails?.medium?.url || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+      thumb: sn.thumbnails?.medium?.url || sn.thumbnails?.high?.url || `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
     };
   }).filter(Boolean);
 }
@@ -221,7 +239,7 @@ export class YouTubeElement extends EventTarget {
       s.videoId = id;
       const ready = new Promise(resolve => {
         s.player = new YT.Player(div, {
-          videoId: id,
+          ...(id ? { videoId: id } : {}),
           width: '100%', height: '100%',
           playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, iv_load_policy: 3, autoplay: autoplay ? 1 : 0, start: Math.floor(start) || undefined, origin: location.origin },
           events: {
@@ -263,6 +281,12 @@ export class YouTubeElement extends EventTarget {
     s.videoId = id; s.failed = false;
     const o = { videoId: id, startSeconds: Math.floor(start) || 0 };
     autoplay ? s.player.loadVideoById(o) : s.player.cueVideoById(o);
+  }
+
+  // Préchauffage : le lecteur YouTube est créé dès l'ouverture de l'app (vide, sans rien lire),
+  // pour que le premier son démarre tout de suite au lieu d'attendre plusieurs secondes
+  async warm() {
+    try { loadYT(); await this.ensure(this.a, null, false); } catch { /* pas grave */ }
   }
 
   // Prépare le son suivant dans le second lecteur, sans le lire (« cue » : simple chargement)
