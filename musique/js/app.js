@@ -1,10 +1,10 @@
-import { db } from './db.js?v=26';
-import { readTags } from './tags.js?v=26';
-import { Player, isIOS } from './player.js?v=26';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=26';
-import * as AI from './ai.js?v=26';
-import * as Voice from './voice.js?v=26';
-import * as Src from './sources.js?v=26';
+import { db } from './db.js?v=27';
+import { readTags } from './tags.js?v=27';
+import { Player, isIOS } from './player.js?v=27';
+import { parseLyrics, activeIndex, fetchOnline, searchCandidates, lyricsOf } from './lyrics.js?v=27';
+import * as AI from './ai.js?v=27';
+import * as Voice from './voice.js?v=27';
+import * as Src from './sources.js?v=27';
 
 // ======================================================================
 // SOMMAIRE de l'application (chaque chapitre est repéré par « Chapitre N »)
@@ -474,11 +474,23 @@ function paintProgress(c, d) {
   seekBox.style.setProperty('--p', `${(r * 100).toFixed(2)}%`);
   seek.value = Math.round(r * 1000);
 }
+// Effet karaoké : la ligne chantée se remplit de couleur au rythme de la voix
+function karaoke(now) {
+  const L = S.lyr;
+  if (!S.lyrOpen || !L?.parsed?.synced || L.idx < 0 || L.id !== player.currentId) return;
+  const lines = L.parsed.lines, cur = lines[L.idx], nx = lines[L.idx + 1];
+  if (!cur) return;
+  const end = nx ? nx.t : cur.t + 5;
+  const k = Math.max(0, Math.min(1, (now - cur.t) / Math.max(0.6, Math.min(end - cur.t, 12) * 0.92)));
+  $('.lyr-lines p.on', np)?.style.setProperty('--k', (k * 100).toFixed(1) + '%');
+}
 function progressLoop() {
   seekRaf = 0;
   if (!player.playing || document.hidden) return;
   const d = player.duration;
-  paintProgress(seekAnchor.t + (performance.now() - seekAnchor.at) / 1000, d);
+  const now = seekAnchor.t + (performance.now() - seekAnchor.at) / 1000;
+  paintProgress(now, d);
+  karaoke(now);
   seekRaf = requestAnimationFrame(progressLoop);
 }
 function updateTime() {
@@ -595,6 +607,7 @@ gesture($('.np-art', np), {
     np.style.transition = ''; np.style.transform = '';
     setTimeout(placeYT, 480);
     if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy)) {
+      if (player.kind === 'yt') return setVideoMode((S.settings.npVideo || 'video') === 'video' ? 'cover' : 'video');
       S.swipeDir = dx < 0 ? 1 : -1;
       dx < 0 ? player.next() : player.prev();
     } else if (dy > 120) closeNP();
@@ -1409,7 +1422,8 @@ document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer?
 async function loadLyrics(t) {
   S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 };
   if (t.source === 'radio' || t.source === 'podcast') { S.lyr = { id: t.id, parsed: null }; renderLyrics(); return; }
-  const stale = !t.lyricsChecked || Date.now() - t.lyricsChecked > 7 * 864e5;
+  // rien trouvé la dernière fois : on réessaie dès le lendemain (la recherche s'améliore et LRCLIB s'enrichit)
+  const stale = !t.lyricsChecked || Date.now() - t.lyricsChecked > (t.lyrics ? 7 : 1) * 864e5 || (t.lyricsV || 0) < 2;
   if (!S.lyr.parsed && S.settings.onlineLyrics && stale && navigator.onLine !== false) {
     S.lyr.loading = true;
     renderLyrics();
@@ -1418,6 +1432,7 @@ async function loadLyrics(t) {
     if (player.currentId !== t.id) return;
     const txt = await fetchOnline(t);
     t.lyricsChecked = Date.now();
+    t.lyricsV = 2;
     if (txt) { t.lyrics = txt; t.lyricsSource = 'LRCLIB'; }
     await saveTrack(t);
     if (player.currentId !== t.id) return;
@@ -1437,14 +1452,14 @@ function renderLyrics() {
   if (!L) return;
   if (L.loading) { box.innerHTML = '<div class="lyr-msg"><span class="dots"><i></i><i></i><i></i></span>Recherche des paroles…</div>'; return; }
   if (!has) {
-    box.innerHTML = `<div class="lyr-msg">Pas de paroles pour ce titre.<br><button class="btn ghost sm" data-lyr="edit">Ajouter les paroles</button></div>`;
+    box.innerHTML = `<div class="lyr-msg">Pas de paroles trouvées pour ce titre.<br><button class="btn primary sm" data-lyr="pick">Chercher les paroles</button> <button class="btn ghost sm" data-lyr="edit">Les écrire</button></div>`;
     return;
   }
   box.classList.toggle('plain', !L.parsed.synced);
   box.innerHTML = L.parsed.lines.map((l, i) => l.text
-    ? `<p data-i="${i}" ${l.t != null ? `data-t="${l.t}"` : ''}>${esc(l.text)}</p>`
+    ? `<p data-i="${i}" ${l.t != null ? `data-t="${l.t}"` : ''}><span class="k" data-text="${esc(l.text)}">${esc(l.text)}</span></p>`
     : `<p class="gap" data-i="${i}" ${l.t != null ? `data-t="${l.t}"` : ''}><span class="dots"><i></i><i></i><i></i></span></p>`).join('')
-    + `<div class="lyr-src">${L.parsed.synced ? 'Paroles synchronisées' : 'Paroles'}${player.current?.lyricsSource ? ' · ' + esc(player.current.lyricsSource) : ''}</div>`;
+    + `<div class="lyr-src">${L.parsed.synced ? 'Paroles synchronisées' : 'Paroles'}${player.current?.lyricsSource ? ' · ' + esc(player.current.lyricsSource) : ''}<br><button class="link" data-lyr="pick">Pas les bonnes paroles ?</button></div>`;
   L.idx = -2;
   syncLyrics(true);
 }
@@ -1460,7 +1475,13 @@ function syncLyrics(force) {
   if (nl.textContent !== line) { nl.classList.remove('in'); void nl.offsetWidth; nl.textContent = line; nl.classList.add('in'); }
   if (!S.lyrOpen) return;
   const ps = $$('.lyr-lines p', np);
-  ps.forEach((p, k) => { p.classList.toggle('on', k === i); p.classList.toggle('past', k < i); });
+  ps.forEach((p, k) => {
+    p.classList.toggle('on', k === i); p.classList.toggle('past', k < i);
+    p.classList.toggle('next', k === i + 1);
+    // plus une ligne est loin de celle chantée, plus elle s'efface
+    p.style.setProperty('--dist', Math.min(4, Math.abs(k - i)));
+    if (k !== i) p.style.removeProperty('--k');
+  });
   const cur = ps[i];
   const sc = $('.lyr-scroll', np);
   if (cur && !S.lyrTouch) sc.scrollTo({ top: cur.offsetTop - sc.clientHeight * 0.36, behavior: force ? 'auto' : 'smooth' });
@@ -1478,6 +1499,7 @@ np.addEventListener('click', e => {
   const p = e.target.closest('.lyr-lines p[data-t]');
   if (p) { player.seek(+p.dataset.t); if (!player.playing) player.play(); return; }
   if (e.target.closest('[data-lyr="edit"]')) return lyricsSheet(player.current);
+  if (e.target.closest('[data-lyr="pick"]')) return lyricsPicker(player.current);
   if (e.target.closest('[data-lyr="close"]')) return popOverlay();
   if (e.target.closest('.np-lyr-btn, .np-line')) return openLyrics();
 }, true);
@@ -1516,6 +1538,32 @@ function lyricsSheet(t) {
       if (t.id === player.currentId) loadLyrics(t);
       toast(t.lyrics ? 'Paroles enregistrées' : 'Paroles supprimées');
     }),
+  });
+}
+
+// Choisir soi-même les bonnes paroles parmi celles trouvées (ou chercher autrement)
+async function lyricsPicker(t, query) {
+  if (!t) return;
+  openSheet(`<h3 class="sheet-title">Choisir les paroles</h3><form class="lyr-q"><input class="set-input wide" name="q" placeholder="Artiste et titre…" value="${esc(query || '')}" aria-label="Rechercher des paroles"><button class="btn primary sm">Chercher</button></form><div class="lyr-cands"><div class="lyr-msg" style="padding:24px 0"><span class="dots"><i></i><i></i><i></i></span></div></div>`, {}, {
+    onOpen: async body => {
+      $('form', body).addEventListener('submit', e => { e.preventDefault(); const q = e.target.q.value.trim(); if (q) fill(q); });
+      const fill = async q => {
+        const box = $('.lyr-cands', body);
+        box.innerHTML = '<div class="lyr-msg" style="padding:24px 0"><span class="dots"><i></i><i></i><i></i></span></div>';
+        const list = await searchCandidates(t, q);
+        if (!list.length) { box.innerHTML = '<p class="sheet-text">Rien trouvé. Essaie d\'écrire l\'artiste et le titre autrement.</p>'; return; }
+        box.innerHTML = list.map((x, i) => `<button class="sheet-item lyr-cand" data-i="${i}"><svg><use href="#i-note"/></svg><span><b>${esc(x.trackName)}</b><small>${esc(x.artistName)}${x.duration ? ' · ' + fmt(x.duration) : ''} · ${x.syncedLyrics ? 'synchronisées ✦' : 'texte seul'}${t.duration && x.duration && Math.abs(x.duration - t.duration) <= 4 ? ' · même durée' : ''}</small></span></button>`).join('');
+        box.onclick = async e => {
+          const b = e.target.closest('.lyr-cand'); if (!b) return;
+          const x = list[+b.dataset.i];
+          t.lyrics = lyricsOf(x); t.lyricsSource = 'LRCLIB (choisies par toi)'; t.lyricsChecked = Date.now(); t.lyricsV = 2;
+          await saveTrack(t); await closeSheet();
+          if (t.id === player.currentId) { S.lyr = { id: t.id, parsed: parseLyrics(t.lyrics), idx: -2 }; renderLyrics(); }
+          toast('Paroles mises à jour');
+        };
+      };
+      fill(query);
+    },
   });
 }
 
@@ -2633,17 +2681,48 @@ function placeYT() {
     // zone carrée de la pochette, calculée sans tenir compte des animations en cours
     const a = $('.np-art', np).getBoundingClientRect();
     const size = Math.min(a.width, window.innerHeight * 0.52);
-    r = { left: a.left + (a.width - size) / 2, top: a.top + (a.height - size) / 2, width: size, height: size };
+    const sq = { left: a.left + (a.width - size) / 2, top: a.top + (a.height - size) / 2, width: size, height: size };
+    if (S.settings.npVideo === 'cover') {
+      // mode « Pochette » : la pochette en grand, la vidéo reste visible en vignette dans le coin
+      const w = Math.max(200, Math.round(size * 0.5)), h = Math.round(w * 9 / 16);
+      r = { left: sq.left + sq.width - w - 10, top: sq.top + sq.height - h - 10, width: w, height: h };
+    } else {
+      // mode « Vidéo » : la vidéo entière en 16:9, sans être rognée, au centre de la pochette
+      const h = Math.round(size * 9 / 16);
+      r = { left: sq.left, top: sq.top + (size - h) / 2, width: size, height: h };
+    }
     inNp = true;
   } else r = $('.mini-cover', mini)?.getBoundingClientRect();
   if (!r) return;
   ytbox.classList.add('moving');
-  Object.assign(ytbox.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px', borderRadius: inNp ? '8px' : '5px' });
+  Object.assign(ytbox.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px', borderRadius: inNp ? '10px' : '5px' });
   ytbox.classList.toggle('in-np', inNp);
+  ytbox.classList.toggle('full', inNp);
+  ytbox.classList.toggle('pip', inNp && S.settings.npVideo === 'cover');
+  np.classList.toggle('vm-cover', S.settings.npVideo === 'cover');
+  $$('.np-pages [data-vm]', np).forEach(b => b.setAttribute('aria-selected', String(b.dataset.vm === (S.settings.npVideo || 'video'))));
   requestAnimationFrame(() => requestAnimationFrame(() => ytbox.classList.remove('moving')));
 }
 window.addEventListener('resize', () => placeYT());
-$('.yt-shield', ytbox).addEventListener('click', () => { if (!S.npOpen) openNP(); else player.toggle(); });
+$('.yt-shield', ytbox).addEventListener('click', () => { if (S.ytSwiped) { S.ytSwiped = false; return; } if (!S.npOpen) openNP(); else player.toggle(); });
+// Vidéo ↔ Pochette : boutons sous la pochette, ou glisser sur la vidéo / la pochette
+function setVideoMode(m) {
+  if ((S.settings.npVideo || 'video') === m) return;
+  S.settings.npVideo = m; saveSettings();
+  ytbox.classList.add('swap'); setTimeout(() => ytbox.classList.remove('swap'), 380);
+  placeYT();
+}
+np.addEventListener('click', e => { const b = e.target.closest('.np-pages [data-vm]'); if (b) setVideoMode(b.dataset.vm); });
+gesture($('.yt-shield', ytbox), {
+  move: (dx, dy) => { if (S.npOpen && Math.abs(dx) > Math.abs(dy)) ytbox.style.translate = `${dx * 0.35}px 0`; },
+  end: (dx, dy) => {
+    ytbox.style.translate = '';
+    if (!S.npOpen || Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
+    S.ytSwiped = true; setTimeout(() => { S.ytSwiped = false; }, 400);
+    setVideoMode((S.settings.npVideo || 'video') === 'video' ? 'cover' : 'video');
+  },
+  reset: () => { ytbox.style.translate = ''; },
+});
 
 function remoteTrack(item, source) {
   const id = source === 'yt' ? 'yt-' + item.ytId : source === 'podcast' ? 'pc-' + item.podcastId : 'rd-' + item.radioId;

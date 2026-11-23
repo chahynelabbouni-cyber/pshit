@@ -704,7 +704,7 @@ body.has-mini .ai-foot { bottom: calc(var(--tabs-h) + var(--mini-h) + var(--safe
 .yt-badge { display: none; }
 body:not(.has-mini) .ytbox:not(.in-np) { opacity: 0; pointer-events: none; }
 .mini.yt .mini-cover { visibility: hidden; }
-.np.yt-on .np-cover { visibility: hidden; }
+.np.yt-on .np-cover { visibility: visible; }
 
 /* Feuille Son */
 .eq-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 14px; }
@@ -1049,3 +1049,40 @@ body.npbg-theme .np-bg { background: linear-gradient(to bottom, color-mix(in srg
 /* Mode sombre du téléphone : l'app est déjà sombre, on le déclare pour que le navigateur ne retouche pas les couleurs */
 @media (prefers-color-scheme: dark) { :root { color-scheme: dark; } }
 @media (prefers-color-scheme: light) { :root { color-scheme: dark; } }
+
+/* =====================================================================
+   Paroles : effet karaoké et défilement doux
+   ===================================================================== */
+.lyr-lines p { transition: color .4s, transform .5s var(--spring), opacity .4s, filter .4s; transform-origin: left center; }
+.lyr-lines:not(.plain) p:not(.on) { opacity: calc(1 - var(--dist, 2) * .14); filter: blur(calc(max(0, var(--dist, 2) - 1) * .5px)); }
+.lyr-lines p.on { transform: scale(1.06); color: rgba(255,255,255,.42); text-shadow: none; }
+.lyr-lines p.next { color: rgba(255,255,255,.55); }
+.lyr-lines p .k { position: relative; display: inline; }
+/* la couleur avance sur la ligne pendant qu'elle est chantée */
+.lyr-lines p.on .k { background: linear-gradient(90deg, #fff var(--k, 0%), rgba(255,255,255,.42) calc(var(--k, 0%) + 12%));
+  -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 14px rgba(255,236,190,.35)); }
+.lyr-lines p.on { animation: lineIn .55s var(--spring); }
+@keyframes lineIn { from { transform: scale(.98); } to { transform: scale(1.06); } }
+.lyr-lines p.gap.on .dots i { animation-duration: 1.2s; }
+.lyr-src .link { margin-top: 10px; }
+.lyr-q { display: flex; gap: 8px; margin: 6px 0 10px; }
+.lyr-q .set-input { flex: 1; }
+.lyr-cand span { display: flex; flex-direction: column; text-align: left; min-width: 0; }
+.lyr-cand small { color: var(--muted); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .lyr-lines p.on { animation: none; } }
+
+/* =====================================================================
+   Lecteur : vidéo entière (sans rognage) ou pochette + vignette vidéo
+   ===================================================================== */
+.ytbox.in-np.full .yt-host { width: 100% !important; left: 0 !important; }
+.ytbox.in-np { transition: left .38s var(--spring), top .38s var(--spring), width .38s var(--spring), height .38s var(--spring), opacity .25s; }
+.ytbox.in-np.pip { box-shadow: 0 14px 34px -8px rgba(0,0,0,.85), 0 0 0 1.5px rgba(255,255,255,.18); }
+.ytbox.swap { animation: vmSwap .38s var(--spring); }
+@keyframes vmSwap { 40% { opacity: .5; } }
+/* en mode vidéo, la pochette derrière est floutée et assombrie pour bien détacher la vidéo */
+.np.yt-on:not(.vm-cover) .np-cover { filter: blur(14px) brightness(.55); transform: scale(1.04); transition: filter .4s, transform .4s; }
+.np.yt-on.vm-cover .np-cover { filter: none; transition: filter .4s; }
+.np-pages { display: none; justify-content: center; gap: 6px; margin: 10px auto 0; padding: 3px; border-radius: 99px; background: rgba(255,255,255,.08); width: max-content; }
+.np.yt-on .np-pages { display: flex; }
+.np-pages button { min-height: 32px; padding: 0 14px; border-radius: 99px; font-size: 12px; font-weight: 700; color: rgba(255,255,255,.7); transition: background .25s, color .25s; }
+.np-pages button[aria-selected="true"] { background: rgba(255,255,255,.92); color: #111; }
