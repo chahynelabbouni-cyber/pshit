@@ -1,10 +1,10 @@
-import { db } from './db.js?v=24';
-import { readTags } from './tags.js?v=24';
-import { Player, isIOS } from './player.js?v=24';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=24';
-import * as AI from './ai.js?v=24';
-import * as Voice from './voice.js?v=24';
-import * as Src from './sources.js?v=24';
+import { db } from './db.js?v=25';
+import { readTags } from './tags.js?v=25';
+import { Player, isIOS } from './player.js?v=25';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=25';
+import * as AI from './ai.js?v=25';
+import * as Voice from './voice.js?v=25';
+import * as Src from './sources.js?v=25';
 
 // ======================================================================
 // SOMMAIRE de l'application (chaque chapitre est repéré par « Chapitre N »)
@@ -828,6 +828,7 @@ function trackSheet(t, { listKey, fromNP } = {}) {
     !['radio', 'podcast'].includes(t.source) && { id: 'lyrics', icon: 'mic', label: t.lyrics ? 'Voir / modifier les paroles' : 'Ajouter les paroles' },
     t.source === 'podcast' && { id: 'dl', icon: 'import', label: t.offline ? 'Supprimer le téléchargement' : 'Télécharger (écouter sans connexion)' },
     t.source === 'yt' && { id: 'ytdl', icon: 'import', label: 'Télécharger' },
+    t.source === 'yt' && { id: 'ytapp', icon: 'next-up', label: 'Ouvrir dans l\'app YouTube' },
     t.source === 'podcast' && podPrefs[showKey(t)] && { id: 'podreset', icon: 'refresh', label: 'Ne plus sauter automatiquement le début / la fin' },
     t.source && !t.saved && { id: 'save', icon: 'plus', label: t.source === 'radio' ? 'Ajouter à mes radios' : t.source === 'podcast' ? 'Garder cet épisode' : 'Ajouter à ma bibliothèque' },
     { id: 'edit', icon: 'edit', label: 'Modifier les infos' },
@@ -836,6 +837,7 @@ function trackSheet(t, { listKey, fromNP } = {}) {
   ]), {
     like: () => { toggleLike(t); closeSheet(); },
     share: async () => { await closeSheet(); shareTrack(t); },
+    ytapp: async () => { await closeSheet(); player.pause(); window.open(`https://www.youtube.com/watch?v=${encodeURIComponent(t.ytId)}&t=${Math.floor(player.currentId === t.id ? player.time : 0)}s`, '_blank', 'noopener'); },
     dl: async () => { await closeSheet(); t.offline ? removeDownload(t) : downloadEpisode(t); },
     ytdl: () => infoSheet('Télécharger depuis YouTube', 'YouTube interdit aux autres apps d\'enregistrer ses vidéos : c\'est réservé à YouTube Premium (bouton « Télécharger » dans l\'app YouTube). Pour écouter sans connexion dans Maison : importe tes propres fichiers MP3 (bouton + de la Bibliothèque), ou télécharge des épisodes de podcasts (menu ⋯ d\'un épisode).'),
     sound: () => soundSheet(),
@@ -3532,6 +3534,8 @@ function viewSettings() {
     </section>
     ${persoSettings()}
     <section class="set-group"><h3>YouTube</h3>
+      <div class="set-item col"><div><b>Ton compte YouTube (Premium, Premium Lite)</b><small>Le lecteur YouTube de l'app utilise le compte connecté dans ce navigateur. Connecte-toi une fois : si tu as Premium Lite, les vidéos non musicales (podcasts vidéo comme LEGEND, émissions…) passent sans pub. Attention : Premium Lite garde les pubs sur les clips de musique, seul Premium complet les enlève.${navigator.brave ? ' Sur Brave, la connexion n\'est pas transmise au lecteur (cookies bloqués) : utilise l\'app installée avec Chrome ou Samsung Internet.' : ''}</small></div>
+        <div class="btn-row"><button class="btn primary sm" data-act="yt-login">Se connecter à YouTube</button><button class="btn ghost sm" data-act="yt-test">Tester une vidéo</button></div></div>
       <label class="set-item col"><div><b>Clé YouTube (gratuite)</b><small>Pour chercher sur YouTube et importer tes playlists. Sans clé, tu peux déjà coller un lien YouTube dans la recherche.</small></div><input class="set-input wide" id="set-yt" type="password" value="${esc(S.settings.ytKey)}" placeholder="AIza…" autocomplete="off"></label>
       <details class="set-help"><summary>Comment obtenir ma clé (5 min)</summary><ol>
         <li>Va sur <b>console.cloud.google.com</b> et connecte-toi avec ton compte Google.</li>
@@ -3850,6 +3854,16 @@ document.addEventListener('click', e => {
         S.settings.searchSrc = 'info'; S.searchQ = ''; S.pendingShow = act.dataset.q; saveSettings(); S.pendingFwd = true; return goto('#/search');
       }
       case 'yt-key': S.pendingFwd = true; return goto('#/settings');
+      case 'yt-login':
+        // la connexion se fait sur le site de Google, dans le même navigateur que l'app : le lecteur YouTube la reconnaît ensuite
+        window.open('https://accounts.google.com/ServiceLogin?service=youtube&continue=' + encodeURIComponent('https://m.youtube.com/'), '_blank', 'noopener');
+        return toast('Connecte-toi, puis reviens dans l\'app');
+      case 'yt-test': {
+        // une vidéo non musicale pour vérifier : avec Premium Lite elle doit démarrer sans pub
+        const t = remoteTrack({ ytId: 'aqz-KE-bpKQ', title: 'Vidéo de test (non musicale)', artist: 'Test du compte YouTube', duration: 635, thumb: 'https://i.ytimg.com/vi/aqz-KE-bpKQ/mqdefault.jpg' }, 'yt');
+        playIds([t.id], 0, { context: { label: 'Test du compte' } }); openNP();
+        return toast('Si ton compte est reconnu, pas de pub avant la vidéo');
+      }
       case 'ai-clear': {
         // effacement immédiat, avec « Annuler » pendant 5 secondes
         if (!S.chat.length) return toast('La conversation est déjà vide');

@@ -1012,3 +1012,5 @@ body.npbg-theme .np-bg { background: linear-gradient(to bottom, color-mix(in srg
 .list .row { content-visibility: auto; contain-intrinsic-size: auto 64px; }
 /* Carte « héros » : flou moins coûteux */
 .hero-bg .cv { filter: blur(10px) saturate(1.15); }
+
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
