@@ -1,10 +1,10 @@
-import { db } from './db.js?v=25';
-import { readTags } from './tags.js?v=25';
-import { Player, isIOS } from './player.js?v=25';
-import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=25';
-import * as AI from './ai.js?v=25';
-import * as Voice from './voice.js?v=25';
-import * as Src from './sources.js?v=25';
+import { db } from './db.js?v=26';
+import { readTags } from './tags.js?v=26';
+import { Player, isIOS } from './player.js?v=26';
+import { parseLyrics, activeIndex, fetchOnline } from './lyrics.js?v=26';
+import * as AI from './ai.js?v=26';
+import * as Voice from './voice.js?v=26';
+import * as Src from './sources.js?v=26';
 
 // ======================================================================
 // SOMMAIRE de l'application (chaque chapitre est repéré par « Chapitre N »)
@@ -464,15 +464,30 @@ function updatePlayState() {
   if (p && S.npOpen) startViz();
 }
 
+// Barre de progression fluide : entre deux nouvelles du lecteur, on avance image par image
+const seekBox = $('.np-seek');
+let seekAnchor = { t: 0, at: 0 }, seekRaf = 0;
+function paintProgress(c, d) {
+  const r = d ? Math.max(0, Math.min(1, c / d)) : 0;
+  $('.mini-bar i').style.transform = `scaleX(${r})`;
+  if (!S.npOpen || seeking) return;
+  seekBox.style.setProperty('--p', `${(r * 100).toFixed(2)}%`);
+  seek.value = Math.round(r * 1000);
+}
+function progressLoop() {
+  seekRaf = 0;
+  if (!player.playing || document.hidden) return;
+  const d = player.duration;
+  paintProgress(seekAnchor.t + (performance.now() - seekAnchor.at) / 1000, d);
+  seekRaf = requestAnimationFrame(progressLoop);
+}
 function updateTime() {
   const d = player.duration, c = player.time;
-  $('.mini-bar i').style.transform = `scaleX(${d ? c / d : 0})`;
+  seekAnchor = { t: c, at: performance.now() };
+  paintProgress(c, d);
+  if (player.playing && !seekRaf) seekRaf = requestAnimationFrame(progressLoop);
   if (!S.npOpen) return;
-  if (!seeking) {
-    seek.value = d ? Math.round(c / d * 1000) : 0;
-    $('.t-cur').textContent = fmt(c);
-  }
-  seek.style.setProperty('--p', `${seek.value / 10}%`);
+  if (!seeking) $('.t-cur').textContent = fmt(c);
   $('.t-dur').textContent = fmt(d);
 }
 
@@ -629,10 +644,23 @@ np.addEventListener('click', e => {
 });
 seek.addEventListener('input', () => {
   seeking = true;
-  seek.style.setProperty('--p', `${seek.value / 10}%`);
-  $('.t-cur').textContent = fmt(seek.value / 1000 * player.duration);
+  seekBox.classList.add('drag');
+  seekBox.style.setProperty('--p', `${seek.value / 10}%`);
+  const t = fmt(seek.value / 1000 * player.duration);
+  $('.t-cur').textContent = t; $('.seek-tip').textContent = t;
 });
-seek.addEventListener('change', () => { player.seek(seek.value / 1000 * player.duration); seeking = false; });
+seek.addEventListener('change', () => {
+  player.seek(seek.value / 1000 * player.duration); seeking = false;
+  seekBox.classList.remove('drag');
+  seekBox.classList.remove('kick'); void seekBox.offsetWidth; seekBox.classList.add('kick');
+});
+seek.addEventListener('pointerdown', () => seekBox.classList.add('drag'));
+['pointerup', 'pointercancel'].forEach(ev => seek.addEventListener(ev, () => setTimeout(() => { if (!seeking) seekBox.classList.remove('drag'); }, 150)));
+// « Play » : petite onde sur la barre ; « pause » : elle se fige
+player.addEventListener('state', () => {
+  seekBox.classList.toggle('on', player.playing);
+  if (player.playing) { seekBox.classList.remove('kick'); void seekBox.offsetWidth; seekBox.classList.add('kick'); updateTime(); }
+});
 
 // --- Visualiseur ---
 let vizRaf = 0;
@@ -721,6 +749,23 @@ function sheetItems(items) {
 }
 
 let toastT;
+// Barre de tri des résultats YouTube
+const YT_ORDERS = [['relevance', 'Pertinence'], ['date', 'Plus récents'], ['viewCount', 'Plus vus'], ['rating', 'Mieux notés']];
+const YT_DURS = [['any', 'Toutes durées'], ['short', '< 4 min'], ['medium', '4 à 20 min'], ['long', '> 20 min']];
+function ytSortBar() {
+  const o = S.settings.ytOrder || 'relevance', d = S.settings.ytDur || 'any';
+  const chip = (k, v, l, on) => `<button class="chip ${on ? 'on' : ''}" data-act="yt-sort" data-k="${k}" data-v="${v}" aria-pressed="${on}">${l}</button>`;
+  return `<div class="sort-bar" role="group" aria-label="Trier les résultats">${YT_ORDERS.map(([v, l]) => chip('ytOrder', v, l, v === o)).join('')}</div>
+    <div class="sort-bar small" role="group" aria-label="Durée">${YT_DURS.map(([v, l]) => chip('ytDur', v, l, v === d)).join('')}</div>`;
+}
+// « il y a 3 jours », « 1,2 M de vues »
+function ago(ts) {
+  if (!ts) return '';
+  const d = (Date.now() - ts) / 864e5;
+  return d < 1 ? 'aujourd\'hui' : d < 2 ? 'hier' : d < 30 ? `il y a ${Math.floor(d)} j` : d < 365 ? `il y a ${Math.floor(d / 30)} mois` : `il y a ${Math.floor(d / 365)} an${d >= 730 ? 's' : ''}`;
+}
+const views = n => !n ? '' : n >= 1e9 ? (n / 1e9).toFixed(1).replace('.', ',').replace(',0', '') + ' Md de vues' : n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',').replace(',0', '') + ' M de vues' : n >= 1e3 ? Math.round(n / 1e3) + ' k vues' : n + ' vues';
+
 // Recherches récentes (10 dernières), affichées quand la barre est vide
 function rememberSearch(q) {
   q = q.trim(); if (q.length < 2) return;
@@ -2609,7 +2654,7 @@ function remoteTrack(item, source) {
   t = {
     id, source, title: item.title || 'Sans titre', artist: item.artist || '', album: '', albumArtist: '', genre: source === 'radio' ? 'Radio' : '',
     duration: item.duration || (source === 'radio' ? 0 : 0), coverId, thumb: item.thumb || '',
-    ytId: item.ytId, url: item.url, addedAt: Date.now(), plays: 0, lastPlayed: 0, liked: false, saved: false, lyrics: '',
+    ytId: item.ytId, url: item.url, published: item.published || 0, views: item.views || 0, addedAt: Date.now(), plays: 0, lastPlayed: 0, liked: false, saved: false, lyrics: '',
   };
   S.tracks.set(id, t);
   return t;
@@ -2619,7 +2664,7 @@ function onlineRow(t, i, listKey) {
   const live = t.source === 'radio';
   return `<div class="row ${t.id === player.currentId ? 'playing' : ''}" role="button" tabindex="0" aria-label="${esc(t.title)}${t.artist ? ', ' + esc(t.artist) : ''}" data-tid="${t.id}" data-i="${i}" data-list="${listKey}" style="--d:${Math.min(i, 14) * 22}ms">
     ${trackCover(t, live ? 'radio-cv' : 'wide')}
-    <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${live ? '<span class="live-dot">EN DIRECT</span> ' : t.offline ? '<span class="src-pc">TÉLÉCHARGÉ</span> ' : t.source === 'podcast' ? '<span class="src-pc">PODCAST</span> ' : '<span class="src-yt">YouTube</span> '}${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}</small></div>
+    <div class="row-meta"><b><span class="eq"><i></i><i></i><i></i></span>${esc(t.title)}</b><small>${live ? '<span class="live-dot">EN DIRECT</span> ' : t.offline ? '<span class="src-pc">TÉLÉCHARGÉ</span> ' : t.source === 'podcast' ? '<span class="src-pc">PODCAST</span> ' : '<span class="src-yt">YouTube</span> '}${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}${t.source === 'yt' && (t.views || t.published) ? ` · ${[views(t.views), ago(t.published)].filter(Boolean).join(' · ')}` : ''}</small></div>
     <button class="ib sm more" aria-label="Options">${icon('more')}</button>
   </div>`;
 }
@@ -2684,12 +2729,13 @@ async function onlineSearch(q) {
     if (!q) return show(recentSearches() + (savedOnline() || `<div class="no-res"><b>Cherche un artiste ou un titre</b><p>Tout YouTube est là.</p></div>`));
     show('<div class="online-loading"><span class="dots"><i></i><i></i><i></i></span></div>');
     // jusqu'à 50 résultats comme sur YouTube, puis « Plus de résultats »
-    const { items, next } = await Src.ytSearchAll(S.settings.ytKey, q);
+    const opts = { order: S.settings.ytOrder || 'relevance', duration: S.settings.ytDur || 'any' };
+    const { items, next } = await Src.ytSearchAll(S.settings.ytKey, q, '', opts);
     const ts = items.map(x => remoteTrack(x, 'yt'));
     const key = registerList('yt-q', ts.map(t => t.id), `YouTube « ${q} »`);
     if (ts.length) rememberSearch(q);
-    S.ytMore = { q, next, key, ids: ts.map(t => t.id) };
-    show(ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>${next ? '<button class="btn ghost more-res" data-act="yt-more">Plus de résultats</button>' : ''}` : `<div class="no-res"><b>Aucun résultat</b></div>`);
+    S.ytMore = { q, next, key, ids: ts.map(t => t.id), opts };
+    show(ytSortBar() + (ts.length ? `<div class="list">${ts.map((t, i) => onlineRow(t, i, key)).join('')}</div>${next ? '<button class="btn ghost more-res" data-act="yt-more">Plus de résultats</button>' : ''}` : `<div class="no-res"><b>Aucun résultat</b></div>`));
   } catch (e) {
     show(netErr('Impossible de charger', e, S.settings.searchSrc));
   }
@@ -3400,6 +3446,7 @@ function searchResults(q) {
     ${shelf('Playlists', pl.map(playlistCard))}`;
 }
 
+const LIB_SORTS = [['recent', 'Ajoutés récemment'], ['last', 'Écoutés récemment'], ['plays', 'Les plus écoutés'], ['az', 'Titre (A → Z)'], ['artist', 'Artiste (A → Z)'], ['long', 'Les plus longs']];
 function viewLibraryList(params) {
   const f = params.get('f') || S.settings.libFilter;
   S.settings.libFilter = f; saveSettings();
@@ -3416,18 +3463,19 @@ function viewLibraryList(params) {
   if (f === 'all' || f === 'artists') for (const a of artists().values()) items.push({ sortName: a.name, at: a.addedAt, html: libItem('#/artist/' + encodeURIComponent(a.name), cover({ coverId: a.coverId, seed: a.name, kind: 'artist' }), a.name, 'Artiste', true) });
   let body;
   if (f === 'tracks') {
-    const tr = allTracks().slice().sort(sort === 'az' ? (a, b) => collator.compare(a.title, b.title) : (a, b) => b.addedAt - a.addedAt);
+    const TS = { az: (a, b) => collator.compare(a.title, b.title), artist: (a, b) => collator.compare(artistOf(a), artistOf(b)) || collator.compare(a.title, b.title), plays: (a, b) => (b.plays || 0) - (a.plays || 0), last: (a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0), long: (a, b) => (b.duration || 0) - (a.duration || 0), recent: (a, b) => b.addedAt - a.addedAt };
+    const tr = allTracks().slice().sort(TS[sort] || TS.recent);
     const key = registerList('lib-tracks', tr.map(t => t.id), 'Tous les titres', { route: '#/all' });
     body = tr.length ? `<div class="list">${lazyRows(tr, (t, i) => trackRow(t, i, key))}</div>` : '';
   } else {
     const pinned = items.filter(i => i.pin);
-    const rest = items.filter(i => !i.pin).sort(sort === 'az' ? byName : byRecent);
+    const rest = items.filter(i => !i.pin).sort(['az', 'artist'].includes(sort) ? byName : byRecent);
     body = `<div class="lib-list">${[...pinned, ...rest].map((x, i) => x.html.replace('style="', `style="--d:${Math.min(i, 14) * 22}ms;`)).join('')}</div>`;
   }
   return `<header class="page-head"><h1>Bibliothèque</h1>
       <div class="head-btns"><button class="ib" data-act="new-playlist" aria-label="Nouvelle playlist">${icon('list-add')}</button><button class="ib" data-act="import" aria-label="Importer">${icon('import')}</button><a class="ib" href="#/settings" aria-label="Réglages">${icon('gear')}</a></div></header>
     <div class="chips">${chips.map(([k, l]) => `<a class="chip ${k === f ? 'on' : ''}" href="#/library?f=${k}">${l}</a>`).join('')}</div>
-    <div class="sort-row"><button class="link" data-act="sort">${icon('sort')} ${sort === 'az' ? 'Ordre alphabétique' : 'Récents'}</button></div>
+    <div class="sort-row"><button class="link" data-act="sort">${icon('sort')} ${LIB_SORTS.find(x => x[0] === sort)?.[1] || 'Ajoutés récemment'}</button></div>
     ${allTracks().length ? body : emptyState()}`;
 }
 function libItem(href, cov, title, sub, round = false) {
@@ -3791,7 +3839,8 @@ document.addEventListener('click', e => {
       case 'pl-add': return addTracksSheet(S.playlists.get(act.dataset.id));
       case 'pl-more': return playlistSheet(S.playlists.get(act.dataset.id));
       case 'pl-share': return sharePlaylist(S.playlists.get(act.dataset.id));
-      case 'sort': S.settings.libSort = S.settings.libSort === 'az' ? 'recent' : 'az'; saveSettings(); return render(true);
+      case 'sort': return openSheet(`<h3 class="sheet-title">Trier par</h3>` + sheetItems(LIB_SORTS.map(([k, l]) => ({ id: k, icon: k === (S.settings.libSort || 'recent') ? 'heart-f' : 'sort', label: l }))),
+        Object.fromEntries(LIB_SORTS.map(([k]) => [k, async () => { S.settings.libSort = k; saveSettings(); await closeSheet(); render(true); }])));
       case 'wipe': return confirmSheet('Tout effacer ?', 'Toute la musique importée et tes playlists seront supprimées de l\'application. Tes fichiers d\'origine ne sont pas touchés.', 'Tout effacer', async () => {
         await deleteTracks([...S.tracks.keys()]);
         await db.clear();
@@ -3805,7 +3854,7 @@ document.addEventListener('click', e => {
         const m = S.ytMore; if (!m?.next) return;
         act.disabled = true; act.textContent = 'Chargement…';
         (async () => { try {
-          const { items, next } = await Src.ytSearchAll(S.settings.ytKey, m.q, m.next);
+          const { items, next } = await Src.ytSearchAll(S.settings.ytKey, m.q, m.next, m.opts);
           const ts = items.map(x => remoteTrack(x, 'yt')).filter(t => !m.ids.includes(t.id));
           const start = m.ids.length;
           m.ids.push(...ts.map(t => t.id)); m.next = next;
@@ -3819,6 +3868,10 @@ document.addEventListener('click', e => {
         toast('Je prépare ta sélection…');
         smartCommand(`mets du ${act.dataset.g}`).then(r => r && toast(r)).catch(() => toast('Indisponible pour le moment'));
         return;
+      }
+      case 'yt-sort': {
+        S.settings[act.dataset.k] = act.dataset.v; saveSettings();
+        return onlineSearch(S.searchQ);
       }
       case 'search-hist-clear': saveJSON('onde.searchHist', []); return render(true);
       case 'search-again': { const qi = $('#q'); if (qi) { qi.value = act.dataset.q; S.searchQ = act.dataset.q; } return onlineSearch(act.dataset.q); }
