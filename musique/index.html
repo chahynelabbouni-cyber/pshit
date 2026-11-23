@@ -18,7 +18,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/app.css?v=26">
+<link rel="stylesheet" href="css/app.css?v=27">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -126,6 +126,7 @@ try {
         <div class="np-cover cover-slot"></div>
       </div>
     </div>
+    <div class="np-pages" role="tablist" aria-label="Affichage"><button role="tab" data-vm="video">Vidéo</button><button role="tab" data-vm="cover">Pochette</button></div>
     <div class="np-info">
       <div class="np-text">
         <div class="np-title marquee"><span></span></div>
@@ -157,7 +158,7 @@ try {
     </div>
   </div>
   <div class="lyr">
-    <header class="lyr-bar"><button class="ib" data-lyr="close" aria-label="Fermer les paroles"><svg><use href="#i-down"/></svg></button><div class="lyr-head"></div><button class="ib sm" data-lyr="edit" aria-label="Modifier les paroles"><svg><use href="#i-edit"/></svg></button></header>
+    <header class="lyr-bar"><button class="ib" data-lyr="close" aria-label="Fermer les paroles"><svg><use href="#i-down"/></svg></button><div class="lyr-head"></div><button class="ib sm" data-lyr="pick" aria-label="Pas les bonnes paroles ? Choisir"><svg><use href="#i-search"/></svg></button><button class="ib sm" data-lyr="edit" aria-label="Modifier les paroles"><svg><use href="#i-edit"/></svg></button></header>
     <div class="lyr-scroll"><div class="lyr-lines"></div></div>
     <div class="lyr-mini"><button class="ib np-prev" aria-label="Précédent"><svg><use href="#i-prev"/></svg></button><button class="np-play sm" aria-label="Lecture"><svg><use href="#i-play"/></svg></button><button class="ib np-next" aria-label="Suivant"><svg><use href="#i-next"/></svg></button></div>
   </div>
@@ -184,6 +185,6 @@ try {
 <input type="file" id="pick-files" accept="audio/*,.mp3,.m4a,.aac,.flac,.ogg,.opus,.wav,.webm,.lrc,.txt" multiple hidden>
 <input type="file" id="pick-folder" webkitdirectory multiple hidden>
 
-<script type="module" src="js/app.js?v=26"></script>
+<script type="module" src="js/app.js?v=27"></script>
 </body>
 </html>
