@@ -80,12 +80,15 @@ async function ytJson(url) {
 // Recherche « comme sur YouTube » : toutes les vidéos (pas seulement la catégorie musique), 50 par page,
 // dans l'ordre de pertinence de YouTube ; next = jeton pour la page suivante
 const ytPageCache = new Map();
-export async function ytSearchAll(key, q, pageToken = '') {
-  const ck = q.trim().toLowerCase() + '|' + pageToken;
+export async function ytSearchAll(key, q, pageToken = '', { order = 'relevance', duration = 'any' } = {}) {
+  const ck = [q.trim().toLowerCase(), pageToken, order, duration].join('|');
   const hit = ytPageCache.get(ck);
   if (hit && Date.now() - hit.at < 30 * 60e3) return hit.v;
   const p = new URLSearchParams({ part: 'snippet', type: 'video', videoEmbeddable: 'true', maxResults: 50, q, key, regionCode: 'FR', relevanceLanguage: 'fr' });
   if (pageToken) p.set('pageToken', pageToken);
+  // tri : pertinence, date, vues, note ; durée : courtes (< 4 min), moyennes (4-20 min), longues (> 20 min)
+  if (order !== 'relevance') p.set('order', order);
+  if (duration !== 'any') p.set('videoDuration', duration);
   const j = await ytJson(`${YT_API}/search?${p}`);
   const ids = (j.items || []).map(i => i.id.videoId).filter(Boolean);
   const all = await ytVideos(key, ids, j.items || []);
@@ -125,7 +128,7 @@ async function ytSearchRank(key, j, max, songsOnly) {
 
 export async function ytVideos(key, ids, snippets = []) {
   if (!ids.length) return [];
-  const p = new URLSearchParams({ part: 'contentDetails,snippet', id: ids.join(','), key });
+  const p = new URLSearchParams({ part: 'contentDetails,snippet,statistics', id: ids.join(','), key });
   const j = await ytJson(`${YT_API}/videos?${p}`);
   const map = new Map(j.items.map(v => [v.id, v]));
   return ids.map(id => {
@@ -136,6 +139,8 @@ export async function ytVideos(key, ids, snippets = []) {
     return {
       ytId: id, title, artist, rawTitle: sn.title || '', channel: sn.channelTitle || '',
       duration: isoDuration(v.contentDetails?.duration),
+      published: Date.parse(sn.publishedAt || '') || 0,
+      views: +(v.statistics?.viewCount || 0),
       thumb: sn.thumbnails?.medium?.url || sn.thumbnails?.high?.url || `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
     };
   }).filter(Boolean);

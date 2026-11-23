@@ -14,10 +14,11 @@
 <link rel="preconnect" href="https://www.googleapis.com">
 <link rel="preconnect" href="https://i.ytimg.com">
 <link rel="dns-prefetch" href="https://www.google.com">
+<meta name="color-scheme" content="dark only">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="css/app.css?v=25">
+<link rel="stylesheet" href="css/app.css?v=26">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -135,6 +136,7 @@ try {
     </div>
     <div class="np-live"><span class="live-dot">EN DIRECT</span> Radio</div>
     <div class="np-seek">
+      <div class="seek-viz" aria-hidden="true"><div class="seek-track"><i class="seek-fill"></i></div><span class="seek-knob"></span><span class="seek-tip">0:00</span></div>
       <input type="range" min="0" max="1000" value="0" step="1" aria-label="Position">
       <div class="np-times"><span class="t-cur">0:00</span><span class="t-dur">0:00</span></div>
     </div>
@@ -182,6 +184,6 @@ try {
 <input type="file" id="pick-files" accept="audio/*,.mp3,.m4a,.aac,.flac,.ogg,.opus,.wav,.webm,.lrc,.txt" multiple hidden>
 <input type="file" id="pick-folder" webkitdirectory multiple hidden>
 
-<script type="module" src="js/app.js?v=25"></script>
+<script type="module" src="js/app.js?v=26"></script>
 </body>
 </html>
